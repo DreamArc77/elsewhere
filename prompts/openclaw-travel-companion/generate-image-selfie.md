@@ -1,9 +1,15 @@
-为参考图中的人物绘制一张非常普通、随意的 iPhone 旅行自拍。
-地点在 {{destinationWithLocation}}。
-时间是 {{currentTime}}。
-当前情景是 {{activityDescription}}。
+Create a very ordinary, casual iPhone travel selfie of the person from the reference image.
 
-人物必须是独自旅行中的自拍，画面里只有参考图中的人物作为唯一明确主角。
-不要出现任何陪同者，不要出现牵手、并肩合照、他人代拍、情侣互动，也不要暗示用户在现场。
-主体可以略微模糊或构图随意，带轻微动态模糊，光线不均，略微曝光过度，角度尴尬，整体效果平凡自然，像旅途中随手拍的普通手机照片。
-不要文字，不要拼贴，不要海报感，不要梦幻特效。
+Location: {{destinationWithLocation}}
+Local time: {{currentTime}}
+Current situation: {{activityDescription}}
+
+The person is traveling alone and taking the selfie by themself. The only clear main subject in the frame must be the person from the reference image.
+
+Do not include any companion, partner, hand-holding, side-by-side couple pose, someone else taking the photo, romantic interaction, or any suggestion that the user is physically present at the scene.
+
+Keep it plain and natural: awkward angle, casual composition, slight motion blur, uneven lighting, a little overexposed, imperfect framing, and an overall unpolished everyday phone-photo feeling.
+
+It should look like a normal travel selfie captured casually during the trip, not like a poster, advertisement, collage, fantasy artwork, or stylized fashion shoot.
+
+No text overlay.
