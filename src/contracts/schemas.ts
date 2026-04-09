@@ -1,8 +1,5 @@
 import { z } from "zod";
 
-const forbiddenCompanionLanguage =
-  /(\bwe\b|\byou\b|和你一起|见到你|找到你|找你|牵(着)?你|你陪我|你在我身边|陪我一起|一起旅行|一起去|如果你敢|背叛我|放开我的手|只属于我|占有|惩罚|报复)/iu;
-
 export const groundingSourceSchema = z.object({
   title: z.string().min(1),
   uri: z.string().url(),
@@ -34,109 +31,11 @@ export const dailyItinerarySchema = z.object({
   activities: z.array(itineraryActivitySchema).min(1),
 });
 
-function validateThreeTwoOnePlan(
-  data: z.infer<typeof tripPlanSchemaBase>,
-  ctx: z.RefinementCtx,
-): void {
-  if (data.daily_itinerary.length !== data.metadata.days) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["daily_itinerary"],
-      message: "daily_itinerary length must match metadata.days.",
-    });
-  }
-
-  for (const entry of data.daily_itinerary) {
-    if (entry.day < 1 || entry.day > data.metadata.days) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["daily_itinerary", entry.day - 1, "day"],
-        message: "Each itinerary day must stay within metadata.days.",
-      });
-    }
-
-    const expectedDateIndex = entry.day - 1;
-    const mirroredEntry = data.daily_itinerary[expectedDateIndex];
-    if (mirroredEntry?.day !== entry.day) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["daily_itinerary"],
-        message: "daily_itinerary day values must be sequential and start from 1.",
-      });
-    }
-
-    const coreCount = entry.activities.filter(
-      (activity) =>
-        activity.type === "sightseeing" || activity.type === "shopping",
-    ).length;
-    const foodCount = entry.activities.filter(
-      (activity) => activity.type === "food",
-    ).length;
-    const lastActivity = entry.activities[entry.activities.length - 1];
-    const isEdgeDay =
-      entry.day === 1 || entry.day === data.metadata.days;
-
-    if (lastActivity?.type !== "accommodation") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["daily_itinerary", entry.day - 1, "activities"],
-        message: "The last activity of each day must be accommodation.",
-      });
-    }
-
-    if (foodCount < 2) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["daily_itinerary", entry.day - 1, "activities"],
-        message: "Each day must contain at least 2 food activities.",
-      });
-    }
-
-    if (!isEdgeDay && coreCount < 3) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["daily_itinerary", entry.day - 1, "activities"],
-        message:
-          "Non-edge days must contain at least 3 sightseeing or shopping activities.",
-      });
-    }
-
-    const narrativeFields = [
-      { path: ["theme"], value: entry.theme },
-      ...entry.activities.flatMap((activity, activityIndex) => [
-        {
-          path: ["activities", activityIndex, "description"],
-          value: activity.description,
-        },
-        {
-          path: ["activities", activityIndex, "transport_memo"],
-          value: activity.transport_memo,
-        },
-        {
-          path: ["activities", activityIndex, "real_time_info", "live_update"],
-          value: activity.real_time_info.live_update,
-        },
-      ]),
-    ];
-
-    for (const field of narrativeFields) {
-      if (forbiddenCompanionLanguage.test(field.value)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["daily_itinerary", entry.day - 1, ...field.path],
-          message:
-            "Trip itinerary text must stay objective and must not imply the user is physically traveling together with the companion.",
-        });
-      }
-    }
-  }
-}
-
-const tripPlanSchemaBase = z.object({
+export const tripPlanSchema = z.object({
   tripId: z.string().min(1),
   metadata: z.object({
     destination: z.string().min(1),
-    days: z.number().int().min(3).max(5),
+    days: z.number().int().min(1).max(14),
   }),
   transportation: z.object({
     outbound: z.object({
@@ -170,12 +69,8 @@ const tripPlanSchemaBase = z.object({
     weather_forecast: z.string().min(1),
     major_events: z.array(z.string().min(1)),
   }),
-  daily_itinerary: z.array(dailyItinerarySchema).min(3).max(5),
+  daily_itinerary: z.array(dailyItinerarySchema).min(1),
 });
-
-export const tripPlanSchema = tripPlanSchemaBase.superRefine(
-  validateThreeTwoOnePlan,
-);
 
 export const imageGenerationResultSchema = z.object({
   mimeType: z.string().min(1),
@@ -228,7 +123,7 @@ export const tripPlanJsonSchema = {
       required: ["destination", "days"],
       properties: {
         destination: { type: "STRING" },
-        days: { type: "INTEGER", minimum: 3, maximum: 5 },
+        days: { type: "INTEGER", minimum: 1, maximum: 14 },
       },
     },
     transportation: {
