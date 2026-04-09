@@ -18,6 +18,9 @@ export default definePluginEntry({
         defaultOriginCity: { type: "string" },
         pollIntervalSeconds: { type: "integer", minimum: 15, maximum: 3600 },
         openclawBinaryPath: { type: "string" },
+        planningModel: { type: "string" },
+        textModel: { type: "string" },
+        imageModel: { type: "string" },
       },
     },
     validate(value) {

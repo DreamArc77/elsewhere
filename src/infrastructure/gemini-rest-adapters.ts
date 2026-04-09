@@ -156,7 +156,12 @@ abstract class BaseGeminiAdapter {
     );
 
     if (!response.ok) {
-      throw new Error(`Gemini request failed: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(
+        `Gemini request failed: ${response.status} ${response.statusText}${
+          errorText ? ` - ${truncate(errorText, 600)}` : ""
+        }`,
+      );
     }
 
     return (await response.json()) as GenerateContentResponse;
@@ -172,8 +177,8 @@ export class GeminiRestGroundingAdapter
 
   constructor(options: GeminiOptions) {
     super(options);
-    this.planningModel = options.planningModel ?? "gemini-2.5-flash";
-    this.textModel = options.textModel ?? "gemini-2.5-flash";
+    this.planningModel = options.planningModel ?? "gemini-3-flash-preview";
+    this.textModel = options.textModel ?? "gemini-3-flash-preview";
   }
 
   async planTrip(input: {
@@ -298,6 +303,12 @@ export class GeminiRestGroundingAdapter
       provider: this.textModel,
     };
   }
+}
+
+function truncate(value: string, maxLength: number): string {
+  return value.length > maxLength
+    ? `${value.slice(0, maxLength - 1)}…`
+    : value;
 }
 
 export class GeminiRestImageAdapter

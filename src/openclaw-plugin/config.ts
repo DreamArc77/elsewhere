@@ -3,6 +3,9 @@ export interface TravelCompanionPluginConfig {
   defaultOriginCity?: string;
   pollIntervalSeconds?: number;
   openclawBinaryPath?: string;
+  planningModel?: string;
+  textModel?: string;
+  imageModel?: string;
 }
 
 export function resolvePluginConfig(
@@ -16,6 +19,9 @@ export function resolvePluginConfig(
     defaultOriginCity: asString(raw?.defaultOriginCity) ?? "Hong Kong",
     pollIntervalSeconds: asInteger(raw?.pollIntervalSeconds) ?? 60,
     openclawBinaryPath: asString(raw?.openclawBinaryPath) ?? "openclaw",
+    planningModel: asString(raw?.planningModel) ?? "gemini-3-flash-preview",
+    textModel: asString(raw?.textModel) ?? "gemini-3-flash-preview",
+    imageModel: asString(raw?.imageModel) ?? "gemini-3.1-flash-image-preview",
   };
 }
 

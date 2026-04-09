@@ -69,8 +69,15 @@ export async function createRuntimeBundle(input: {
     artifactStore,
     scheduler: new NoopSchedulerPort(),
     messenger: new OpenClawCliMessengerPort(tripRepository, commandRunner),
-    grounding: new GeminiRestGroundingAdapter({ apiKey }),
-    imageGeneration: new GeminiRestImageAdapter({ apiKey }),
+    grounding: new GeminiRestGroundingAdapter({
+      apiKey,
+      planningModel: input.pluginConfig.planningModel,
+      textModel: input.pluginConfig.textModel,
+    }),
+    imageGeneration: new GeminiRestImageAdapter({
+      apiKey,
+      imageModel: input.pluginConfig.imageModel,
+    }),
     clock: new SystemClockPort(),
     logger,
   });

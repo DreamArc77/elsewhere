@@ -20,6 +20,15 @@
       },
       "openclawBinaryPath": {
         "type": "string"
+      },
+      "planningModel": {
+        "type": "string"
+      },
+      "textModel": {
+        "type": "string"
+      },
+      "imageModel": {
+        "type": "string"
       }
     }
   },
@@ -40,6 +49,18 @@
     "openclawBinaryPath": {
       "label": "OpenClaw Binary Path",
       "placeholder": "openclaw"
+    },
+    "planningModel": {
+      "label": "Planning Model",
+      "placeholder": "gemini-3-flash-preview"
+    },
+    "textModel": {
+      "label": "Caption and Grounding Model",
+      "placeholder": "gemini-3-flash-preview"
+    },
+    "imageModel": {
+      "label": "Image Model",
+      "placeholder": "gemini-3.1-flash-image-preview"
     }
   }
 }
