@@ -92,6 +92,7 @@ export async function renderTripPlanPrompt(input: {
   const template = await loadTemplate("plan-trip.md");
   return renderTemplate(template, {
     tripId: input.tripId,
+    currentDate: new Date().toISOString().slice(0, 10),
     originCity: input.request.originCity,
     destinationCity: input.request.destinationCity,
     tripDaysHint: "3-5",

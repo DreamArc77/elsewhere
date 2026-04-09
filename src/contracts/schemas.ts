@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const forbiddenCompanionLanguage =
+  /(\bwe\b|\byou\b|和你一起|见到你|找到你|找你|牵(着)?你|你陪我|你在我身边|陪我一起|一起旅行|一起去|如果你敢|背叛我|放开我的手|只属于我|占有|惩罚|报复)/iu;
+
 export const groundingSourceSchema = z.object({
   title: z.string().min(1),
   uri: z.string().url(),
@@ -96,6 +99,35 @@ function validateThreeTwoOnePlan(
         message:
           "Non-edge days must contain at least 3 sightseeing or shopping activities.",
       });
+    }
+
+    const narrativeFields = [
+      { path: ["theme"], value: entry.theme },
+      ...entry.activities.flatMap((activity, activityIndex) => [
+        {
+          path: ["activities", activityIndex, "description"],
+          value: activity.description,
+        },
+        {
+          path: ["activities", activityIndex, "transport_memo"],
+          value: activity.transport_memo,
+        },
+        {
+          path: ["activities", activityIndex, "real_time_info", "live_update"],
+          value: activity.real_time_info.live_update,
+        },
+      ]),
+    ];
+
+    for (const field of narrativeFields) {
+      if (forbiddenCompanionLanguage.test(field.value)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["daily_itinerary", entry.day - 1, ...field.path],
+          message:
+            "Trip itinerary text must stay objective and must not imply the user is physically traveling together with the companion.",
+        });
+      }
     }
   }
 }

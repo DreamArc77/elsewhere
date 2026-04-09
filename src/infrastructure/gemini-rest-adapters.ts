@@ -162,23 +162,46 @@ export class GeminiRestGroundingAdapter
     persona: StoredPersonaProfile;
     request: TripRequest;
   }): Promise<TripPlan> {
-    const prompt = await renderTripPlanPrompt(input);
+    const basePrompt = await renderTripPlanPrompt(input);
+    const prompts = [
+      basePrompt,
+      [
+        basePrompt,
+        "",
+        "纠错提醒：上一次输出不合格。请重新生成完整 JSON，并严格遵守这些额外要求：",
+        "1. 不允许把用户写进旅行现场，用户只是远端收消息的人。",
+        "2. 不允许出现恋爱对白、病娇台词、威胁、占有欲、牵手、见面、同行叙事。",
+        "3. `description`、`transport_memo`、`live_update` 必须是客观、可执行的旅行信息。",
+        "4. 日期必须晚于或等于今天，不能回到过去年份。",
+      ].join("\n"),
+    ];
 
-    const response = await this.generateContent(this.planningModel, {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseJsonSchema: tripPlanJsonSchema,
-        temperature: 0.3,
-      },
-    });
+    let lastError: unknown;
+    for (const prompt of prompts) {
+      try {
+        const response = await this.generateContent(this.planningModel, {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          tools: [{ google_search: {} }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseJsonSchema: tripPlanJsonSchema,
+            temperature: 0.3,
+          },
+        });
 
-    return parseModelJson(
-      extractText(response),
-      tripPlanSchema,
-      "Gemini trip plan",
-    );
+        return parseModelJson(
+          extractText(response),
+          tripPlanSchema,
+          "Gemini trip plan",
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Gemini trip plan generation failed.");
   }
 
   async composeCaption(input: {

@@ -32,6 +32,21 @@ describe("Gemini contracts", () => {
     ).toThrow(/failed schema validation/i);
   });
 
+  it("rejects itinerary text that implies the user is traveling on-site", () => {
+    const plan = buildFixtureTripPlan({
+      tripId: "trip-2",
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+      days: 3,
+    });
+    plan.daily_itinerary[0]!.activities[0]!.description =
+      "和你一起落地以后去找酒店，然后牵着你的手去逛街。";
+
+    expect(() =>
+      parseModelJson(JSON.stringify(plan), tripPlanSchema, "trip plan"),
+    ).toThrow(/must not imply the user is physically traveling together/i);
+  });
+
   it("extracts JSON from fenced code blocks", () => {
     expect(extractLikelyJson("```json\n{\"ok\":true}\n```")).toBe('{"ok":true}');
   });

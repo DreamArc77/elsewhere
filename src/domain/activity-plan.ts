@@ -59,6 +59,26 @@ function parseTimeParts(time: string): { hour: number; minute: number } {
   };
 }
 
+function addDaysToDateParts(input: {
+  year: number;
+  month: number;
+  day: number;
+  dayOffset: number;
+}): {
+  year: number;
+  month: number;
+  day: number;
+} {
+  const shifted = new Date(
+    Date.UTC(input.year, input.month - 1, input.day + input.dayOffset),
+  );
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+  };
+}
+
 function formatPartsInTimeZone(date: Date, timeZone: string): {
   year: number;
   month: number;
@@ -141,32 +161,61 @@ function formatLocalIso(date: Date, timeZone: string): string {
   ).padStart(2, "0")}:00`;
 }
 
+function parseTimeToken(token: string): {
+  hour: number;
+  minute: number;
+  dayOffset: number;
+} {
+  const match = token
+    .trim()
+    .match(/^(\d{1,2}:\d{2})(?:\s*\(\+(\d+)\))?$/u);
+  if (!match) {
+    throw new Error(`Invalid itinerary time: ${token}`);
+  }
+
+  const time = parseTimeParts(match[1]!);
+  return {
+    ...time,
+    dayOffset: Number(match[2] ?? "0"),
+  };
+}
+
 function parseTimeSlot(
   date: string,
   timeSlot: string,
   timeZone: string,
 ): ActivityTiming {
   const rangeMatch = timeSlot.match(
-    /^\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*$/u,
+    /^\s*(\d{1,2}:\d{2}(?:\s*\(\+\d+\))?)\s*-\s*(\d{1,2}:\d{2}(?:\s*\(\+\d+\))?)\s*$/u,
   );
-  const singleMatch = timeSlot.match(/^\s*(\d{1,2}:\d{2})\s*$/u);
+  const singleMatch = timeSlot.match(
+    /^\s*(\d{1,2}:\d{2}(?:\s*\(\+\d+\))?)\s*$/u,
+  );
   if (!rangeMatch && !singleMatch) {
     throw new Error(`Unsupported itinerary time_slot: ${timeSlot}`);
   }
 
   const { year, month, day } = parseDateParts(date);
-  const startParts = parseTimeParts((rangeMatch?.[1] ?? singleMatch?.[1])!);
+  const startParts = parseTimeToken((rangeMatch?.[1] ?? singleMatch?.[1])!);
   const endParts = rangeMatch
-    ? parseTimeParts(rangeMatch[2]!)
+    ? parseTimeToken(rangeMatch[2]!)
     : {
         hour: startParts.hour,
         minute: startParts.minute + DEFAULT_SINGLE_SLOT_MINUTES,
+        dayOffset: startParts.dayOffset,
       };
 
-  const startUtcDate = toUtcDate({
+  const startDateParts = addDaysToDateParts({
     year,
     month,
     day,
+    dayOffset: startParts.dayOffset,
+  });
+
+  const startUtcDate = toUtcDate({
+    year: startDateParts.year,
+    month: startDateParts.month,
+    day: startDateParts.day,
     hour: startParts.hour,
     minute: startParts.minute,
     timeZone,
@@ -196,14 +245,14 @@ function parseTimeSlot(
 }
 
 function durationMinutesFromRange(
-  start: { hour: number; minute: number },
-  end: { hour: number; minute: number },
+  start: { hour: number; minute: number; dayOffset?: number },
+  end: { hour: number; minute: number; dayOffset?: number },
 ): number {
-  const startMinutes = start.hour * 60 + start.minute;
-  const endMinutes = end.hour * 60 + end.minute;
+  const startMinutes = (start.dayOffset ?? 0) * 24 * 60 + start.hour * 60 + start.minute;
+  const endMinutes = (end.dayOffset ?? 0) * 24 * 60 + end.hour * 60 + end.minute;
   return endMinutes >= startMinutes
     ? endMinutes - startMinutes
-    : 24 * 60 - startMinutes + endMinutes;
+    : 24 * 60 - (start.hour * 60 + start.minute) + end.hour * 60 + end.minute;
 }
 
 export function inferDestinationTimeZone(plan: TripPlan): string {
@@ -338,6 +387,37 @@ function buildSyntheticContext(input: {
   };
 }
 
+function buildSyntheticTiming(now: Date, timeZone: string): ActivityTiming {
+  const end = new Date(now.getTime() + DEFAULT_SINGLE_SLOT_MINUTES * 60 * 1000);
+  const startLocal = formatLocalIso(now, timeZone);
+
+  return {
+    rawDate: startLocal.slice(0, 10),
+    rawTimeSlot: startLocal.slice(11, 16),
+    timeZone,
+    startLocal,
+    endLocal: formatLocalIso(end, timeZone),
+    startUtc: now.toISOString(),
+    endUtc: end.toISOString(),
+    durationMinutes: DEFAULT_SINGLE_SLOT_MINUTES,
+  };
+}
+
+function buildPlanningActivity(plan: TripPlan): ItineraryActivity {
+  const departure = plan.transportation.outbound.departure;
+  return {
+    time_slot: departure.time,
+    location: `Departure prep near ${departure.airport_station}`,
+    address: departure.airport_station,
+    type: "transport",
+    description: `Before leaving for ${plan.metadata.destination}, review the plan, pack lightly, check the route to ${departure.airport_station}, and get ready for departure. This is still pre-departure preparation, not arrival at the destination.`,
+    transport_memo: `Leave with enough buffer to reach ${departure.airport_station} before ${departure.time}.`,
+    real_time_info: {
+      live_update: plan.search_summary.weather_forecast,
+    },
+  };
+}
+
 export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
   const timeZone = inferDestinationTimeZone(plan);
   const itinerary = [...plan.daily_itinerary].sort((a, b) => a.day - b.day);
@@ -416,6 +496,9 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
     new Date(lastActivityStep.context.timing.endUtc).getTime() +
       SYNTHETIC_REFLECTION_DELAY_MINUTES * 60 * 1000,
   ).toISOString();
+  const planningTiming = buildSyntheticTiming(now, timeZone);
+  const planningActivity = buildPlanningActivity(plan);
+  const firstDay = getDayItinerary(plan, firstActivityStep.day)!;
 
   return [
     {
@@ -427,12 +510,17 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
       context: buildSyntheticContext({
         kind: "planning",
         phase: "planning",
-        itinerary: getDayItinerary(plan, firstActivityStep.day)!,
-        activityIndex: firstActivityStep.context.activityIndex,
-        activity: firstActivityStep.context.activity,
+        itinerary: {
+          day: 0,
+          date: planningTiming.rawDate,
+          theme: `Preparing to leave for ${plan.metadata.destination}`,
+          activities: [planningActivity],
+        },
+        activityIndex: -1,
+        activity: planningActivity,
         previousActivity: undefined,
-        nextActivity: firstActivityStep.context.nextActivity,
-        timing: firstActivityStep.context.timing,
+        nextActivity: firstDay.activities[0],
+        timing: planningTiming,
       }),
     },
     ...activitySteps,

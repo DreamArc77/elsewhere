@@ -26,6 +26,10 @@ describe("state machine", () => {
 
     expect(timeline[0]?.phase).toBe("planning");
     expect(timeline[0]?.day).toBe(0);
+    expect(timeline[0]?.context?.activity.description).toContain(
+      "pre-departure preparation",
+    );
+    expect(timeline[0]?.context?.activity.location).toContain("Departure prep");
     expect(timeline.at(-1)?.phase).toBe("home_reflection");
     expect(
       timeline.filter((step) => step.context?.isExtraMessage).length,
@@ -37,6 +41,25 @@ describe("state machine", () => {
           step.context.activity.type === "transport",
       ).length,
     ).toBe(1);
+  });
+
+  it("supports cross-day single-slot timestamps like 02:00 (+1)", () => {
+    const plan = buildPlan(3);
+    plan.daily_itinerary[1]!.activities[5]!.time_slot = "02:00 (+1)";
+
+    const timeline = buildTimeline(
+      plan,
+      new Date("2026-04-09T00:00:00.000Z"),
+    );
+    const lateStep = timeline.find(
+      (step) =>
+        step.context?.kind === "activity" &&
+        step.context.activity.location.includes("Central Hotel") &&
+        step.day === 2,
+    );
+
+    expect(lateStep?.scheduledAt.startsWith("2026-04-14")).toBe(true);
+    expect(lateStep?.context?.timing.startLocal.includes("T02:00:00")).toBe(true);
   });
 
   it("creates at least one postcard step per activity", () => {

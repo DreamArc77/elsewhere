@@ -114,11 +114,16 @@ describe("travel companion prompts", () => {
       expect(prompt.length).toBeGreaterThan(40);
     }
 
+    expect(prompts[0]).toContain(`今天的日期是 ${new Date().toISOString().slice(0, 10)}`);
+    expect(prompts[0]).toContain("用户是远端接收消息的人，不在旅行现场");
     expect(prompts[1]).toContain("你刚刚拍了一张照片");
+    expect(prompts[1]).toContain("用户只能是远端收信人");
     expect(prompts[1]).toContain(selfieImagePrompt);
     expect(prompts[2]).toContain("参考图中的人物");
+    expect(prompts[2]).toContain("不要出现任何陪同者");
     expect(prompts[2]).toContain(selfieIntent.currentTimeLocal);
     expect(prompts[3]).toContain("没有主体人物");
+    expect(prompts[3]).toContain("不要出现用户");
     expect(prompts[3]).toContain(snapshotIntent.activityDescription);
   });
 });
