@@ -89,4 +89,46 @@ describe("OpenClawCliMessengerPort", () => {
       }),
     ).rejects.toThrow("fatal send failure");
   });
+
+  it("extracts a nested message id from a noisy pretty-printed CLI payload", async () => {
+    const messenger = new OpenClawCliMessengerPort(buildTripRepository(), {
+      async run() {
+        return {
+          stdout: "",
+          stderr: [
+            "Config warnings:",
+            '- plugins.entries.feishu: plugin disabled (disabled in config) but config is present',
+            "[plugins] something noisy",
+            "{",
+            '  "action": "send",',
+            '  "channel": "telegram",',
+            '  "dryRun": false,',
+            '  "handledBy": "plugin",',
+            '  "payload": {',
+            '    "ok": true,',
+            '    "messageId": "149",',
+            '    "chatId": "1459473177"',
+            "  }",
+            "}",
+          ].join("\n"),
+          code: null,
+        };
+      },
+    });
+
+    const receipt = await messenger.sendPostcard({
+      personaId: "persona-1",
+      dedupeKey: "trip-1:step-1",
+      postcard: {
+        tripId: "trip-1",
+        phase: "planning",
+        caption: "hello",
+        imageAsset: "/tmp/fake.png",
+        sentAt: "",
+      },
+    });
+
+    expect(receipt.messageId).toBe("149");
+    expect(receipt.provider).toBe("telegram");
+  });
 });

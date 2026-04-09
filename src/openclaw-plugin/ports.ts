@@ -95,7 +95,10 @@ function extractSendReceipt(
   const messageId =
     readString(parsed, "messageId") ??
     readString(parsed, "message_id") ??
-    readString(parsed, "id");
+    readString(parsed, "id") ??
+    readNestedString(parsed, ["payload", "messageId"]) ??
+    readNestedString(parsed, ["payload", "message_id"]) ??
+    readNestedString(parsed, ["payload", "id"]);
   const deduped =
     readBoolean(parsed, "deduped") ??
     readBoolean(parsed, "duplicate") ??
@@ -116,13 +119,7 @@ function extractSendReceipt(
 }
 
 function extractJsonRecord(payload: string): Record<string, unknown> | undefined {
-  const candidates = payload
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("{") && line.endsWith("}"))
-    .reverse();
-
-  for (const candidate of candidates) {
+  for (const candidate of extractBalancedJsonObjects(payload).reverse()) {
     try {
       const parsed = JSON.parse(candidate) as Record<string, unknown>;
       return parsed;
@@ -136,6 +133,52 @@ function extractJsonRecord(payload: string): Record<string, unknown> | undefined
   } catch {
     return undefined;
   }
+}
+
+function extractBalancedJsonObjects(payload: string): string[] {
+  const matches: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < payload.length; index += 1) {
+    const char = payload[index]!;
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      if (depth === 0) {
+        start = index;
+      }
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start !== -1) {
+        matches.push(payload.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+
+  return matches;
 }
 
 function readString(
@@ -152,4 +195,19 @@ function readBoolean(
   return typeof value[key] === "boolean"
     ? (value[key] as boolean)
     : undefined;
+}
+
+function readNestedString(
+  value: Record<string, unknown>,
+  path: string[],
+): string | undefined {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || !(key in current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return typeof current === "string" ? current : undefined;
 }
