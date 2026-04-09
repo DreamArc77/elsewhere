@@ -167,6 +167,44 @@ export class OpenClawTravelCompanionService {
     return results;
   }
 
+  async stopTrip(tripId: string): Promise<TripRecord> {
+    const record = await this.requireTrip(tripId);
+    const stoppedAt = nowIso(this.dependencies.clock);
+    const runId = randomUUID();
+
+    const stopped: TripRecord = {
+      ...record,
+      state: {
+        ...record.state,
+        status: "completed",
+        nextRunAt: null,
+        pendingPostcard: null,
+      },
+      pendingDispatch: null,
+      updatedAt: stoppedAt,
+      lastRunId: runId,
+    };
+
+    await this.dependencies.tripRepository.save(stopped);
+    this.inFlightTripIds.delete(tripId);
+    await this.log({
+      tripId,
+      runId,
+      phase: record.state.currentPhase,
+      event: "trip.stopped",
+      decision: "Stopped trip manually for testing.",
+      provider: "service",
+      status: "success",
+      startedAt: stoppedAt,
+      finishedAt: stoppedAt,
+      details: {
+        previousStatus: record.state.status,
+      },
+    });
+
+    return stopped;
+  }
+
   async runTrip(
     tripId: string,
     options?: { ignoreSchedule?: boolean },

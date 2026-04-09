@@ -174,4 +174,58 @@ describe("travel companion command UX", () => {
     expect(reply.text).toContain("Ticked immediately:");
     expect(runtime.messenger.sentMessages).toHaveLength(2);
   });
+
+  it("stops the current trip from the chat command", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = {
+      service: runtime.service,
+      tripRepository: runtime.tripRepository,
+      bindings,
+      pluginConfig: {
+        geminiApiKey: "test-key",
+        defaultOriginCity: "Hong Kong",
+        pollIntervalSeconds: 60,
+        openclawBinaryPath: "openclaw",
+      },
+      runtimeDataPaths: runtime.paths,
+    };
+
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    await bindings.upsert({
+      key: bindingKey({
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+      }),
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      defaultPersonaId: persona.personaId,
+    });
+
+    const startReply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion start --to Tokyo"),
+      deps,
+    );
+    const tripId = startReply.text.match(/Trip created: ([^\n]+)/u)?.[1];
+    expect(tripId).toBeTruthy();
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion stop"),
+      deps,
+    );
+
+    expect(reply.text).toContain("Stopped:");
+    const trip = await runtime.tripRepository.getById(tripId!);
+    expect(trip?.state.status).toBe("completed");
+    expect(trip?.state.nextRunAt).toBeNull();
+  });
 });

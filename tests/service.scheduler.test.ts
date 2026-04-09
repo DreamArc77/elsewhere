@@ -95,6 +95,30 @@ describe("service scheduling and crash recovery", () => {
     expect(updatedTrip?.state.currentPhase).not.toBe("departing");
   });
 
+  it("can stop an old trip so it no longer schedules messages", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    const stopped = await runtime.service.stopTrip(trip.tripId);
+    expect(stopped.state.status).toBe("completed");
+    expect(stopped.state.nextRunAt).toBeNull();
+
+    await runtime.service.runDueTrips();
+    expect(runtime.messenger.sentMessages).toHaveLength(0);
+  });
+
   it("recovers after crashing after persisting a pending postcard", async () => {
     const runtime = await createTestRuntime({
       hooks: {

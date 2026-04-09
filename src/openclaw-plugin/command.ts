@@ -42,6 +42,8 @@ export async function handleTravelCompanionCommand(
       return statusTrip(ctx, parsed.options, deps);
     case "tick":
       return tickTrip(ctx, parsed.options, deps);
+    case "stop":
+      return stopTrip(ctx, parsed.options, deps);
     default:
       return { text: helpText() };
   }
@@ -234,6 +236,31 @@ async function tickTrip(
   };
 }
 
+async function stopTrip(
+  ctx: PluginCommandContext,
+  options: Record<string, string>,
+  deps: CommandDependencies,
+): Promise<CommandReply> {
+  const binding = await requireBinding(ctx, deps.bindings);
+  if ("reply" in binding) {
+    return binding.reply;
+  }
+
+  const tripId = options.trip ?? binding.record.lastTripId;
+  if (!tripId) {
+    return { text: "No trip is available to stop.", isError: true };
+  }
+
+  const trip = await deps.service.stopTrip(tripId);
+  return {
+    text: [
+      `Stopped: ${trip.tripId}`,
+      `status: ${trip.state.status}`,
+      "This trip will not schedule more messages.",
+    ].join("\n"),
+  };
+}
+
 async function requireBinding(
   ctx: PluginCommandContext,
   bindings: BindingRegistryStore,
@@ -345,5 +372,6 @@ function helpText(): string {
     "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
     "/travel-companion status [--trip <id>]",
     "/travel-companion tick [--trip <id>]  # force the next step immediately",
+    "/travel-companion stop [--trip <id>]",
   ].join("\n");
 }
