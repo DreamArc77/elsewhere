@@ -1,0 +1,45 @@
+{
+  "id": "openclaw-travel-companion",
+  "name": "OpenClaw Travel Companion",
+  "description": "A travel-frog-style companion plugin with bundled skills, Gemini grounding, and autonomous postcard delivery.",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "geminiApiKey": {
+        "type": "string"
+      },
+      "defaultOriginCity": {
+        "type": "string"
+      },
+      "pollIntervalSeconds": {
+        "type": "integer",
+        "minimum": 15,
+        "maximum": 3600
+      },
+      "openclawBinaryPath": {
+        "type": "string"
+      }
+    }
+  },
+  "uiHints": {
+    "geminiApiKey": {
+      "label": "Gemini API Key",
+      "placeholder": "AIza...",
+      "sensitive": true
+    },
+    "defaultOriginCity": {
+      "label": "Default Origin City",
+      "placeholder": "Hong Kong"
+    },
+    "pollIntervalSeconds": {
+      "label": "Poll Interval Seconds",
+      "help": "How often the background service scans for due trip steps."
+    },
+    "openclawBinaryPath": {
+      "label": "OpenClaw Binary Path",
+      "placeholder": "openclaw"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "openclaw-travel-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MVP runtime and skill package for a travel-frog-style OpenClaw companion.",
+  "openclaw": {
+    "extensions": ["./plugin.ts"],
+    "compat": {
+      "pluginApi": ">=2026.4.9",
+      "minGatewayVersion": "2026.4.9"
+    },
+    "build": {
+      "openclawVersion": "2026.4.9",
+      "pluginSdkVersion": "2026.4.9"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "vitest run tests/live.gemini.smoke.test.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49",
+    "openclaw": "^2026.4.9",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
