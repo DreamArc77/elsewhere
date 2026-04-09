@@ -44,6 +44,8 @@ function detectImageExtension(mimeType: string): string {
 }
 
 export class OpenClawTravelCompanionService {
+  private readonly inFlightTripIds = new Set<string>();
+
   constructor(
     private readonly dependencies: OpenClawTravelCompanionServiceDependencies,
   ) {}
@@ -159,28 +161,34 @@ export class OpenClawTravelCompanionService {
   }
 
   async runTrip(tripId: string): Promise<TripRecord> {
-    const startedAt = nowIso(this.dependencies.clock);
-    const runId = randomUUID();
-    const record = await this.requireTrip(tripId);
-    const currentStep = getCurrentStep(record);
-
-    if (!isTripDue(record, this.dependencies.clock.now())) {
-      await this.log({
-        tripId,
-        runId,
-        phase: currentStep?.phase ?? "system",
-        event: "trip.skipped",
-        decision: "Trip is not due yet.",
-        provider: "service",
-        status: "skipped",
-        startedAt,
-        finishedAt: nowIso(this.dependencies.clock),
-        scheduledAt: record.state.nextRunAt ?? undefined,
-      });
-      return record;
+    if (this.inFlightTripIds.has(tripId)) {
+      return await this.requireTrip(tripId);
     }
 
+    this.inFlightTripIds.add(tripId);
+    const startedAt = nowIso(this.dependencies.clock);
+    const runId = randomUUID();
+    let currentStep: ReturnType<typeof getCurrentStep> | undefined;
     try {
+      const record = await this.requireTrip(tripId);
+      currentStep = getCurrentStep(record);
+
+      if (!isTripDue(record, this.dependencies.clock.now())) {
+        await this.log({
+          tripId,
+          runId,
+          phase: currentStep?.phase ?? "system",
+          event: "trip.skipped",
+          decision: "Trip is not due yet.",
+          provider: "service",
+          status: "skipped",
+          startedAt,
+          finishedAt: nowIso(this.dependencies.clock),
+          scheduledAt: record.state.nextRunAt ?? undefined,
+        });
+        return record;
+      }
+
       if (record.pendingDispatch) {
         return await this.dispatchPending(record, runId, startedAt);
       }
@@ -217,6 +225,8 @@ export class OpenClawTravelCompanionService {
         error,
       });
       throw error;
+    } finally {
+      this.inFlightTripIds.delete(tripId);
     }
   }
 

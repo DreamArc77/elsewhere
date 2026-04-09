@@ -6,6 +6,43 @@ import { JsonlFileLogger } from "../src/infrastructure/jsonl-file-logger.js";
 import { createTestRuntime } from "./helpers/runtime.js";
 
 describe("service scheduling and crash recovery", () => {
+  it("does not send duplicate postcards when the same trip is ticked concurrently", async () => {
+    let releasePending: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releasePending = resolve;
+    });
+
+    const runtime = await createTestRuntime({
+      hooks: {
+        async afterPendingSaved() {
+          await gate;
+        },
+      },
+    });
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    const firstRun = runtime.service.runTrip(trip.tripId);
+    const secondRun = runtime.service.runTrip(trip.tripId);
+
+    await Promise.resolve();
+    releasePending?.();
+
+    await Promise.all([firstRun, secondRun]);
+    expect(runtime.messenger.sentMessages).toHaveLength(1);
+  });
+
   it("does not run again before the next scheduled time", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({

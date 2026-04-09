@@ -99,6 +99,7 @@ export function startPollingService(input: {
 }): { stop: () => void } {
   let disposed = false;
   let interval: NodeJS.Timeout | undefined;
+  let ticking = false;
 
   void createRuntimeBundle(input)
     .then((bundle) => {
@@ -107,6 +108,10 @@ export function startPollingService(input: {
       }
 
       const tick = async () => {
+        if (ticking) {
+          return;
+        }
+        ticking = true;
         try {
           await bundle.service.runDueTrips();
         } catch (error) {
@@ -115,6 +120,8 @@ export function startPollingService(input: {
               error instanceof Error ? error.message : String(error)
             }`,
           );
+        } finally {
+          ticking = false;
         }
       };
 
