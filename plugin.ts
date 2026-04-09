@@ -71,6 +71,7 @@ export default definePluginEntry({
             tripRepository: runtimeBundle.tripRepository,
             bindings,
             pluginConfig,
+            runtimeDataPaths: runtimeBundle.runtimeDataPaths,
           });
         } catch (error) {
           return {

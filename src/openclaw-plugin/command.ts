@@ -4,6 +4,11 @@ import { OpenClawTravelCompanionService } from "../application/openclaw-travel-c
 import { TripRecord, TripRepository } from "../domain/types.js";
 import { BindingRegistryStore, bindingKey } from "./binding-state.js";
 import { TravelCompanionPluginConfig } from "./config.js";
+import {
+  extractReferenceImageInput,
+  materializeReferenceImage,
+} from "./reference-image.js";
+import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 
 type CommandReply = { text: string; isError?: boolean };
 
@@ -12,6 +17,7 @@ interface CommandDependencies {
   tripRepository: TripRepository;
   bindings: BindingRegistryStore;
   pluginConfig: TravelCompanionPluginConfig;
+  runtimeDataPaths: RuntimeDataPaths;
 }
 
 type ParsedArgs = {
@@ -45,59 +51,15 @@ async function bindConversation(
   ctx: PluginCommandContext,
   bindings: BindingRegistryStore,
 ): Promise<CommandReply> {
-  const existing = await ctx.getCurrentConversationBinding();
-  if (existing) {
-    const key = bindingKey({
-      channel: existing.channel,
-      accountId: existing.accountId,
-      target: existing.conversationId,
-      threadId: existing.threadId,
-    });
-    await bindings.upsert({
-      key,
-      bindingId: existing.bindingId,
-      channel: existing.channel,
-      accountId: existing.accountId,
-      target: existing.conversationId,
-      parentConversationId: existing.parentConversationId,
-      threadId: existing.threadId,
-      boundAt: existing.boundAt,
-    });
+  const binding = inferBindingRecord(ctx);
+  if (!binding) {
     return {
-      text: "This conversation is already bound. Travel postcards will return here.",
+      text: "Could not infer the current chat route. Please try again in the Telegram chat where you want to receive postcards.",
+      isError: true,
     };
   }
 
-  const requested = await ctx.requestConversationBinding({
-    summary: "Allow OpenClaw Travel Companion to proactively send trip postcards here.",
-    detachHint:
-      "Use /travel-companion bind again in another chat to move postcard delivery.",
-  });
-
-  if (requested.status === "pending") {
-    return requested.reply as CommandReply;
-  }
-  if (requested.status === "error") {
-    return { text: requested.message, isError: true };
-  }
-
-  const binding = requested.binding;
-  const key = bindingKey({
-    channel: binding.channel,
-    accountId: binding.accountId,
-    target: binding.conversationId,
-    threadId: binding.threadId,
-  });
-  await bindings.upsert({
-    key,
-    bindingId: binding.bindingId,
-    channel: binding.channel,
-    accountId: binding.accountId,
-    target: binding.conversationId,
-    parentConversationId: binding.parentConversationId,
-    threadId: binding.threadId,
-    boundAt: binding.boundAt,
-  });
+  await bindings.upsert(binding);
 
   return {
     text: [
@@ -118,6 +80,20 @@ async function setupPersona(
     return binding.reply;
   }
 
+  const referenceImageInput = extractReferenceImageInput(
+    options.image,
+    ctx.commandBody,
+  );
+  if (!referenceImageInput) {
+    throw new Error(
+      "Missing reference image. Pass --image <absolute-path-or-image-url>, or paste an image URL in the setup command.",
+    );
+  }
+  const referenceImageAsset = await materializeReferenceImage({
+    source: referenceImageInput,
+    personasDir: deps.runtimeDataPaths.personasDir,
+  });
+
   const persona = await deps.service.createPersona({
     name: requiredOption(options, "name"),
     traits: requiredOption(options, "traits")
@@ -126,7 +102,7 @@ async function setupPersona(
       .filter(Boolean),
     relationship: requiredOption(options, "relationship"),
     toneStyle: requiredOption(options, "tone"),
-    referenceImageAsset: requiredOption(options, "image"),
+    referenceImageAsset,
   });
 
   await deps.bindings.upsert({
@@ -265,39 +241,68 @@ async function requireBinding(
   | { record: NonNullable<Awaited<ReturnType<BindingRegistryStore["get"]>>> }
   | { reply: CommandReply }
 > {
-  const current = await ctx.getCurrentConversationBinding();
-  if (!current) {
+  const inferred = inferBindingRecord(ctx);
+  if (!inferred) {
     return {
       reply: {
-        text: "This conversation is not bound yet. Run /travel-companion bind first.",
+        text: "This conversation is not ready yet. Run /travel-companion bind in the Telegram chat where you want to receive postcards.",
         isError: true,
       },
     };
   }
 
-  const key = bindingKey({
-    channel: current.channel,
-    accountId: current.accountId,
-    target: current.conversationId,
-    threadId: current.threadId,
-  });
-  const record = await bindings.get(key);
+  const record = await bindings.get(inferred.key);
   if (record) {
     return { record };
   }
 
-  const newRecord = {
+  await bindings.upsert(inferred);
+  return { record: inferred };
+}
+
+function inferBindingRecord(
+  ctx: PluginCommandContext,
+): Awaited<ReturnType<BindingRegistryStore["get"]>> | null {
+  const target = inferConversationTarget(ctx);
+  if (!target) {
+    return null;
+  }
+
+  const key = bindingKey({
+    channel: ctx.channel,
+    accountId: ctx.accountId,
+    target,
+    threadId: ctx.messageThreadId,
+  });
+  return {
     key,
-    bindingId: current.bindingId,
-    channel: current.channel,
-    accountId: current.accountId,
-    target: current.conversationId,
-    parentConversationId: current.parentConversationId,
-    threadId: current.threadId,
-    boundAt: current.boundAt,
+    bindingId: undefined,
+    channel: ctx.channel,
+    accountId: ctx.accountId,
+    target,
+    parentConversationId: ctx.threadParentId,
+    threadId: ctx.messageThreadId,
+    boundAt: Date.now(),
   };
-  await bindings.upsert(newRecord);
-  return { record: newRecord };
+}
+
+function inferConversationTarget(ctx: PluginCommandContext): string | null {
+  const from = normalizeRoutePart(ctx.from ?? ctx.senderId);
+  const to = normalizeRoutePart(ctx.to);
+
+  if (ctx.channel === "telegram") {
+    if (to?.startsWith("-")) {
+      return to;
+    }
+    return from ?? to;
+  }
+
+  return to ?? from;
+}
+
+function normalizeRoutePart(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 function requiredOption(options: Record<string, string>, key: string): string {
@@ -336,6 +341,7 @@ function helpText(): string {
   return [
     "/travel-companion bind",
     "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image /abs/path/ref.png",
+    "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp",
     "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
     "/travel-companion status [--trip <id>]",
     "/travel-companion tick [--trip <id>]",

@@ -1,0 +1,125 @@
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
+
+import { describe, expect, it, vi, afterEach } from "vitest";
+import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
+
+import { handleTravelCompanionCommand } from "../src/openclaw-plugin/command.js";
+import {
+  BindingRegistryStore,
+  bindingKey,
+} from "../src/openclaw-plugin/binding-state.js";
+import { createTestRuntime } from "./helpers/runtime.js";
+
+function createTelegramContext(commandBody: string): PluginCommandContext {
+  const [commandName, ...rest] = commandBody.trim().split(/\s+/u);
+  return {
+    senderId: "1459473177",
+    channel: "telegram",
+    isAuthorizedSender: true,
+    args: rest.join(" "),
+    commandBody,
+    config: {} as PluginCommandContext["config"],
+    from: "1459473177",
+    to: "999999999",
+    accountId: "default",
+    requestConversationBinding: async () => ({
+      status: "error",
+      message: "requestConversationBinding should not be used in this test",
+    }),
+    detachConversationBinding: async () => ({ removed: false }),
+    getCurrentConversationBinding: async () => null,
+  };
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("travel companion command UX", () => {
+  it("binds the current Telegram DM without interactive approval", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion bind"),
+      {
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        bindings,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+      },
+    );
+
+    expect(reply.isError).toBeUndefined();
+    expect(reply.text).toContain("Binding complete.");
+
+    const binding = await bindings.get(
+      bindingKey({
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+      }),
+    );
+    expect(binding?.target).toBe("1459473177");
+  });
+
+  it("creates a persona from an image URL pasted in the setup command", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const webpBytes = Buffer.from("fake-webp", "utf8");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: new Headers({ "content-type": "image/webp" }),
+        arrayBuffer: async () =>
+          webpBytes.buffer.slice(
+            webpBytes.byteOffset,
+            webpBytes.byteOffset + webpBytes.byteLength,
+          ),
+      })),
+    );
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext(
+        "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm https://example.com/mori.webp",
+      ),
+      {
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        bindings,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+      },
+    );
+
+    expect(reply.text).toContain("Persona created: Mori");
+    const binding = await bindings.get(
+      bindingKey({
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+      }),
+    );
+    expect(binding?.defaultPersonaId).toBeTruthy();
+
+    const persona = await runtime.personaRepository.getById(binding!.defaultPersonaId!);
+    expect(persona?.referenceImageAsset).toContain(
+      join(runtime.paths.personasDir, "reference-assets"),
+    );
+    await expect(stat(persona!.referenceImageAsset)).resolves.toBeTruthy();
+  });
+});

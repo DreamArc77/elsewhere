@@ -15,20 +15,21 @@ This skill is bundled inside the `openclaw-travel-companion` plugin. It gives th
 Use the plugin command directly:
 
 1. `/travel-companion bind`
-2. `/travel-companion setup --name 森 --traits 温柔,好奇 --relationship 灵魂伴侣 --tone 轻柔 --image /absolute/path/to/ref.png`
-3. `/travel-companion start --to 东京`
-4. `/travel-companion status`
+2. `/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image /absolute/path/to/ref.png`
+3. `/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp`
+4. `/travel-companion start --to Tokyo`
+5. `/travel-companion status`
 
 Optional:
 
-- `/travel-companion start --to 纽约 --from 东京 --when 下周`
+- `/travel-companion start --to New-York --from Tokyo --when next-week`
 - `/travel-companion tick` for a manual advancement test
 - `/travel-companion status --trip <tripId>` to inspect a specific run
 
 ## MVP Constraints
 
 - The current conversation must be bound first.
-- The reference image must be a local absolute path the gateway can read.
+- The reference image can be either a local absolute path or a direct image URL.
 - The destination is user-chosen.
 - The trip is single-city only.
 - Real-time chat replies are out of scope.
