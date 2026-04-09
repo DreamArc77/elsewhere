@@ -53,7 +53,7 @@ export async function createRuntimeBundle(input: {
     run: async (argv) => {
       const result = await input.runtime.system.runCommandWithTimeout(
         [input.pluginConfig.openclawBinaryPath ?? "openclaw", ...argv],
-        { timeoutMs: 30_000 },
+        { timeoutMs: 120_000 },
       );
       return {
         stdout: result.stdout,

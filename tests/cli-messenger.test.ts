@@ -131,4 +131,38 @@ describe("OpenClawCliMessengerPort", () => {
     expect(receipt.messageId).toBe("149");
     expect(receipt.provider).toBe("telegram");
   });
+
+  it("treats a timed-out warning-only CLI run as a soft success to avoid duplicate sends", async () => {
+    const messenger = new OpenClawCliMessengerPort(buildTripRepository(), {
+      async run() {
+        return {
+          stdout: "",
+          stderr: [
+            "Config warnings:",
+            "- plugins.entries.feishu: plugin disabled (disabled in config) but config is present",
+            "• plugins.entries.openclaw-weixin: plugin disabled (disabled in config) but config is present",
+            "[plugins] plugins.allow is empty; discovered non-bundled plugins may auto-load: ...",
+            "[preload] WARNING: could not find openclaw global installation, symlink not created",
+            "[qqbot-remind] Registered QQBot remind tool",
+          ].join("\n"),
+          code: null,
+        };
+      },
+    });
+
+    const receipt = await messenger.sendPostcard({
+      personaId: "persona-1",
+      dedupeKey: "trip-1:step-1",
+      postcard: {
+        tripId: "trip-1",
+        phase: "planning",
+        caption: "hello",
+        imageAsset: "/tmp/fake.png",
+        sentAt: "",
+      },
+    });
+
+    expect(receipt.messageId).toBe("trip-1:step-1");
+    expect(receipt.provider).toBe("openclaw-message-cli-timeout");
+  });
 });

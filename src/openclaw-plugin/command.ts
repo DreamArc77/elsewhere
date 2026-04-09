@@ -225,15 +225,26 @@ async function tickTrip(
     return { text: "No trip is available to tick.", isError: true };
   }
 
-  const trip = await deps.service.runTrip(tripId, { ignoreSchedule: true });
-  return {
-    text: [
-      `Ticked immediately: ${trip.tripId}`,
-      `status: ${trip.state.status}`,
-      `phase: ${trip.state.currentPhase}`,
-      `nextRunAt: ${trip.state.nextRunAt ?? "none"}`,
-    ].join("\n"),
-  };
+  try {
+    const trip = await deps.service.runTrip(tripId, { ignoreSchedule: true });
+    return {
+      text: [
+        `Ticked immediately: ${trip.tripId}`,
+        `status: ${trip.state.status}`,
+        `phase: ${trip.state.currentPhase}`,
+        `nextRunAt: ${trip.state.nextRunAt ?? "none"}`,
+      ].join("\n"),
+    };
+  } catch {
+    return {
+      text: [
+        `Tick attempted: ${tripId}`,
+        "The postcard could not be confirmed just now.",
+        "The trip state was preserved. Please try /travel-companion tick again shortly.",
+      ].join("\n"),
+      isError: true,
+    };
+  }
 }
 
 async function stopTrip(

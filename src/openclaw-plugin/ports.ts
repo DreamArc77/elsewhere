@@ -33,6 +33,17 @@ export class OpenClawCliMessengerPort {
       return receipt;
     }
 
+    if (
+      result.code === null &&
+      containsOnlyBenignCliNoise(result.stdout, result.stderr)
+    ) {
+      return {
+        messageId: input.dedupeKey,
+        deduped: false,
+        provider: "openclaw-message-cli-timeout",
+      };
+    }
+
     if (result.code !== 0) {
       throw new Error(
         [
@@ -52,6 +63,29 @@ export class OpenClawCliMessengerPort {
       provider: "openclaw-message-cli",
     };
   }
+}
+
+const benignCliNoisePatterns = [
+  /^Config warnings:/u,
+  /^- plugins\.entries\./u,
+  /^• plugins\.entries\./u,
+  /^\[plugins\]/u,
+  /^\[preload\] WARNING:/u,
+  /^\[qqbot-/u,
+  /^Set plugins\.allow to explicit trusted ids\./u,
+  /^$/u,
+] as const;
+
+function containsOnlyBenignCliNoise(stdout: string, stderr: string): boolean {
+  const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
+  if (!combined) {
+    return false;
+  }
+
+  const lines = combined.split(/\r?\n/u).map((line) => line.trim());
+  return lines.every((line) =>
+    benignCliNoisePatterns.some((pattern) => pattern.test(line)),
+  );
 }
 
 function buildMessageSendArgv(

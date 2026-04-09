@@ -228,4 +228,52 @@ describe("travel companion command UX", () => {
     expect(trip?.state.status).toBe("completed");
     expect(trip?.state.nextRunAt).toBeNull();
   });
+
+  it("does not leak raw internal stderr when a tick fails", async () => {
+    const bindings = new BindingRegistryStore("C:\\temp");
+    await bindings.upsert({
+      key: bindingKey({
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+      }),
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      lastTripId: "trip-1",
+    });
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion tick"),
+      {
+        service: {
+          async runTrip() {
+            throw new Error(
+              "openclaw message send failed | code=null | Config warnings: ...",
+            );
+          },
+        } as never,
+        tripRepository: {} as never,
+        bindings,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: {
+          rootDir: "C:\\temp",
+          personasDir: "C:\\temp\\personas",
+          tripsDir: "C:\\temp\\trips",
+          artifactsDir: "C:\\temp\\artifacts",
+          logsDir: "C:\\temp\\logs",
+        },
+      },
+    );
+
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain("Tick attempted: trip-1");
+    expect(reply.text).not.toContain("Config warnings");
+  });
 });
