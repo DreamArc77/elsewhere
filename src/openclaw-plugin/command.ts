@@ -167,7 +167,7 @@ async function startTrip(
     text: [
       `Trip created: ${patchedTrip.tripId}`,
       `Destination: ${patchedTrip.request.destinationCity}`,
-      `Days: ${patchedTrip.plan.days}`,
+      `Days: ${patchedTrip.plan.metadata.days}`,
       "The background worker will now advance the trip and proactively send postcards here.",
     ].join("\n"),
   };
@@ -223,10 +223,10 @@ async function tickTrip(
     return { text: "No trip is available to tick.", isError: true };
   }
 
-  const trip = await deps.service.runTrip(tripId);
+  const trip = await deps.service.runTrip(tripId, { ignoreSchedule: true });
   return {
     text: [
-      `Ticked: ${trip.tripId}`,
+      `Ticked immediately: ${trip.tripId}`,
       `status: ${trip.state.status}`,
       `phase: ${trip.state.currentPhase}`,
       `nextRunAt: ${trip.state.nextRunAt ?? "none"}`,
@@ -344,6 +344,6 @@ function helpText(): string {
     "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp",
     "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
     "/travel-companion status [--trip <id>]",
-    "/travel-companion tick [--trip <id>]",
+    "/travel-companion tick [--trip <id>]  # force the next step immediately",
   ].join("\n");
 }

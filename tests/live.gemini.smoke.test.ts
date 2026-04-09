@@ -8,6 +8,9 @@ import {
   GeminiRestGroundingAdapter,
   GeminiRestImageAdapter,
 } from "../src/infrastructure/gemini-rest-adapters.js";
+import { deriveImageIntent } from "../src/domain/image-intent.js";
+import { buildDerivedGrounding } from "../src/domain/step-grounding.js";
+import { buildTimeline } from "../src/domain/state-machine.js";
 
 const tinyPngBase64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9mA0QAAAAASUVORK5CYII=";
@@ -48,16 +51,26 @@ describe.skipIf(!liveEnabled)("live Gemini smoke", () => {
       persona,
       request,
     });
-    expect(plan.days).toBeGreaterThanOrEqual(3);
-    expect(plan.days).toBeLessThanOrEqual(5);
+    expect(plan.metadata.days).toBeGreaterThanOrEqual(3);
+    expect(plan.metadata.days).toBeLessThanOrEqual(5);
 
-    const phaseGrounding = await grounding.enrichPhase({
-      tripId: "trip-live",
-      persona,
-      request,
+    const timeline = buildTimeline(plan, new Date());
+    const planningStep = timeline[0];
+    if (!planningStep?.context) {
+      throw new Error("Planning step context is missing");
+    }
+
+    const phaseGrounding = buildDerivedGrounding({
       plan,
       phase: "planning",
       day: 0,
+      stepContext: planningStep.context,
+    });
+    const imageIntent = deriveImageIntent({
+      tripId: plan.tripId,
+      stepId: planningStep.stepId,
+      plan,
+      stepContext: planningStep.context,
     });
 
     const imageResult = await image.generateImage({
@@ -67,7 +80,10 @@ describe.skipIf(!liveEnabled)("live Gemini smoke", () => {
       plan,
       phase: "planning",
       day: 0,
+      stepContext: planningStep.context,
       grounding: phaseGrounding,
+      shotKind: imageIntent.shotKind,
+      usesReferenceImage: imageIntent.usesReferenceImage,
       prompt: "Create a realistic airport departure selfie.",
     });
 

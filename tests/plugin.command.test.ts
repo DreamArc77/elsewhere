@@ -122,4 +122,56 @@ describe("travel companion command UX", () => {
     );
     await expect(stat(persona!.referenceImageAsset)).resolves.toBeTruthy();
   });
+
+  it("forces the next trip step immediately when tick is used", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = {
+      service: runtime.service,
+      tripRepository: runtime.tripRepository,
+      bindings,
+      pluginConfig: {
+        geminiApiKey: "test-key",
+        defaultOriginCity: "Hong Kong",
+        pollIntervalSeconds: 60,
+        openclawBinaryPath: "openclaw",
+      },
+      runtimeDataPaths: runtime.paths,
+    };
+
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    await bindings.upsert({
+      key: bindingKey({
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+      }),
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      defaultPersonaId: persona.personaId,
+    });
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion start --to Tokyo"),
+      deps,
+    );
+    await runtime.service.runDueTrips();
+    expect(runtime.messenger.sentMessages).toHaveLength(1);
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion tick"),
+      deps,
+    );
+
+    expect(reply.text).toContain("Ticked immediately:");
+    expect(runtime.messenger.sentMessages).toHaveLength(2);
+  });
 });

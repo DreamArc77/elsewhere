@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   ClockPort,
+  ImageIntent,
   LogEntry,
   OpenClawTravelCompanionServiceDependencies,
   PersonaProfile,
@@ -21,6 +22,8 @@ import {
   isPostcardStep,
   isTripDue,
 } from "../domain/state-machine.js";
+import { deriveImageIntent } from "../domain/image-intent.js";
+import { buildDerivedGrounding } from "../domain/step-grounding.js";
 import { renderImageGenerationPrompt } from "../prompting/travel-companion-prompts.js";
 
 function nowIso(clock: ClockPort): string {
@@ -86,7 +89,10 @@ export class OpenClawTravelCompanionService {
         value: normalizedPlan,
       });
 
-      const timeline = buildTimeline(normalizedPlan);
+      const timeline = buildTimeline(
+        normalizedPlan,
+        this.dependencies.clock.now(),
+      );
       const state = createInitialTripState(timeline, this.dependencies.clock.now());
       state.artifacts = [
         {
@@ -161,7 +167,10 @@ export class OpenClawTravelCompanionService {
     return results;
   }
 
-  async runTrip(tripId: string): Promise<TripRecord> {
+  async runTrip(
+    tripId: string,
+    options?: { ignoreSchedule?: boolean },
+  ): Promise<TripRecord> {
     if (this.inFlightTripIds.has(tripId)) {
       return await this.requireTrip(tripId);
     }
@@ -174,7 +183,7 @@ export class OpenClawTravelCompanionService {
       const record = await this.requireTrip(tripId);
       currentStep = getCurrentStep(record);
 
-      if (!isTripDue(record, this.dependencies.clock.now())) {
+      if (!options?.ignoreSchedule && !isTripDue(record, this.dependencies.clock.now())) {
         await this.log({
           tripId,
           runId,
@@ -237,30 +246,38 @@ export class OpenClawTravelCompanionService {
     startedAt: string,
   ): Promise<TripRecord> {
     const step = getCurrentStep(record);
-    if (!step) {
+    if (!step?.context) {
       return record;
     }
 
     const persona = await this.requirePersona(record.personaId);
-    const grounding = await this.dependencies.grounding.enrichPhase({
-      tripId: record.tripId,
-      persona,
-      request: record.request,
+    const grounding = buildDerivedGrounding({
       plan: record.plan,
       phase: step.phase,
       day: step.day,
+      stepContext: step.context,
+    });
+    const imageIntent = deriveImageIntent({
+      tripId: record.tripId,
+      stepId: step.stepId,
+      plan: record.plan,
+      stepContext: step.context,
     });
     await this.log({
       tripId: record.tripId,
       runId,
       phase: step.phase,
-      event: "grounding.generated",
-      decision: "Generated grounded phase details.",
-      provider: "grounding",
+      event: "grounding.derived",
+      decision: "Derived postcard context from the current itinerary step.",
+      provider: "service",
       status: "success",
       startedAt,
       finishedAt: nowIso(this.dependencies.clock),
-      details: { day: step.day, locality: grounding.locality },
+      details: {
+        day: step.day,
+        locality: grounding.locality,
+        shotKind: imageIntent.shotKind,
+      },
     });
 
     const groundingArtifactId = randomUUID();
@@ -275,7 +292,9 @@ export class OpenClawTravelCompanionService {
       persona,
       request: record.request,
       plan: record.plan,
+      stepContext: step.context,
       grounding,
+      imageIntent,
     });
     const image = await this.dependencies.imageGeneration.generateImage({
       tripId: record.tripId,
@@ -284,7 +303,10 @@ export class OpenClawTravelCompanionService {
       plan: record.plan,
       phase: step.phase,
       day: step.day,
+      stepContext: step.context,
       grounding,
+      shotKind: imageIntent.shotKind,
+      usesReferenceImage: imageIntent.usesReferenceImage,
       prompt: imagePrompt,
     });
     await this.log({
@@ -297,14 +319,20 @@ export class OpenClawTravelCompanionService {
       status: "success",
       startedAt,
       finishedAt: nowIso(this.dependencies.clock),
-      details: { mimeType: image.mimeType, day: step.day },
+      details: {
+        mimeType: image.mimeType,
+        day: step.day,
+        shotKind: imageIntent.shotKind,
+      },
     });
 
     const imageArtifactId = randomUUID();
     const imagePath = await this.dependencies.artifactStore.writeBinaryArtifact({
       tripId: record.tripId,
       artifactId: imageArtifactId,
-      fileName: `${step.stepId}.${detectImageExtension(image.mimeType)}`,
+      fileName: `${step.stepId}-${imageIntent.shotKind}.${detectImageExtension(
+        image.mimeType,
+      )}`,
       bytesBase64: image.bytesBase64,
     });
 
@@ -315,7 +343,9 @@ export class OpenClawTravelCompanionService {
       plan: record.plan,
       phase: step.phase,
       day: step.day,
+      stepContext: step.context,
       grounding,
+      imagePrompt,
     });
 
     const pendingPostcard: Postcard = {
@@ -355,6 +385,7 @@ export class OpenClawTravelCompanionService {
         stepId: step.stepId,
         phase: step.phase,
         day: step.day,
+        shotKind: imageIntent.shotKind,
         postcard: pendingPostcard,
         dedupeKey: `${record.tripId}:${step.stepId}`,
         grounding,
@@ -376,7 +407,10 @@ export class OpenClawTravelCompanionService {
       status: "success",
       startedAt,
       finishedAt: nowIso(this.dependencies.clock),
-      details: { dedupeKey: `${record.tripId}:${step.stepId}` },
+      details: {
+        dedupeKey: `${record.tripId}:${step.stepId}`,
+        shotKind: imageIntent.shotKind,
+      },
     });
 
     await this.dependencies.hooks?.afterPendingSaved?.(updatedRecord);
@@ -449,7 +483,11 @@ export class OpenClawTravelCompanionService {
       status: "success",
       startedAt,
       finishedAt: sentAt,
-      details: { dedupeKey: pending.dedupeKey, messageId: receipt.messageId },
+      details: {
+        dedupeKey: pending.dedupeKey,
+        messageId: receipt.messageId,
+        shotKind: pending.shotKind,
+      },
     });
 
     if (nextRecord.state.nextRunAt) {

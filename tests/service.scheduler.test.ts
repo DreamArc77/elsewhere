@@ -66,7 +66,33 @@ describe("service scheduling and crash recovery", () => {
     expect(runtime.messenger.sentMessages).toHaveLength(1);
 
     const updatedTrip = await runtime.tripRepository.getById(trip.tripId);
-    expect(updatedTrip?.state.currentPhase).toBe("packing");
+    expect(updatedTrip?.state.currentPhase).toBe("departing");
+  });
+
+  it("can force the next step immediately for manual testing", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    await runtime.service.runDueTrips();
+    expect(runtime.messenger.sentMessages).toHaveLength(1);
+
+    await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
+    expect(runtime.messenger.sentMessages).toHaveLength(2);
+
+    const updatedTrip = await runtime.tripRepository.getById(trip.tripId);
+    expect(updatedTrip?.state.currentPhase).not.toBe("departing");
   });
 
   it("recovers after crashing after persisting a pending postcard", async () => {

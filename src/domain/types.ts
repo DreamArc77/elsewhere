@@ -46,39 +46,63 @@ export interface GroundingSource {
   snippet?: string;
 }
 
-export interface TransportPlan {
-  summary: string;
-  departure: string;
-  arrival: string;
-  carrierHint?: string;
+export type TransportType = "flight" | "train";
+export type ActivityType =
+  | "sightseeing"
+  | "food"
+  | "transport"
+  | "shopping"
+  | "accommodation";
+
+export interface TransportEndpoint {
+  airport_station: string;
+  time: string;
 }
 
-export interface HotelPlan {
-  name: string;
-  district: string;
-  address?: string;
-  nightlyBudget?: string;
+export interface TransportationLeg {
+  type: TransportType;
+  identifier: string;
+  airline_operator?: string;
+  departure: TransportEndpoint;
+  arrival: TransportEndpoint;
 }
 
-export interface DailyAgenda {
+export interface SearchSummary {
+  weather_forecast: string;
+  major_events: string[];
+}
+
+export interface ItineraryActivity {
+  time_slot: string;
+  location: string;
+  address: string;
+  type: ActivityType;
+  description: string;
+  transport_memo: string;
+  real_time_info: {
+    live_update: string;
+  };
+}
+
+export interface DailyItinerary {
   day: number;
-  dateLabel: string;
-  headline: string;
-  morning: string[];
-  afternoon: string[];
-  evening: string[];
-  notes: string;
+  date: string;
+  theme: string;
+  activities: ItineraryActivity[];
 }
 
 export interface TripPlan {
   tripId: string;
-  days: number;
-  transport: TransportPlan;
-  hotel: HotelPlan;
-  dailyAgenda: DailyAgenda[];
-  groundingSources: GroundingSource[];
-  weatherSummary: string;
-  recommendedPostingMoments: TripPhase[];
+  metadata: {
+    destination: string;
+    days: number;
+  };
+  transportation: {
+    outbound: TransportationLeg;
+    return: TransportationLeg;
+  };
+  search_summary: SearchSummary;
+  daily_itinerary: DailyItinerary[];
 }
 
 export type TripStatus = "planned" | "active" | "completed" | "failed";
@@ -114,7 +138,34 @@ export interface TimelineStep {
   phase: TripPhase;
   day: number;
   emitsPostcard: boolean;
-  delayHours: number;
+  scheduledAt: string;
+  context?: RuntimeStepContext;
+}
+
+export interface ActivityTiming {
+  rawDate: string;
+  rawTimeSlot: string;
+  timeZone: string;
+  startLocal: string;
+  endLocal: string;
+  startUtc: string;
+  endUtc: string;
+  durationMinutes: number;
+}
+
+export interface RuntimeStepContext {
+  kind: "planning" | "activity" | "home_reflection";
+  phase: TripPhase;
+  day: number;
+  date: string;
+  theme: string;
+  activityIndex: number;
+  isExtraMessage: boolean;
+  sendMoment: "start" | "mid" | "summary";
+  activity: ItineraryActivity;
+  previousActivity?: ItineraryActivity;
+  nextActivity?: ItineraryActivity;
+  timing: ActivityTiming;
 }
 
 export interface PhaseGroundingResult {
@@ -129,6 +180,17 @@ export interface PhaseGroundingResult {
   groundingSources: GroundingSource[];
 }
 
+export type ShotKind = "selfie" | "snapshot";
+
+export interface ImageIntent {
+  shotKind: ShotKind;
+  usesReferenceImage: boolean;
+  currentTimeLocal: string;
+  destinationWithLocation: string;
+  activityLocation: string;
+  activityDescription: string;
+}
+
 export interface ImageGenerationResult {
   mimeType: string;
   bytesBase64: string;
@@ -140,6 +202,7 @@ export interface PendingDispatch {
   stepId: string;
   phase: TripPhase;
   day: number;
+  shotKind: ShotKind;
   postcard: Postcard;
   dedupeKey: string;
   grounding: PhaseGroundingResult;
@@ -212,14 +275,6 @@ export interface GroundingPort {
     persona: StoredPersonaProfile;
     request: TripRequest;
   }): Promise<TripPlan>;
-  enrichPhase(input: {
-    tripId: string;
-    persona: StoredPersonaProfile;
-    request: TripRequest;
-    plan: TripPlan;
-    phase: TripPhase;
-    day: number;
-  }): Promise<PhaseGroundingResult>;
   composeCaption(input: {
     tripId: string;
     persona: StoredPersonaProfile;
@@ -227,7 +282,9 @@ export interface GroundingPort {
     plan: TripPlan;
     phase: TripPhase;
     day: number;
+    stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
+    imagePrompt: string;
   }): Promise<{ caption: string; provider: string }>;
 }
 
@@ -239,7 +296,10 @@ export interface ImageGenerationPort {
     plan: TripPlan;
     phase: TripPhase;
     day: number;
+    stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
+    shotKind: ShotKind;
+    usesReferenceImage: boolean;
     prompt: string;
   }): Promise<ImageGenerationResult>;
 }

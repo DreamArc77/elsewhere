@@ -1,7 +1,9 @@
 import { readFile } from "node:fs/promises";
 
 import type {
+  ImageIntent,
   PhaseGroundingResult,
+  RuntimeStepContext,
   StoredPersonaProfile,
   TripPlan,
   TripRequest,
@@ -31,20 +33,46 @@ function renderTemplate(
   template: string,
   values: Record<string, string | number>,
 ): string {
-  const rendered = template.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_match, key) => {
-    const value = values[key];
-    if (value === undefined) {
-      throw new Error(`Missing prompt template value: ${key}`);
-    }
-    return String(value);
-  });
+  const rendered = template.replace(
+    /{{\s*([a-zA-Z0-9_]+)\s*}}/g,
+    (_match, key) => {
+      const value = values[key];
+      if (value === undefined) {
+        throw new Error(`Missing prompt template value: ${key}`);
+      }
+      return String(value);
+    },
+  );
 
   const unresolved = rendered.match(/{{\s*[a-zA-Z0-9_]+\s*}}/g);
   if (unresolved?.length) {
-    throw new Error(`Prompt template still has unresolved placeholders: ${unresolved.join(", ")}`);
+    throw new Error(
+      `Prompt template still has unresolved placeholders: ${unresolved.join(", ")}`,
+    );
   }
 
   return rendered.trim();
+}
+
+function summarizeStepContext(stepContext: RuntimeStepContext): string {
+  return JSON.stringify(
+    {
+      kind: stepContext.kind,
+      phase: stepContext.phase,
+      day: stepContext.day,
+      date: stepContext.date,
+      theme: stepContext.theme,
+      activityIndex: stepContext.activityIndex,
+      isExtraMessage: stepContext.isExtraMessage,
+      sendMoment: stepContext.sendMoment,
+      timing: stepContext.timing,
+      currentActivity: stepContext.activity,
+      previousActivity: stepContext.previousActivity,
+      nextActivity: stepContext.nextActivity,
+    },
+    null,
+    2,
+  );
 }
 
 export function buildPersonaSummary(persona: StoredPersonaProfile): string {
@@ -66,37 +94,11 @@ export async function renderTripPlanPrompt(input: {
     tripId: input.tripId,
     originCity: input.request.originCity,
     destinationCity: input.request.destinationCity,
+    tripDaysHint: "3-5",
     startWindow:
       input.request.startWindow ??
-      "pick the next reasonable departure window.",
+      "Choose the nearest realistic departure window based on transport and weather.",
     personaSummary: buildPersonaSummary(input.persona),
-  });
-}
-
-export async function renderPhaseGroundingPrompt(input: {
-  tripId: string;
-  persona: StoredPersonaProfile;
-  request: TripRequest;
-  plan: TripPlan;
-  phase: string;
-  day: number;
-  agenda: unknown;
-}): Promise<string> {
-  const template = await loadTemplate("phase-grounding.md");
-  return renderTemplate(template, {
-    tripId: input.tripId,
-    originCity: input.request.originCity,
-    destinationCity: input.request.destinationCity,
-    phase: input.phase,
-    day: input.day,
-    personaSummary: buildPersonaSummary(input.persona),
-    hotelName: input.plan.hotel.name,
-    hotelDistrict: input.plan.hotel.district,
-    weatherSummary: input.plan.weatherSummary,
-    agenda:
-      input.agenda === undefined
-        ? "n/a"
-        : JSON.stringify(input.agenda, null, 2),
   });
 }
 
@@ -105,7 +107,9 @@ export async function renderCaptionPrompt(input: {
   request: TripRequest;
   phase: string;
   day: number;
+  stepContext: RuntimeStepContext;
   grounding: PhaseGroundingResult;
+  imagePrompt: string;
 }): Promise<string> {
   const template = await loadTemplate("compose-caption.md");
   return renderTemplate(template, {
@@ -113,7 +117,9 @@ export async function renderCaptionPrompt(input: {
     destinationCity: input.request.destinationCity,
     phase: input.phase,
     day: input.day,
+    stepContext: summarizeStepContext(input.stepContext),
     grounding: JSON.stringify(input.grounding, null, 2),
+    imagePrompt: input.imagePrompt,
   });
 }
 
@@ -121,25 +127,19 @@ export async function renderImageGenerationPrompt(input: {
   persona: StoredPersonaProfile;
   request: TripRequest;
   plan: TripPlan;
+  stepContext: RuntimeStepContext;
   grounding: PhaseGroundingResult;
+  imageIntent: ImageIntent;
 }): Promise<string> {
-  const template = await loadTemplate("generate-image.md");
+  const template = await loadTemplate(
+    input.imageIntent.shotKind === "selfie"
+      ? "generate-image-selfie.md"
+      : "generate-image-snapshot.md",
+  );
+
   return renderTemplate(template, {
-    name: input.persona.name,
-    relationship: input.persona.relationship,
-    traits: input.persona.traits.join(", "),
-    toneStyle: input.persona.toneStyle,
-    originCity: input.request.originCity,
-    destinationCity: input.request.destinationCity,
-    phase: input.grounding.phase,
-    day: input.grounding.day,
-    hotelName: input.plan.hotel.name,
-    hotelDistrict: input.plan.hotel.district,
-    locality: input.grounding.locality,
-    weatherSummary: input.grounding.weatherSummary,
-    transitSummary: input.grounding.transitSummary,
-    venueSummary: input.grounding.venueSummary,
-    photoBrief: input.grounding.photoBrief,
-    sensoryHighlights: input.grounding.sensoryHighlights.join(", "),
+    currentTime: input.imageIntent.currentTimeLocal,
+    destinationWithLocation: input.imageIntent.destinationWithLocation,
+    activityDescription: input.imageIntent.activityDescription,
   });
 }

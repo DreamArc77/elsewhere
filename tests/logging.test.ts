@@ -43,5 +43,10 @@ describe("structured logging", () => {
       expect(entry.provider).toBeTypeOf("string");
       expect(entry.latencyMs).toBeTypeOf("number");
     }
+
+    const imageEntry = entries.find((entry) => entry.event === "image.generated");
+    expect(imageEntry?.details).toMatchObject({
+      shotKind: expect.stringMatching(/^(selfie|snapshot)$/),
+    });
   });
 });

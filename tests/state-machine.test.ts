@@ -5,71 +5,58 @@ import {
   buildTimeline,
   createInitialTripState,
 } from "../src/domain/state-machine.js";
-import { TripPlan, TripRecord } from "../src/domain/types.js";
+import { TripRecord } from "../src/domain/types.js";
+import { buildFixtureTripPlan } from "../src/testing/fakes.js";
 
-function buildPlan(days: number): TripPlan {
-  return {
+function buildPlan(days: number) {
+  return buildFixtureTripPlan({
     tripId: "trip-1",
+    originCity: "Hong Kong",
+    destinationCity: "Tokyo",
     days,
-    transport: {
-      summary: "Flight",
-      departure: "Hong Kong",
-      arrival: "Tokyo",
-    },
-    hotel: {
-      name: "Central Hotel",
-      district: "Shinjuku",
-    },
-    dailyAgenda: Array.from({ length: days }, (_, index) => ({
-      day: index + 1,
-      dateLabel: `Day ${index + 1}`,
-      headline: `Headline ${index + 1}`,
-      morning: ["Coffee"],
-      afternoon: ["Museum"],
-      evening: ["Walk"],
-      notes: "Slow pace",
-    })),
-    groundingSources: [{ title: "Source", uri: "https://example.com" }],
-    weatherSummary: "Sunny",
-    recommendedPostingMoments: [
-      "planning",
-      "departing",
-      "arrival_checkin",
-      "day_exploration",
-      "returning",
-      "home_reflection",
-    ],
-  };
+  });
 }
 
 describe("state machine", () => {
-  it("builds a deterministic timeline for a 3-day trip", () => {
-    const timeline = buildTimeline(buildPlan(3));
+  it("builds an activity-driven timeline for a 3-day trip", () => {
+    const timeline = buildTimeline(
+      buildPlan(3),
+      new Date("2026-04-09T00:00:00.000Z"),
+    );
 
-    expect(timeline.map((step) => `${step.phase}:${step.day}`)).toEqual([
-      "planning:0",
-      "packing:0",
-      "departing:0",
-      "in_transit:0",
-      "arrival_checkin:1",
-      "day_exploration:1",
-      "day_exploration:2",
-      "day_exploration:3",
-      "returning:3",
-      "home_reflection:3",
-    ]);
+    expect(timeline[0]?.phase).toBe("planning");
+    expect(timeline[0]?.day).toBe(0);
+    expect(timeline.at(-1)?.phase).toBe("home_reflection");
+    expect(
+      timeline.filter((step) => step.context?.isExtraMessage).length,
+    ).toBeGreaterThanOrEqual(3);
+    expect(
+      timeline.filter(
+        (step) =>
+          step.context?.kind === "activity" &&
+          step.context.activity.type === "transport",
+      ).length,
+    ).toBe(1);
   });
 
-  it("repeats day exploration for every itinerary day", () => {
-    const timeline = buildTimeline(buildPlan(5));
-    const daySteps = timeline.filter((step) => step.phase === "day_exploration");
-    expect(daySteps).toHaveLength(5);
-    expect(daySteps.map((step) => step.day)).toEqual([1, 2, 3, 4, 5]);
+  it("creates at least one postcard step per activity", () => {
+    const plan = buildPlan(5);
+    const activityCount = plan.daily_itinerary.reduce(
+      (sum, day) => sum + day.activities.length,
+      0,
+    );
+    const timeline = buildTimeline(plan, new Date("2026-04-09T00:00:00.000Z"));
+    const postcardSteps = timeline.filter((step) => step.emitsPostcard);
+
+    expect(postcardSteps.length).toBeGreaterThan(activityCount);
+    expect(
+      postcardSteps.filter((step) => step.context?.sendMoment === "start").length,
+    ).toBe(activityCount);
   });
 
-  it("advances through phases and completes after the last postcard", () => {
+  it("advances through steps and completes after the final reflection", () => {
     const plan = buildPlan(3);
-    const timeline = buildTimeline(plan);
+    const timeline = buildTimeline(plan, new Date("2026-04-09T00:00:00.000Z"));
     let record: TripRecord = {
       tripId: plan.tripId,
       personaId: "persona-1",
@@ -79,7 +66,10 @@ describe("state machine", () => {
         destinationCity: "Tokyo",
       },
       plan,
-      state: createInitialTripState(timeline, new Date("2026-04-09T00:00:00.000Z")),
+      state: createInitialTripState(
+        timeline,
+        new Date("2026-04-09T00:00:00.000Z"),
+      ),
       timeline,
       timelineIndex: 0,
       pendingDispatch: null,
@@ -87,7 +77,7 @@ describe("state machine", () => {
       updatedAt: "2026-04-09T00:00:00.000Z",
     };
 
-    for (let i = 0; i < timeline.length; i += 1) {
+    for (let index = 0; index < timeline.length; index += 1) {
       const advanced = advanceAfterCurrentStep(
         record,
         new Date("2026-04-09T00:00:00.000Z"),

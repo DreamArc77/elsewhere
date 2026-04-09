@@ -28,15 +28,16 @@ describe("end-to-end fixture trip", () => {
       record = await runtime.tripRepository.getById(trip.tripId);
     }
 
-    expect(runtime.messenger.sentMessages).toHaveLength(8);
+    const expectedPostcards = record?.timeline.length ?? 0;
+    expect(runtime.messenger.sentMessages).toHaveLength(expectedPostcards);
     expect(record?.state.status).toBe("completed");
-    expect(record?.state.artifacts.length).toBeGreaterThanOrEqual(17);
+    expect(record?.state.artifacts.length).toBe(1 + expectedPostcards * 3);
     expect(
       record?.state.artifacts.filter((artifact) => artifact.kind === "image").length,
-    ).toBe(8);
+    ).toBe(expectedPostcards);
     expect(
       record?.state.artifacts.filter((artifact) => artifact.kind === "grounding")
         .length,
-    ).toBe(8);
+    ).toBe(expectedPostcards);
   });
 });

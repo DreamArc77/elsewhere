@@ -1,58 +1,149 @@
 import { z } from "zod";
 
-import { tripPhases } from "../domain/types.js";
-
 export const groundingSourceSchema = z.object({
   title: z.string().min(1),
   uri: z.string().url(),
   snippet: z.string().min(1).optional(),
 });
 
-export const tripPlanSchema = z.object({
-  tripId: z.string().min(1),
-  days: z.number().int().min(3).max(5),
-  transport: z.object({
-    summary: z.string().min(1),
-    departure: z.string().min(1),
-    arrival: z.string().min(1),
-    carrierHint: z.string().min(1).optional(),
+export const itineraryActivitySchema = z.object({
+  time_slot: z.string().min(1),
+  location: z.string().min(1),
+  address: z.string().min(1),
+  type: z.enum([
+    "sightseeing",
+    "food",
+    "transport",
+    "shopping",
+    "accommodation",
+  ]),
+  description: z.string().min(1),
+  transport_memo: z.string().min(1),
+  real_time_info: z.object({
+    live_update: z.string().min(1),
   }),
-  hotel: z.object({
-    name: z.string().min(1),
-    district: z.string().min(1),
-    address: z.string().min(1).optional(),
-    nightlyBudget: z.string().min(1).optional(),
-  }),
-  dailyAgenda: z
-    .array(
-      z.object({
-        day: z.number().int().min(1),
-        dateLabel: z.string().min(1),
-        headline: z.string().min(1),
-        morning: z.array(z.string().min(1)).min(1),
-        afternoon: z.array(z.string().min(1)).min(1),
-        evening: z.array(z.string().min(1)).min(1),
-        notes: z.string().min(1),
-      }),
-    )
-    .min(3)
-    .max(5),
-  groundingSources: z.array(groundingSourceSchema).min(1),
-  weatherSummary: z.string().min(1),
-  recommendedPostingMoments: z.array(z.enum(tripPhases)).min(1),
 });
 
-export const phaseGroundingSchema = z.object({
-  phase: z.enum(tripPhases),
-  day: z.number().int().min(0),
-  locality: z.string().min(1),
-  weatherSummary: z.string().min(1),
-  transitSummary: z.string().min(1),
-  venueSummary: z.string().min(1),
-  photoBrief: z.string().min(1),
-  sensoryHighlights: z.array(z.string().min(1)).min(1),
-  groundingSources: z.array(groundingSourceSchema).min(1),
+export const dailyItinerarySchema = z.object({
+  day: z.number().int().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  theme: z.string().min(1),
+  activities: z.array(itineraryActivitySchema).min(1),
 });
+
+function validateThreeTwoOnePlan(
+  data: z.infer<typeof tripPlanSchemaBase>,
+  ctx: z.RefinementCtx,
+): void {
+  if (data.daily_itinerary.length !== data.metadata.days) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["daily_itinerary"],
+      message: "daily_itinerary length must match metadata.days.",
+    });
+  }
+
+  for (const entry of data.daily_itinerary) {
+    if (entry.day < 1 || entry.day > data.metadata.days) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["daily_itinerary", entry.day - 1, "day"],
+        message: "Each itinerary day must stay within metadata.days.",
+      });
+    }
+
+    const expectedDateIndex = entry.day - 1;
+    const mirroredEntry = data.daily_itinerary[expectedDateIndex];
+    if (mirroredEntry?.day !== entry.day) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["daily_itinerary"],
+        message: "daily_itinerary day values must be sequential and start from 1.",
+      });
+    }
+
+    const coreCount = entry.activities.filter(
+      (activity) =>
+        activity.type === "sightseeing" || activity.type === "shopping",
+    ).length;
+    const foodCount = entry.activities.filter(
+      (activity) => activity.type === "food",
+    ).length;
+    const lastActivity = entry.activities[entry.activities.length - 1];
+    const isEdgeDay =
+      entry.day === 1 || entry.day === data.metadata.days;
+
+    if (lastActivity?.type !== "accommodation") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["daily_itinerary", entry.day - 1, "activities"],
+        message: "The last activity of each day must be accommodation.",
+      });
+    }
+
+    if (foodCount < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["daily_itinerary", entry.day - 1, "activities"],
+        message: "Each day must contain at least 2 food activities.",
+      });
+    }
+
+    if (!isEdgeDay && coreCount < 3) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["daily_itinerary", entry.day - 1, "activities"],
+        message:
+          "Non-edge days must contain at least 3 sightseeing or shopping activities.",
+      });
+    }
+  }
+}
+
+const tripPlanSchemaBase = z.object({
+  tripId: z.string().min(1),
+  metadata: z.object({
+    destination: z.string().min(1),
+    days: z.number().int().min(3).max(5),
+  }),
+  transportation: z.object({
+    outbound: z.object({
+      type: z.enum(["flight", "train"]),
+      identifier: z.string().min(1),
+      airline_operator: z.string().min(1).optional(),
+      departure: z.object({
+        airport_station: z.string().min(1),
+        time: z.string().min(1),
+      }),
+      arrival: z.object({
+        airport_station: z.string().min(1),
+        time: z.string().min(1),
+      }),
+    }),
+    return: z.object({
+      type: z.enum(["flight", "train"]),
+      identifier: z.string().min(1),
+      airline_operator: z.string().min(1).optional(),
+      departure: z.object({
+        airport_station: z.string().min(1),
+        time: z.string().min(1),
+      }),
+      arrival: z.object({
+        airport_station: z.string().min(1),
+        time: z.string().min(1),
+      }),
+    }),
+  }),
+  search_summary: z.object({
+    weather_forecast: z.string().min(1),
+    major_events: z.array(z.string().min(1)),
+  }),
+  daily_itinerary: z.array(dailyItinerarySchema).min(3).max(5),
+});
+
+export const tripPlanSchema = tripPlanSchemaBase.superRefine(
+  validateThreeTwoOnePlan,
+);
 
 export const imageGenerationResultSchema = z.object({
   mimeType: z.string().min(1),
@@ -97,119 +188,114 @@ export function extractLikelyJson(rawText: string): string {
 
 export const tripPlanJsonSchema = {
   type: "OBJECT",
-  required: [
-    "tripId",
-    "days",
-    "transport",
-    "hotel",
-    "dailyAgenda",
-    "groundingSources",
-    "weatherSummary",
-    "recommendedPostingMoments",
-  ],
+  required: ["tripId", "metadata", "transportation", "search_summary", "daily_itinerary"],
   properties: {
     tripId: { type: "STRING" },
-    days: { type: "INTEGER", minimum: 3, maximum: 5 },
-    transport: {
+    metadata: {
       type: "OBJECT",
-      required: ["summary", "departure", "arrival"],
+      required: ["destination", "days"],
       properties: {
-        summary: { type: "STRING" },
-        departure: { type: "STRING" },
-        arrival: { type: "STRING" },
-        carrierHint: { type: "STRING" },
+        destination: { type: "STRING" },
+        days: { type: "INTEGER", minimum: 3, maximum: 5 },
       },
     },
-    hotel: {
+    transportation: {
       type: "OBJECT",
-      required: ["name", "district"],
+      required: ["outbound", "return"],
       properties: {
-        name: { type: "STRING" },
-        district: { type: "STRING" },
-        address: { type: "STRING" },
-        nightlyBudget: { type: "STRING" },
+        outbound: transportLegJsonSchema(),
+        return: transportLegJsonSchema(),
       },
     },
-    dailyAgenda: {
+    search_summary: {
+      type: "OBJECT",
+      required: ["weather_forecast", "major_events"],
+      properties: {
+        weather_forecast: { type: "STRING" },
+        major_events: {
+          type: "ARRAY",
+          items: { type: "STRING" },
+        },
+      },
+    },
+    daily_itinerary: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
-        required: [
-          "day",
-          "dateLabel",
-          "headline",
-          "morning",
-          "afternoon",
-          "evening",
-          "notes",
-        ],
+        required: ["day", "date", "theme", "activities"],
         properties: {
           day: { type: "INTEGER" },
-          dateLabel: { type: "STRING" },
-          headline: { type: "STRING" },
-          morning: { type: "ARRAY", items: { type: "STRING" } },
-          afternoon: { type: "ARRAY", items: { type: "STRING" } },
-          evening: { type: "ARRAY", items: { type: "STRING" } },
-          notes: { type: "STRING" },
+          date: { type: "STRING" },
+          theme: { type: "STRING" },
+          activities: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              required: [
+                "time_slot",
+                "location",
+                "address",
+                "type",
+                "description",
+                "transport_memo",
+                "real_time_info",
+              ],
+              properties: {
+                time_slot: { type: "STRING" },
+                location: { type: "STRING" },
+                address: { type: "STRING" },
+                type: {
+                  type: "STRING",
+                  enum: [
+                    "sightseeing",
+                    "food",
+                    "transport",
+                    "shopping",
+                    "accommodation",
+                  ],
+                },
+                description: { type: "STRING" },
+                transport_memo: { type: "STRING" },
+                real_time_info: {
+                  type: "OBJECT",
+                  required: ["live_update"],
+                  properties: {
+                    live_update: { type: "STRING" },
+                  },
+                },
+              },
+            },
+          },
         },
       },
-    },
-    groundingSources: {
-      type: "ARRAY",
-      items: {
-        type: "OBJECT",
-        required: ["title", "uri"],
-        properties: {
-          title: { type: "STRING" },
-          uri: { type: "STRING" },
-          snippet: { type: "STRING" },
-        },
-      },
-    },
-    weatherSummary: { type: "STRING" },
-    recommendedPostingMoments: {
-      type: "ARRAY",
-      items: { type: "STRING", enum: [...tripPhases] },
     },
   },
 };
 
-export const phaseGroundingJsonSchema = {
-  type: "OBJECT",
-  required: [
-    "phase",
-    "day",
-    "locality",
-    "weatherSummary",
-    "transitSummary",
-    "venueSummary",
-    "photoBrief",
-    "sensoryHighlights",
-    "groundingSources",
-  ],
-  properties: {
-    phase: { type: "STRING", enum: [...tripPhases] },
-    day: { type: "INTEGER" },
-    locality: { type: "STRING" },
-    weatherSummary: { type: "STRING" },
-    transitSummary: { type: "STRING" },
-    venueSummary: { type: "STRING" },
-    photoBrief: { type: "STRING" },
-    sensoryHighlights: {
-      type: "ARRAY",
-      items: { type: "STRING" },
-    },
-    groundingSources: {
-      type: "ARRAY",
-      items: {
+function transportLegJsonSchema() {
+  return {
+    type: "OBJECT",
+    required: ["type", "identifier", "departure", "arrival"],
+    properties: {
+      type: { type: "STRING", enum: ["flight", "train"] },
+      identifier: { type: "STRING" },
+      airline_operator: { type: "STRING" },
+      departure: {
         type: "OBJECT",
-        required: ["title", "uri"],
+        required: ["airport_station", "time"],
         properties: {
-          title: { type: "STRING" },
-          uri: { type: "STRING" },
-          snippet: { type: "STRING" },
+          airport_station: { type: "STRING" },
+          time: { type: "STRING" },
+        },
+      },
+      arrival: {
+        type: "OBJECT",
+        required: ["airport_station", "time"],
+        properties: {
+          airport_station: { type: "STRING" },
+          time: { type: "STRING" },
         },
       },
     },
-  },
-};
+  };
+}

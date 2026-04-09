@@ -4,17 +4,15 @@ import { extname } from "node:path";
 import {
   extractLikelyJson,
   parseModelJson,
-  phaseGroundingJsonSchema,
-  phaseGroundingSchema,
   tripPlanJsonSchema,
   tripPlanSchema,
 } from "../contracts/schemas.js";
 import {
   GroundingPort,
-  GroundingSource,
   ImageGenerationPort,
   ImageGenerationResult,
   PhaseGroundingResult,
+  RuntimeStepContext,
   StoredPersonaProfile,
   TripPhase,
   TripPlan,
@@ -22,7 +20,6 @@ import {
 } from "../domain/types.js";
 import {
   renderCaptionPrompt,
-  renderPhaseGroundingPrompt,
   renderTripPlanPrompt,
 } from "../prompting/travel-companion-prompts.js";
 
@@ -42,13 +39,6 @@ interface GenerateContentResponse {
         text?: string;
         inlineData?: { data?: string; mimeType?: string };
         inline_data?: { data?: string; mime_type?: string };
-      }>;
-    };
-    groundingMetadata?: {
-      groundingChunks?: Array<{
-        web?: { uri?: string; title?: string };
-        uri?: string;
-        title?: string;
       }>;
     };
   }>;
@@ -93,20 +83,10 @@ function extractImage(response: GenerateContentResponse): ImageGenerationResult 
   };
 }
 
-function extractGroundingSources(
-  response: GenerateContentResponse,
-): GroundingSource[] {
-  const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-  if (!chunks) {
-    return [];
-  }
-
-  return chunks
-    .map((chunk) => ({
-      title: chunk.web?.title ?? chunk.title ?? "Gemini grounding source",
-      uri: chunk.web?.uri ?? chunk.uri,
-    }))
-    .filter((chunk): chunk is GroundingSource => Boolean(chunk.uri));
+function truncate(value: string, maxLength: number): string {
+  return value.length > maxLength
+    ? `${value.slice(0, maxLength - 3)}...`
+    : value;
 }
 
 function mimeTypeFromPath(path: string): string {
@@ -194,54 +174,11 @@ export class GeminiRestGroundingAdapter
       },
     });
 
-    const parsed = parseModelJson(
+    return parseModelJson(
       extractText(response),
       tripPlanSchema,
       "Gemini trip plan",
     );
-    if (parsed.groundingSources.length === 0) {
-      parsed.groundingSources = extractGroundingSources(response);
-    }
-    return parsed;
-  }
-
-  async enrichPhase(input: {
-    tripId: string;
-    persona: StoredPersonaProfile;
-    request: TripRequest;
-    plan: TripPlan;
-    phase: TripPhase;
-    day: number;
-  }): Promise<PhaseGroundingResult> {
-    const agenda =
-      input.phase === "day_exploration"
-        ? input.plan.dailyAgenda.find((entry) => entry.day === input.day)
-        : undefined;
-
-    const prompt = await renderPhaseGroundingPrompt({
-      ...input,
-      agenda,
-    });
-
-    const response = await this.generateContent(this.textModel, {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseJsonSchema: phaseGroundingJsonSchema,
-        temperature: 0.4,
-      },
-    });
-
-    const parsed = parseModelJson(
-      extractText(response),
-      phaseGroundingSchema,
-      "Gemini phase grounding",
-    );
-    if (parsed.groundingSources.length === 0) {
-      parsed.groundingSources = extractGroundingSources(response);
-    }
-    return parsed;
   }
 
   async composeCaption(input: {
@@ -251,9 +188,19 @@ export class GeminiRestGroundingAdapter
     plan: TripPlan;
     phase: TripPhase;
     day: number;
+    stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
+    imagePrompt: string;
   }): Promise<{ caption: string; provider: string }> {
-    const prompt = await renderCaptionPrompt(input);
+    const prompt = await renderCaptionPrompt({
+      persona: input.persona,
+      request: input.request,
+      phase: input.phase,
+      day: input.day,
+      stepContext: input.stepContext,
+      grounding: input.grounding,
+      imagePrompt: input.imagePrompt,
+    });
 
     const response = await this.generateContent(this.textModel, {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -263,16 +210,12 @@ export class GeminiRestGroundingAdapter
     });
 
     return {
-      caption: extractLikelyJson(extractText(response)).replace(/^"|"$/g, "").trim(),
+      caption: extractLikelyJson(extractText(response))
+        .replace(/^"|"$/g, "")
+        .trim(),
       provider: this.textModel,
     };
   }
-}
-
-function truncate(value: string, maxLength: number): string {
-  return value.length > maxLength
-    ? `${value.slice(0, maxLength - 1)}…`
-    : value;
 }
 
 export class GeminiRestImageAdapter
@@ -293,24 +236,30 @@ export class GeminiRestImageAdapter
     plan: TripPlan;
     phase: TripPhase;
     day: number;
+    stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
+    shotKind: "selfie" | "snapshot";
+    usesReferenceImage: boolean;
     prompt: string;
   }): Promise<ImageGenerationResult> {
-    const imageBytes = await readFile(input.persona.referenceImageAsset);
-    const mimeType = mimeTypeFromPath(input.persona.referenceImageAsset);
+    const parts: Array<Record<string, unknown>> = [{ text: input.prompt }];
+
+    if (input.usesReferenceImage) {
+      const imageBytes = await readFile(input.persona.referenceImageAsset);
+      const mimeType = mimeTypeFromPath(input.persona.referenceImageAsset);
+      parts.push({
+        inline_data: {
+          mime_type: mimeType,
+          data: imageBytes.toString("base64"),
+        },
+      });
+    }
+
     const body = {
       contents: [
         {
           role: "user",
-          parts: [
-            { text: input.prompt },
-            {
-              inline_data: {
-                mime_type: mimeType,
-                data: imageBytes.toString("base64"),
-              },
-            },
-          ],
+          parts,
         },
       ],
       tools: [
