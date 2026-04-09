@@ -21,6 +21,7 @@ import {
   isPostcardStep,
   isTripDue,
 } from "../domain/state-machine.js";
+import { renderImageGenerationPrompt } from "../prompting/travel-companion-prompts.js";
 
 function nowIso(clock: ClockPort): string {
   return clock.now().toISOString();
@@ -270,12 +271,12 @@ export class OpenClawTravelCompanionService {
       value: grounding,
     });
 
-    const imagePrompt = this.buildImagePrompt(
+    const imagePrompt = await renderImageGenerationPrompt({
       persona,
-      record.request,
-      record.plan,
+      request: record.request,
+      plan: record.plan,
       grounding,
-    );
+    });
     const image = await this.dependencies.imageGeneration.generateImage({
       tripId: record.tripId,
       persona,
@@ -502,32 +503,6 @@ export class OpenClawTravelCompanionService {
     }
 
     return updated;
-  }
-
-  private buildImagePrompt(
-    persona: StoredPersonaProfile,
-    request: TripRequest,
-    plan: TripPlan,
-    grounding: PhaseGroundingResult,
-  ): string {
-    return [
-      "Create a realistic smartphone travel photo with natural imperfections and candid framing.",
-      "Use the provided reference image to preserve the same person identity.",
-      `Character name: ${persona.name}`,
-      `Relationship energy: ${persona.relationship}`,
-      `Traits: ${persona.traits.join(", ")}`,
-      `Tone: ${persona.toneStyle}`,
-      `Trip route: ${request.originCity} -> ${request.destinationCity}`,
-      `Current phase: ${grounding.phase} on day ${grounding.day}`,
-      `Hotel context: ${plan.hotel.name}, ${plan.hotel.district}`,
-      `Locality: ${grounding.locality}`,
-      `Weather: ${grounding.weatherSummary}`,
-      `Transit: ${grounding.transitSummary}`,
-      `Venue: ${grounding.venueSummary}`,
-      `Photo brief: ${grounding.photoBrief}`,
-      `Sensory highlights: ${grounding.sensoryHighlights.join(", ")}`,
-      "No text overlay, no collage, no fantasy elements.",
-    ].join("\n");
   }
 
   private async requirePersona(personaId: string): Promise<StoredPersonaProfile> {

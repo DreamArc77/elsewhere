@@ -20,6 +20,11 @@ import {
   TripPlan,
   TripRequest,
 } from "../domain/types.js";
+import {
+  renderCaptionPrompt,
+  renderPhaseGroundingPrompt,
+  renderTripPlanPrompt,
+} from "../prompting/travel-companion-prompts.js";
 
 interface GeminiOptions {
   apiKey: string;
@@ -119,15 +124,6 @@ function mimeTypeFromPath(path: string): string {
   }
 }
 
-function buildPersonaSummary(persona: StoredPersonaProfile): string {
-  return [
-    `Name: ${persona.name}`,
-    `Traits: ${persona.traits.join(", ")}`,
-    `Relationship to user: ${persona.relationship}`,
-    `Tone style: ${persona.toneStyle}`,
-  ].join("\n");
-}
-
 abstract class BaseGeminiAdapter {
   protected readonly apiKey: string;
   protected readonly baseUrl: string;
@@ -186,20 +182,7 @@ export class GeminiRestGroundingAdapter
     persona: StoredPersonaProfile;
     request: TripRequest;
   }): Promise<TripPlan> {
-    const prompt = [
-      "You are planning a realistic 3-5 day single-city trip for a travel-companion bot.",
-      "Use Google Search grounding and return strict JSON only.",
-      `Trip ID: ${input.tripId}`,
-      `Origin city: ${input.request.originCity}`,
-      `Destination city: ${input.request.destinationCity}`,
-      input.request.startWindow
-        ? `Preferred start window: ${input.request.startWindow}`
-        : "Preferred start window: pick the next reasonable departure window.",
-      `Persona:\n${buildPersonaSummary(input.persona)}`,
-      "Return exactly these fields: tripId, days, transport, hotel, dailyAgenda, groundingSources, weatherSummary, recommendedPostingMoments.",
-      "dailyAgenda must contain one entry per day, each with morning/afternoon/evening arrays.",
-      "recommendedPostingMoments should only use planning, departing, arrival_checkin, day_exploration, returning, home_reflection.",
-    ].join("\n");
+    const prompt = await renderTripPlanPrompt(input);
 
     const response = await this.generateContent(this.planningModel, {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -235,20 +218,10 @@ export class GeminiRestGroundingAdapter
         ? input.plan.dailyAgenda.find((entry) => entry.day === input.day)
         : undefined;
 
-    const prompt = [
-      "You generate travel grounding payloads for a realistic companion bot.",
-      "Use Google Search grounding and return strict JSON only.",
-      `Trip ID: ${input.tripId}`,
-      `Origin city: ${input.request.originCity}`,
-      `Destination city: ${input.request.destinationCity}`,
-      `Phase: ${input.phase}`,
-      `Day: ${input.day}`,
-      `Persona:\n${buildPersonaSummary(input.persona)}`,
-      `Hotel: ${input.plan.hotel.name}, ${input.plan.hotel.district}`,
-      `Weather summary so far: ${input.plan.weatherSummary}`,
-      agenda ? `Planned agenda: ${JSON.stringify(agenda)}` : "Planned agenda: n/a",
-      "Return exactly these fields: phase, day, locality, weatherSummary, transitSummary, venueSummary, photoBrief, sensoryHighlights, groundingSources.",
-    ].join("\n");
+    const prompt = await renderPhaseGroundingPrompt({
+      ...input,
+      agenda,
+    });
 
     const response = await this.generateContent(this.textModel, {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -280,16 +253,7 @@ export class GeminiRestGroundingAdapter
     day: number;
     grounding: PhaseGroundingResult;
   }): Promise<{ caption: string; provider: string }> {
-    const prompt = [
-      "Write one short first-person travel companion postcard in Chinese.",
-      "Sound vivid and alive, like a real person texting a close user.",
-      "Do not use hashtags, markdown, or bullet points.",
-      "Keep it under 120 Chinese characters.",
-      `Persona:\n${buildPersonaSummary(input.persona)}`,
-      `Destination: ${input.request.destinationCity}`,
-      `Phase: ${input.phase}, day ${input.day}`,
-      `Grounding: ${JSON.stringify(input.grounding)}`,
-    ].join("\n");
+    const prompt = await renderCaptionPrompt(input);
 
     const response = await this.generateContent(this.textModel, {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
