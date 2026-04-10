@@ -29,6 +29,10 @@ function trimTurns<T>(items: T[], max: number): T[] {
   return items.slice(Math.max(0, items.length - max));
 }
 
+function trimRecentMessageIds(items: string[], max: number): string[] {
+  return items.slice(Math.max(0, items.length - max));
+}
+
 function computeReplyDelayMs(activeTrip: TripRecord | null): number {
   if (!activeTrip) {
     return 2 * 60 * 1000;
@@ -54,6 +58,7 @@ function emptyConversationState(
     mode,
     pendingUserMessages: [],
     pendingReplyDispatch: null,
+    recentHandledCommandMessageIds: [],
     recentTurns: [],
     lastUserMessageAt: null,
     lastCompanionReplyAt: null,
@@ -177,6 +182,54 @@ export class CompanionConversationService {
     });
 
     return this.enqueueInboundMessage(input);
+  }
+
+  async isInboundCommandDuplicate(input: {
+    conversationKey: string;
+    messageId?: string;
+  }): Promise<boolean> {
+    if (!input.messageId) {
+      return false;
+    }
+
+    const state = await this.dependencies.conversationStates.getByKey(
+      input.conversationKey,
+    );
+    return (
+      state?.recentHandledCommandMessageIds?.includes(input.messageId) ?? false
+    );
+  }
+
+  async rememberHandledInboundCommand(input: {
+    conversationKey: string;
+    messageId?: string;
+  }): Promise<ConversationCompanionState | null> {
+    if (!input.messageId) {
+      return await this.dependencies.conversationStates.getByKey(
+        input.conversationKey,
+      );
+    }
+
+    const updatedAt = nowIso(this.dependencies.clock);
+    const state =
+      (await this.dependencies.conversationStates.getByKey(input.conversationKey)) ??
+      emptyConversationState(input.conversationKey, "companion-exclusive", updatedAt);
+
+    const nextState: ConversationCompanionState = {
+      ...state,
+      recentHandledCommandMessageIds: trimRecentMessageIds(
+        [
+          ...(state.recentHandledCommandMessageIds ?? []).filter(
+            (messageId) => messageId !== input.messageId,
+          ),
+          input.messageId,
+        ],
+        20,
+      ),
+      updatedAt,
+    };
+    await this.dependencies.conversationStates.save(nextState);
+    return nextState;
   }
 
   async enqueueInboundMessage(input: {

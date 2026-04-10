@@ -217,6 +217,116 @@ describe("travel companion inbound takeover hook", () => {
     expect(payload).toContain('"event":"command.bridge.replied"');
   });
 
+  it("deduplicates repeated bridged slash-command deliveries by message id", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationService.activateConversation({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+
+    const first = await handleTravelCompanionInboundClaim(
+      {
+        content: "/travel-companion status",
+        body: "/travel-companion status",
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-dup",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-dup",
+      },
+      {
+        bindings: runtime.bindings,
+        conversationService: runtime.conversationService,
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        messenger: runtime.messenger,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+        logger: runtime.logger,
+      },
+    );
+    const second = await handleTravelCompanionInboundClaim(
+      {
+        content: "/travel-companion status",
+        body: "/travel-companion status",
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-dup",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-dup",
+      },
+      {
+        bindings: runtime.bindings,
+        conversationService: runtime.conversationService,
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        messenger: runtime.messenger,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+        logger: runtime.logger,
+      },
+    );
+
+    expect(first).toEqual({ handled: true });
+    expect(second).toEqual({ handled: true });
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.recentHandledCommandMessageIds).toContain("msg-dup");
+
+    const logFiles = await readdir(runtime.paths.logsDir);
+    const payload = (
+      await Promise.all(
+        logFiles.map((file) =>
+          readFile(`${runtime.paths.logsDir}\\${file}`, "utf8"),
+        ),
+      )
+    ).join("\n");
+    expect(payload).toContain('"event":"command.bridge.duplicate"');
+  });
+
   it("leaves non-travel-companion slash commands alone", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

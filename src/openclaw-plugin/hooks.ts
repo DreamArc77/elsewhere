@@ -97,6 +97,8 @@ type ConversationBindingInternals = {
 };
 
 let bindingInternalsPromise: Promise<ConversationBindingInternals> | undefined;
+const inFlightCommandKeys = new Set<string>();
+const inFlightCommandBodies = new Set<string>();
 
 export async function handleTravelCompanionInboundClaim(
   event: InboundClaimEvent,
@@ -112,51 +114,85 @@ export async function handleTravelCompanionInboundClaim(
 
   const trimmed = rawText.trim();
   if (trimmed.startsWith("/travel-companion")) {
+    const messageId = String(event.messageId ?? "");
+    const duplicateByMessageId =
+      messageId.length > 0
+        ? await deps.conversationService.isInboundCommandDuplicate({
+            conversationKey: binding.key,
+            messageId,
+          })
+        : false;
+    const inFlightKey =
+      messageId.length > 0
+        ? `${binding.key}:${messageId}`
+        : `${binding.key}:${trimmed}`;
+    const inFlightBodyKey = `${binding.key}:${trimmed}`;
+    if (duplicateByMessageId || inFlightCommandKeys.has(inFlightKey) || inFlightCommandBodies.has(inFlightBodyKey)) {
+      await logCommandBridgeEvent(deps.logger, {
+        binding,
+        runId: `command:${messageId || randomUUID()}`,
+        event: "command.bridge.duplicate",
+        decision:
+          "Skipped a duplicate bridged travel-companion slash command delivery.",
+        provider: "inbound-claim",
+        status: "skipped",
+        details: {
+          commandBody: rawText,
+          messageId,
+          mode: binding.mode,
+          duplicateByMessageId,
+        },
+      });
+      return { handled: true };
+    }
+
+    inFlightCommandKeys.add(inFlightKey);
+    inFlightCommandBodies.add(inFlightBodyKey);
     const commandRunId = `command:${String(event.messageId ?? randomUUID())}`;
-    await logCommandBridgeEvent(deps.logger, {
-      binding,
-      runId: commandRunId,
-      event: "command.bridge.received",
-      decision: "Received travel-companion slash command inside a companion-exclusive conversation.",
-      provider: "inbound-claim",
-      status: "success",
-      details: {
-        commandBody: rawText,
-        messageId: String(event.messageId ?? ""),
-        mode: binding.mode,
-      },
-    });
-
-    const commandStartedAt = Date.now();
-    const reply = await handleTravelCompanionCommand(
-      buildSyntheticCommandContext(event, ctx, rawText),
-      {
-        service: deps.service,
-        conversationService: deps.conversationService,
-        tripRepository: deps.tripRepository,
-        bindings: deps.bindings,
-        pluginConfig: deps.pluginConfig,
-        runtimeDataPaths: deps.runtimeDataPaths,
-        logger: deps.logger,
-      },
-    );
-    await logCommandBridgeEvent(deps.logger, {
-      binding,
-      runId: commandRunId,
-      event: "command.bridge.executed",
-      decision: "Executed the bridged travel-companion slash command.",
-      provider: "command-handler",
-      status: "success",
-      startedAtMs: commandStartedAt,
-      details: {
-        commandBody: rawText,
-        messageId: String(event.messageId ?? ""),
-        isError: reply.isError ?? false,
-      },
-    });
-
-    const replyStartedAt = Date.now();
     try {
+      await logCommandBridgeEvent(deps.logger, {
+        binding,
+        runId: commandRunId,
+        event: "command.bridge.received",
+        decision: "Received travel-companion slash command inside a companion-exclusive conversation.",
+        provider: "inbound-claim",
+        status: "success",
+        details: {
+          commandBody: rawText,
+          messageId,
+          mode: binding.mode,
+        },
+      });
+
+      const commandStartedAt = Date.now();
+      const reply = await handleTravelCompanionCommand(
+        buildSyntheticCommandContext(event, ctx, rawText),
+        {
+          service: deps.service,
+          conversationService: deps.conversationService,
+          tripRepository: deps.tripRepository,
+          bindings: deps.bindings,
+          pluginConfig: deps.pluginConfig,
+          runtimeDataPaths: deps.runtimeDataPaths,
+          logger: deps.logger,
+        },
+      );
+      await logCommandBridgeEvent(deps.logger, {
+        binding,
+        runId: commandRunId,
+        event: "command.bridge.executed",
+        decision: "Executed the bridged travel-companion slash command.",
+        provider: "command-handler",
+        status: "success",
+        startedAtMs: commandStartedAt,
+        details: {
+          commandBody: rawText,
+          messageId,
+          isError: reply.isError ?? false,
+        },
+      });
+
+      const replyStartedAt = Date.now();
       await deps.messenger.sendTextReply({
         binding,
         text: reply.text,
@@ -172,9 +208,13 @@ export async function handleTravelCompanionInboundClaim(
         startedAtMs: replyStartedAt,
         details: {
           commandBody: rawText,
-          messageId: String(event.messageId ?? ""),
+          messageId,
           replyLength: reply.text.length,
         },
+      });
+      await deps.conversationService.rememberHandledInboundCommand({
+        conversationKey: binding.key,
+        messageId: messageId || undefined,
       });
     } catch (error) {
       await logCommandBridgeEvent(deps.logger, {
@@ -184,15 +224,18 @@ export async function handleTravelCompanionInboundClaim(
         decision: "Failed to deliver bridged slash-command output back into the bound conversation.",
         provider: "command-bridge",
         status: "failure",
-        startedAtMs: replyStartedAt,
+        startedAtMs: Date.now(),
         errorCode: error instanceof Error ? error.name : "command_bridge_reply_failed",
         details: {
           commandBody: rawText,
-          messageId: String(event.messageId ?? ""),
+          messageId,
           errorMessage: error instanceof Error ? error.message : String(error),
         },
       });
       throw error;
+    } finally {
+      inFlightCommandKeys.delete(inFlightKey);
+      inFlightCommandBodies.delete(inFlightBodyKey);
     }
 
     return { handled: true };

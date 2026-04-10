@@ -264,6 +264,7 @@ export interface ConversationCompanionState {
   mode: ConversationMode;
   pendingUserMessages: InboundUserMessage[];
   pendingReplyDispatch: PendingReplyDispatch | null;
+  recentHandledCommandMessageIds: string[];
   recentTurns: CompanionTurn[];
   lastUserMessageAt: string | null;
   lastCompanionReplyAt: string | null;
