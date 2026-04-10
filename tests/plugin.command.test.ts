@@ -13,6 +13,16 @@ import { createTestRuntime } from "./helpers/runtime.js";
 
 function createTelegramContext(commandBody: string): PluginCommandContext {
   const [, ...rest] = commandBody.trim().split(/\s+/u);
+  const pluginBinding = {
+    bindingId: "binding-1",
+    pluginId: "openclaw-travel-companion",
+    pluginName: "OpenClaw Travel Companion",
+    pluginRoot: "C:\\Users\\ndh\\Documents\\New project",
+    channel: "telegram",
+    accountId: "default",
+    conversationId: "1459473177",
+    boundAt: Date.now(),
+  };
   return {
     senderId: "1459473177",
     channel: "telegram",
@@ -24,11 +34,11 @@ function createTelegramContext(commandBody: string): PluginCommandContext {
     to: "999999999",
     accountId: "default",
     requestConversationBinding: async () => ({
-      status: "error",
-      message: "requestConversationBinding should not be used in this test",
+      status: "bound",
+      binding: pluginBinding,
     }),
-    detachConversationBinding: async () => ({ removed: false }),
-    getCurrentConversationBinding: async () => null,
+    detachConversationBinding: async () => ({ removed: true }),
+    getCurrentConversationBinding: async () => pluginBinding,
   };
 }
 

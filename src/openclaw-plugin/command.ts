@@ -59,21 +59,16 @@ async function bindConversation(
   ctx: PluginCommandContext,
   bindings: BindingRegistryStore,
 ): Promise<CommandReply> {
-  const binding = inferBindingRecord(ctx);
-  if (!binding) {
+  const binding = await ensurePluginConversationBinding(ctx, bindings, "default");
+  if ("reply" in binding) {
     return {
-      text: "Could not infer the current chat route. Please try again in the Telegram chat where you want to receive postcards.",
-      isError: true,
+      text: binding.reply.text,
+      isError: binding.reply.isError,
     };
   }
 
-  await bindings.upsert(binding);
-
   return {
-    text: [
-      "Binding complete.",
-      "Run /travel-companion activate to enter companion-exclusive mode.",
-    ].join("\n"),
+    text: ["Binding complete.", "Run /travel-companion activate to enter companion-exclusive mode."].join("\n"),
   };
 }
 
@@ -81,18 +76,17 @@ async function activateConversation(
   ctx: PluginCommandContext,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
-  const binding = inferBindingRecord(ctx);
-  if (!binding) {
-    return {
-      text: "Could not infer the current chat route. Please try again in the chat where you want the companion takeover.",
-      isError: true,
-    };
+  const binding = await ensurePluginConversationBinding(
+    ctx,
+    deps.bindings,
+    "companion-exclusive",
+  );
+  if ("reply" in binding) {
+    return binding.reply;
   }
 
-  const existing = await deps.bindings.get(binding.key);
   const activatedBinding = {
-    ...existing,
-    ...binding,
+    ...binding.record,
     mode: "companion-exclusive" as const,
   };
   await deps.bindings.upsert(activatedBinding);
@@ -127,6 +121,7 @@ async function deactivateConversation(
   };
   await deps.bindings.upsert(nextBinding);
   await deps.conversationService.deactivateConversation(binding.record.key);
+  await ctx.detachConversationBinding();
 
   return {
     text: [
@@ -356,6 +351,39 @@ async function requireBinding(
   | { record: NonNullable<Awaited<ReturnType<BindingRegistryStore["get"]>>> }
   | { reply: CommandReply }
 > {
+  const currentBinding = await ctx.getCurrentConversationBinding();
+  if (currentBinding) {
+    const existing = await bindings.get(
+      bindingKey({
+        channel: currentBinding.channel,
+        accountId: currentBinding.accountId,
+        target: currentBinding.conversationId,
+        threadId: currentBinding.threadId,
+      }),
+    );
+    const record = {
+      ...(existing ?? {}),
+      key: bindingKey({
+        channel: currentBinding.channel,
+        accountId: currentBinding.accountId,
+        target: currentBinding.conversationId,
+        threadId: currentBinding.threadId,
+      }),
+      bindingId: currentBinding.bindingId,
+      channel: currentBinding.channel,
+      accountId: currentBinding.accountId,
+      target: currentBinding.conversationId,
+      parentConversationId: currentBinding.parentConversationId,
+      threadId: currentBinding.threadId,
+      boundAt: currentBinding.boundAt,
+      mode: existing?.mode ?? "default",
+      defaultPersonaId: existing?.defaultPersonaId,
+      lastTripId: existing?.lastTripId,
+    };
+    await bindings.upsert(record);
+    return { record };
+  }
+
   const inferred = inferBindingRecord(ctx);
   if (!inferred) {
     return {
@@ -380,16 +408,15 @@ async function requireActivatedThen(
   deps: CommandDependencies,
   fn: () => Promise<CommandReply>,
 ): Promise<CommandReply> {
-  const binding = inferBindingRecord(ctx);
-  if (!binding) {
+  const resolved = await requireBinding(ctx, deps.bindings);
+  if ("reply" in resolved) {
     return {
       text: "This conversation is not ready yet. Run /travel-companion activate first.",
       isError: true,
     };
   }
 
-  const record = await deps.bindings.get(binding.key);
-  if (!record || record.mode !== "companion-exclusive") {
+  if (resolved.record.mode !== "companion-exclusive") {
     return {
       text: "Travel companion is not active in this chat yet. Run /travel-companion activate first.",
       isError: true,
@@ -424,6 +451,75 @@ function inferBindingRecord(
     boundAt: Date.now(),
     mode: "default",
   };
+}
+
+async function ensurePluginConversationBinding(
+  ctx: PluginCommandContext,
+  bindings: BindingRegistryStore,
+  mode: "default" | "companion-exclusive",
+): Promise<
+  | { record: NonNullable<Awaited<ReturnType<BindingRegistryStore["get"]>>> }
+  | { reply: CommandReply }
+> {
+  const requested = await ctx.requestConversationBinding({
+    summary:
+      "Allow OpenClaw Travel Companion to own this conversation for travel postcards and delayed chat replies.",
+    detachHint:
+      "Run /travel-companion deactivate to stop the trip and return this chat to the default assistant.",
+  });
+
+  if (requested.status === "pending") {
+    return {
+      reply: {
+        text: [
+          "Conversation binding approval is required before takeover can start.",
+          `approvalId: ${requested.approvalId}`,
+          "Approve it, then run /travel-companion activate again.",
+        ].join("\n"),
+        isError: true,
+      },
+    };
+  }
+
+  if (requested.status === "error") {
+    return {
+      reply: {
+        text: requested.message,
+        isError: true,
+      },
+    };
+  }
+
+  const existing = await bindings.get(
+    bindingKey({
+      channel: requested.binding.channel,
+      accountId: requested.binding.accountId,
+      target: requested.binding.conversationId,
+      threadId: requested.binding.threadId,
+    }),
+  );
+  const record = {
+    ...(existing ?? {}),
+    key: bindingKey({
+      channel: requested.binding.channel,
+      accountId: requested.binding.accountId,
+      target: requested.binding.conversationId,
+      threadId: requested.binding.threadId,
+    }),
+    bindingId: requested.binding.bindingId,
+    channel: requested.binding.channel,
+    accountId: requested.binding.accountId,
+    target: requested.binding.conversationId,
+    parentConversationId: requested.binding.parentConversationId,
+    threadId: requested.binding.threadId,
+    boundAt: requested.binding.boundAt,
+    mode,
+    defaultPersonaId: existing?.defaultPersonaId,
+    lastTripId: existing?.lastTripId,
+  };
+  await bindings.upsert(record);
+
+  return { record };
 }
 
 function inferConversationTarget(ctx: PluginCommandContext): string | null {
