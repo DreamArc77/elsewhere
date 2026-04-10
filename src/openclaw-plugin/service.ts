@@ -5,7 +5,7 @@ import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
-import { ClockPort, TripRepository } from "../domain/types.js";
+import { ClockPort, LoggerPort, TripRepository } from "../domain/types.js";
 import { GeminiRestGroundingAdapter, GeminiRestImageAdapter } from "../infrastructure/gemini-rest-adapters.js";
 import {
   JsonArtifactStore,
@@ -25,6 +25,7 @@ export interface RuntimeBundle {
   conversationService: CompanionConversationService;
   tripRepository: TripRepository;
   runtimeDataPaths: RuntimeDataPaths;
+  logger: LoggerPort;
 }
 
 class SystemClockPort implements ClockPort {
@@ -111,6 +112,7 @@ export async function createRuntimeBundle(input: {
     conversationService,
     tripRepository,
     runtimeDataPaths,
+    logger,
   };
 }
 

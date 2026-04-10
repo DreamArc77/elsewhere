@@ -2,7 +2,7 @@ import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
-import { TripRecord, TripRepository } from "../domain/types.js";
+import { LoggerPort, TripRecord, TripRepository } from "../domain/types.js";
 import { BindingRegistryStore, bindingKey } from "./binding-state.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import {
@@ -20,6 +20,7 @@ interface CommandDependencies {
   bindings: BindingRegistryStore;
   pluginConfig: TravelCompanionPluginConfig;
   runtimeDataPaths: RuntimeDataPaths;
+  logger?: LoggerPort;
 }
 
 type ParsedArgs = {
@@ -35,7 +36,7 @@ export async function handleTravelCompanionCommand(
 
   switch (parsed.subcommand) {
     case "bind":
-      return bindConversation(ctx, deps.bindings);
+      return bindConversation(ctx, deps);
     case "activate":
       return activateConversation(ctx, deps);
     case "deactivate":
@@ -57,9 +58,14 @@ export async function handleTravelCompanionCommand(
 
 async function bindConversation(
   ctx: PluginCommandContext,
-  bindings: BindingRegistryStore,
+  deps: Pick<CommandDependencies, "bindings" | "logger">,
 ): Promise<CommandReply> {
-  const binding = await ensurePluginConversationBinding(ctx, bindings, "default");
+  const binding = await ensurePluginConversationBinding(
+    ctx,
+    deps.bindings,
+    "default",
+    deps.logger,
+  );
   if ("reply" in binding) {
     return {
       text: binding.reply.text,
@@ -80,6 +86,7 @@ async function activateConversation(
     ctx,
     deps.bindings,
     "companion-exclusive",
+    deps.logger,
   );
   if ("reply" in binding) {
     return binding.reply;
@@ -105,7 +112,7 @@ async function deactivateConversation(
   ctx: PluginCommandContext,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
-  const binding = await requireBinding(ctx, deps.bindings);
+  const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
@@ -137,7 +144,7 @@ async function setupPersona(
   options: Record<string, string>,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
-  const binding = await requireBinding(ctx, deps.bindings);
+  const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
@@ -186,7 +193,7 @@ async function startTrip(
   options: Record<string, string>,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
-  const binding = await requireBinding(ctx, deps.bindings);
+  const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
@@ -240,7 +247,7 @@ async function statusTrip(
   options: Record<string, string>,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
-  const binding = await requireBinding(ctx, deps.bindings);
+  const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
@@ -275,7 +282,7 @@ async function tickTrip(
   options: Record<string, string>,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
-  const binding = await requireBinding(ctx, deps.bindings);
+  const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
@@ -324,7 +331,7 @@ async function stopTrip(
   options: Record<string, string>,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
-  const binding = await requireBinding(ctx, deps.bindings);
+  const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
@@ -347,6 +354,7 @@ async function stopTrip(
 async function requireBinding(
   ctx: PluginCommandContext,
   bindings: BindingRegistryStore,
+  logger?: LoggerPort,
 ): Promise<
   | { record: NonNullable<Awaited<ReturnType<BindingRegistryStore["get"]>>> }
   | { reply: CommandReply }
@@ -381,6 +389,21 @@ async function requireBinding(
       lastTripId: existing?.lastTripId,
     };
     await bindings.upsert(record);
+    await logBindingEvent(logger, {
+      event: "binding.current",
+      decision: "Resolved current official OpenClaw conversation binding.",
+      status: "success",
+      ctx,
+      details: {
+        key: record.key,
+        bindingId: record.bindingId,
+        channel: record.channel,
+        accountId: record.accountId,
+        target: record.target,
+        parentConversationId: record.parentConversationId,
+        threadId: record.threadId,
+      },
+    });
     return { record };
   }
 
@@ -396,10 +419,37 @@ async function requireBinding(
 
   const record = await bindings.get(inferred.key);
   if (record) {
+    await logBindingEvent(logger, {
+      event: "binding.fallback_existing",
+      decision: "Fell back to locally stored inferred binding because no official current binding was present.",
+      status: "skipped",
+      ctx,
+      details: {
+        key: record.key,
+        bindingId: record.bindingId,
+        channel: record.channel,
+        accountId: record.accountId,
+        target: record.target,
+        threadId: record.threadId,
+      },
+    });
     return { record };
   }
 
   await bindings.upsert(inferred);
+  await logBindingEvent(logger, {
+    event: "binding.fallback_inferred",
+    decision: "Created a locally inferred binding because no official current binding was present.",
+    status: "skipped",
+    ctx,
+    details: {
+      key: inferred.key,
+      channel: inferred.channel,
+      accountId: inferred.accountId,
+      target: inferred.target,
+      threadId: inferred.threadId,
+    },
+  });
   return { record: inferred };
 }
 
@@ -408,7 +458,7 @@ async function requireActivatedThen(
   deps: CommandDependencies,
   fn: () => Promise<CommandReply>,
 ): Promise<CommandReply> {
-  const resolved = await requireBinding(ctx, deps.bindings);
+  const resolved = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in resolved) {
     return {
       text: "This conversation is not ready yet. Run /travel-companion activate first.",
@@ -457,6 +507,7 @@ async function ensurePluginConversationBinding(
   ctx: PluginCommandContext,
   bindings: BindingRegistryStore,
   mode: "default" | "companion-exclusive",
+  logger?: LoggerPort,
 ): Promise<
   | { record: NonNullable<Awaited<ReturnType<BindingRegistryStore["get"]>>> }
   | { reply: CommandReply }
@@ -466,6 +517,41 @@ async function ensurePluginConversationBinding(
       "Allow OpenClaw Travel Companion to own this conversation for travel postcards and delayed chat replies.",
     detachHint:
       "Run /travel-companion deactivate to stop the trip and return this chat to the default assistant.",
+  });
+
+  await logBindingEvent(logger, {
+    event: "binding.requested",
+    decision: "Requested official OpenClaw conversation binding for travel companion.",
+    status:
+      requested.status === "bound"
+        ? "success"
+        : requested.status === "pending"
+          ? "skipped"
+          : "failure",
+    ctx,
+    details:
+      requested.status === "bound"
+        ? {
+            requestStatus: requested.status,
+            bindingId: requested.binding.bindingId,
+            channel: requested.binding.channel,
+            accountId: requested.binding.accountId,
+            conversationId: requested.binding.conversationId,
+            parentConversationId: requested.binding.parentConversationId,
+            threadId: requested.binding.threadId,
+            mode,
+          }
+        : requested.status === "pending"
+          ? {
+              requestStatus: requested.status,
+              approvalId: requested.approvalId,
+              mode,
+            }
+          : {
+              requestStatus: requested.status,
+              message: requested.message,
+              mode,
+            },
   });
 
   if (requested.status === "pending") {
@@ -518,8 +604,54 @@ async function ensurePluginConversationBinding(
     lastTripId: existing?.lastTripId,
   };
   await bindings.upsert(record);
+  await logBindingEvent(logger, {
+    event: "binding.stored",
+    decision: "Stored conversation binding metadata locally after official binding request.",
+    status: "success",
+    ctx,
+    details: {
+      key: record.key,
+      bindingId: record.bindingId,
+      channel: record.channel,
+      accountId: record.accountId,
+      target: record.target,
+      parentConversationId: record.parentConversationId,
+      threadId: record.threadId,
+      mode: record.mode,
+    },
+  });
 
   return { record };
+}
+
+async function logBindingEvent(
+  logger: LoggerPort | undefined,
+  input: {
+    event: string;
+    decision: string;
+    status: "success" | "failure" | "skipped";
+    ctx: PluginCommandContext;
+    details: Record<string, unknown>;
+  },
+): Promise<void> {
+  if (!logger) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  await logger.log({
+    tripId: `conversation:${input.ctx.channel}:${input.ctx.accountId ?? "default"}`,
+    runId: `binding:${input.event}:${Date.now()}`,
+    phase: "system",
+    event: input.event,
+    decision: input.decision,
+    provider: "command",
+    status: input.status,
+    startedAt: now,
+    finishedAt: now,
+    latencyMs: 0,
+    details: input.details,
+  });
 }
 
 function inferConversationTarget(ctx: PluginCommandContext): string | null {

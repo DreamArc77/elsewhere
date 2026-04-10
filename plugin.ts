@@ -101,6 +101,7 @@ export default definePluginEntry({
             bindings,
             pluginConfig,
             runtimeDataPaths: runtimeBundle.runtimeDataPaths,
+            logger: runtimeBundle.logger,
           });
         } catch (error) {
           return {
