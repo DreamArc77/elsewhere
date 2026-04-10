@@ -54,6 +54,8 @@ export async function handleTravelCompanionCommand(
       return requireActivatedThen(ctx, deps, () => statusTrip(ctx, parsed.options, deps));
     case "tick":
       return requireActivatedThen(ctx, deps, () => tickTrip(ctx, parsed.options, deps));
+    case "tick-reply":
+      return requireActivatedThen(ctx, deps, () => tickReply(ctx, parsed.options, deps));
     case "stop":
       return requireActivatedThen(ctx, deps, () => stopTrip(ctx, parsed.options, deps));
     default:
@@ -325,6 +327,40 @@ async function tickTrip(
         `Tick attempted: ${tripId ?? binding.record.key}`,
         "The postcard or delayed reply could not be confirmed just now.",
         "The state was preserved. Please try /travel-companion tick again shortly.",
+      ].join("\n"),
+      isError: true,
+    };
+  }
+}
+
+async function tickReply(
+  ctx: PluginCommandContext,
+  _options: Record<string, string>,
+  deps: CommandDependencies,
+): Promise<CommandReply> {
+  const binding = await requireBinding(ctx, deps.bindings, deps.logger);
+  if ("reply" in binding) {
+    return binding.reply;
+  }
+
+  try {
+    await deps.conversationService.runConversation(binding.record.key, {
+      ignoreSchedule: true,
+    });
+
+    return {
+      text: [
+        `Ticked reply immediately: ${binding.record.key}`,
+        "reply: processed pending conversation replies",
+        "trip: not advanced",
+      ].join("\n"),
+    };
+  } catch {
+    return {
+      text: [
+        `Reply tick attempted: ${binding.record.key}`,
+        "The delayed reply could not be confirmed just now.",
+        "The state was preserved. Please try /travel-companion tick-reply again shortly.",
       ].join("\n"),
       isError: true,
     };
@@ -790,6 +826,7 @@ function helpText(): string {
     "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
     "/travel-companion status [--trip <id>]",
     "/travel-companion tick [--trip <id>]  # force delayed replies + the next trip step immediately",
+    "/travel-companion tick-reply           # force delayed replies only",
     "/travel-companion stop [--trip <id>]",
   ].join("\n");
 }

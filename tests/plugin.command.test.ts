@@ -363,6 +363,72 @@ describe("travel companion command UX", () => {
     expect(runtime.messenger.sentMessages.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("forces only delayed replies immediately when tick-reply is used", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = {
+      service: runtime.service,
+      conversationService: runtime.conversationService,
+      tripRepository: runtime.tripRepository,
+      bindings,
+      pluginConfig: {
+        geminiApiKey: "test-key",
+        defaultOriginCity: "Hong Kong",
+        pollIntervalSeconds: 60,
+        openclawBinaryPath: "openclaw",
+      },
+      runtimeDataPaths: runtime.paths,
+    };
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion activate"),
+      deps,
+    );
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const binding = await bindings.get(key);
+    await bindings.upsert({
+      ...binding!,
+      defaultPersonaId: persona.personaId,
+    });
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion start --to Tokyo"),
+      deps,
+    );
+    const tripBefore = await runtime.tripRepository.listDueTrips(new Date("9999-01-01T00:00:00.000Z"));
+    await runtime.service.runDueTrips();
+    await runtime.conversationService.enqueueInboundMessage({
+      binding: (await bindings.get(key))!,
+      messageId: "msg-reply-only",
+      content: "在吗",
+      senderId: "1459473177",
+    });
+    const sentPostcardsBefore = runtime.messenger.sentMessages.length;
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion tick-reply"),
+      deps,
+    );
+
+    expect(reply.text).toContain("reply: processed pending conversation replies");
+    expect(reply.text).toContain("trip: not advanced");
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentMessages.length).toBe(sentPostcardsBefore);
+    const tripAfter = await runtime.tripRepository.getById(tripBefore[0]!.tripId);
+    expect(tripAfter?.timelineIndex).toBe(1);
+  });
+
   it("deactivates takeover and stops the active trip", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
