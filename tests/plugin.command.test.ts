@@ -42,6 +42,45 @@ function createTelegramContext(commandBody: string): PluginCommandContext {
   };
 }
 
+function createTelegramContextWithBinding(
+  commandBody: string,
+  input: {
+    accountId?: string;
+    bindingAccountId?: string;
+    bindingConversationId?: string;
+    bindingId?: string;
+  } = {},
+): PluginCommandContext {
+  const [, ...rest] = commandBody.trim().split(/\s+/u);
+  const pluginBinding = {
+    bindingId: input.bindingId ?? "binding-1",
+    pluginId: "openclaw-travel-companion",
+    pluginName: "OpenClaw Travel Companion",
+    pluginRoot: "C:\\Users\\ndh\\Documents\\New project",
+    channel: "telegram",
+    accountId: input.bindingAccountId ?? input.accountId ?? "default",
+    conversationId: input.bindingConversationId ?? "1459473177",
+    boundAt: Date.now(),
+  };
+  return {
+    senderId: "1459473177",
+    channel: "telegram",
+    isAuthorizedSender: true,
+    args: rest.join(" "),
+    commandBody,
+    config: {} as PluginCommandContext["config"],
+    from: "1459473177",
+    to: "999999999",
+    accountId: input.accountId ?? "default",
+    requestConversationBinding: async () => ({
+      status: "bound",
+      binding: pluginBinding,
+    }),
+    detachConversationBinding: async () => ({ removed: true }),
+    getCurrentConversationBinding: async () => pluginBinding,
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -139,6 +178,66 @@ describe("travel companion command UX", () => {
       }),
     );
     expect(binding?.mode).toBe("companion-exclusive");
+  });
+
+  it("migrates the default persona from a legacy local binding to the new official binding key on activate", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = {
+      service: runtime.service,
+      conversationService: runtime.conversationService,
+      tripRepository: runtime.tripRepository,
+      bindings,
+      pluginConfig: {
+        geminiApiKey: "test-key",
+        defaultOriginCity: "Hong Kong",
+        pollIntervalSeconds: 60,
+        openclawBinaryPath: "openclaw",
+      },
+      runtimeDataPaths: runtime.paths,
+    };
+
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    await bindings.upsert({
+      key: bindingKey({
+        channel: "telegram",
+        accountId: "default",
+        target: "telegram:1459473177",
+      }),
+      channel: "telegram",
+      accountId: "default",
+      target: "telegram:1459473177",
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+      boundAt: Date.now(),
+    });
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContextWithBinding("/travel-companion activate", {
+        accountId: "1459473177",
+        bindingAccountId: "1459473177",
+        bindingConversationId: "1459473177",
+        bindingId: "binding-official",
+      }),
+      deps,
+    );
+
+    expect(reply.isError).toBeUndefined();
+    const migrated = await bindings.get(
+      bindingKey({
+        channel: "telegram",
+        accountId: "1459473177",
+        target: "1459473177",
+      }),
+    );
+    expect(migrated?.defaultPersonaId).toBe(persona.personaId);
   });
 
   it("creates a persona from an image URL pasted in the setup command after activation", async () => {

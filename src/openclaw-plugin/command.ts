@@ -584,8 +584,16 @@ async function ensurePluginConversationBinding(
       threadId: requested.binding.threadId,
     }),
   );
+  const seed =
+    existing ??
+    (await findRelatedBindingRecord(bindings, ctx, {
+      channel: requested.binding.channel,
+      accountId: requested.binding.accountId,
+      target: requested.binding.conversationId,
+      threadId: requested.binding.threadId,
+    }));
   const record = {
-    ...(existing ?? {}),
+    ...(seed ?? {}),
     key: bindingKey({
       channel: requested.binding.channel,
       accountId: requested.binding.accountId,
@@ -600,8 +608,8 @@ async function ensurePluginConversationBinding(
     threadId: requested.binding.threadId,
     boundAt: requested.binding.boundAt,
     mode,
-    defaultPersonaId: existing?.defaultPersonaId,
-    lastTripId: existing?.lastTripId,
+    defaultPersonaId: seed?.defaultPersonaId,
+    lastTripId: seed?.lastTripId,
   };
   await bindings.upsert(record);
   await logBindingEvent(logger, {
@@ -622,6 +630,49 @@ async function ensurePluginConversationBinding(
   });
 
   return { record };
+}
+
+async function findRelatedBindingRecord(
+  bindings: BindingRegistryStore,
+  ctx: PluginCommandContext,
+  input: {
+    channel: string;
+    accountId?: string;
+    target: string;
+    threadId?: string | number;
+  },
+): Promise<Awaited<ReturnType<BindingRegistryStore["get"]>>> {
+  const candidates = new Set<string>();
+  for (const value of [
+    input.target,
+    ctx.senderId,
+    ctx.from,
+    ctx.to,
+    inferConversationTarget(ctx),
+  ]) {
+    const normalized = normalizeBindingTarget(input.channel, value);
+    if (normalized) {
+      candidates.add(normalized);
+    }
+  }
+
+  const threadId = String(input.threadId ?? "main");
+  const records = await bindings.list();
+  return (
+    records.find((record) => {
+      if (record.channel !== input.channel) {
+        return false;
+      }
+      if (String(record.threadId ?? "main") !== threadId) {
+        return false;
+      }
+      const target = normalizeBindingTarget(record.channel, record.target);
+      if (!target || !candidates.has(target)) {
+        return false;
+      }
+      return Boolean(record.defaultPersonaId || record.lastTripId);
+    }) ?? null
+  );
 }
 
 async function logBindingEvent(
@@ -668,9 +719,26 @@ function inferConversationTarget(ctx: PluginCommandContext): string | null {
   return to ?? from;
 }
 
-function normalizeRoutePart(value: string | undefined): string | null {
+function normalizeRoutePart(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeBindingTarget(
+  channel: string,
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeRoutePart(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const channelPrefix = `${channel}:`;
+  if (normalized.startsWith(channelPrefix)) {
+    return normalized.slice(channelPrefix.length);
+  }
+
+  return normalized;
 }
 
 function requiredOption(options: Record<string, string>, key: string): string {
