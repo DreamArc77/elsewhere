@@ -584,14 +584,16 @@ async function ensurePluginConversationBinding(
       threadId: requested.binding.threadId,
     }),
   );
+  const related = await findRelatedBindingRecord(bindings, ctx, {
+    channel: requested.binding.channel,
+    accountId: requested.binding.accountId,
+    target: requested.binding.conversationId,
+    threadId: requested.binding.threadId,
+  });
   const seed =
-    existing ??
-    (await findRelatedBindingRecord(bindings, ctx, {
-      channel: requested.binding.channel,
-      accountId: requested.binding.accountId,
-      target: requested.binding.conversationId,
-      threadId: requested.binding.threadId,
-    }));
+    existing && (existing.defaultPersonaId || existing.lastTripId)
+      ? existing
+      : related ?? existing;
   const record = {
     ...(seed ?? {}),
     key: bindingKey({
