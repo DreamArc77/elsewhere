@@ -1,7 +1,14 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
-import { DeliveryBinding, HostSchedulerPort, Postcard, SendReceipt, TripRepository } from "../domain/types.js";
+import {
+  DeliveryBinding,
+  HostSchedulerPort,
+  LoggerPort,
+  Postcard,
+  SendReceipt,
+  TripRepository,
+} from "../domain/types.js";
 
 export class NoopSchedulerPort implements HostSchedulerPort {
   async scheduleTripTick(): Promise<void> {}
@@ -21,6 +28,7 @@ export class OpenClawCliMessengerPort {
     private readonly tripRepository: TripRepository,
     private readonly runner: MessageCommandRunner,
     private readonly directReplyRuntime?: DirectReplyRuntime,
+    private readonly logger?: LoggerPort,
   ) {}
 
   async sendPostcard(input: {
@@ -78,13 +86,30 @@ export class OpenClawCliMessengerPort {
     text: string;
     dedupeKey: string;
   }): Promise<SendReceipt> {
+    const directSendStartedAt = Date.now();
     const directReceipt = await this.trySendDirectTextReply(
       input.binding,
       input.text,
+      input.dedupeKey,
+      directSendStartedAt,
     );
     if (directReceipt) {
       return directReceipt;
     }
+
+    await this.logTextReplyEvent({
+      binding: input.binding,
+      runId: `text-reply:${input.dedupeKey}`,
+      event: "textreply.cli.fallback",
+      decision:
+        "Fell back to CLI text reply delivery after direct outbound path was unavailable.",
+      provider: "openclaw-message-cli",
+      status: "success",
+      startedAtMs: directSendStartedAt,
+      details: {
+        dedupeKey: input.dedupeKey,
+      },
+    });
 
     const argv = buildTextSendArgv(input.binding, input.text);
     const result = await this.runner.run(argv);
@@ -128,8 +153,24 @@ export class OpenClawCliMessengerPort {
   private async trySendDirectTextReply(
     binding: DeliveryBinding,
     text: string,
+    dedupeKey: string,
+    startedAtMs: number,
   ): Promise<SendReceipt | undefined> {
     if (!this.directReplyRuntime) {
+      await this.logTextReplyEvent({
+        binding,
+        runId: `text-reply:${dedupeKey}`,
+        event: "textreply.direct.unavailable",
+        decision:
+          "Direct reply runtime was not available; CLI fallback is required.",
+        provider: "runtime-outbound",
+        status: "skipped",
+        startedAtMs,
+        details: {
+          dedupeKey,
+          reason: "missing_direct_reply_runtime",
+        },
+      });
       return undefined;
     }
 
@@ -140,6 +181,20 @@ export class OpenClawCliMessengerPort {
           binding.channel,
         );
       if (!adapter) {
+        await this.logTextReplyEvent({
+          binding,
+          runId: `text-reply:${dedupeKey}`,
+          event: "textreply.direct.unavailable",
+          decision: "No direct outbound adapter was available for this channel.",
+          provider: "runtime-outbound",
+          status: "skipped",
+          startedAtMs,
+          details: {
+            dedupeKey,
+            reason: "missing_outbound_adapter",
+            channel: binding.channel,
+          },
+        });
         return undefined;
       }
 
@@ -152,11 +207,29 @@ export class OpenClawCliMessengerPort {
           threadId: binding.threadId ?? null,
         });
 
-        return {
+        const receipt = {
           messageId: result.messageId,
           deduped: false,
           provider: result.channel ?? binding.channel,
         };
+        await this.logTextReplyEvent({
+          binding,
+          runId: `text-reply:${dedupeKey}`,
+          event: "textreply.direct.sent",
+          decision:
+            "Delivered text reply through the runtime outbound adapter sendText path.",
+          provider: result.channel ?? binding.channel,
+          status: "success",
+          startedAtMs,
+          details: {
+            dedupeKey,
+            channel: binding.channel,
+            deliveryMode: adapter.deliveryMode,
+            method: "sendText",
+            messageId: result.messageId,
+          },
+        });
+        return receipt;
       }
 
       if (adapter.sendPayload) {
@@ -169,18 +242,113 @@ export class OpenClawCliMessengerPort {
           threadId: binding.threadId ?? null,
         });
 
-        return {
+        const receipt = {
           messageId: result.messageId,
           deduped: false,
           provider: result.channel ?? binding.channel,
         };
+        await this.logTextReplyEvent({
+          binding,
+          runId: `text-reply:${dedupeKey}`,
+          event: "textreply.direct.sent",
+          decision:
+            "Delivered text reply through the runtime outbound adapter sendPayload path.",
+          provider: result.channel ?? binding.channel,
+          status: "success",
+          startedAtMs,
+          details: {
+            dedupeKey,
+            channel: binding.channel,
+            deliveryMode: adapter.deliveryMode,
+            method: "sendPayload",
+            messageId: result.messageId,
+          },
+        });
+        return receipt;
       }
-    } catch {
+
+      await this.logTextReplyEvent({
+        binding,
+        runId: `text-reply:${dedupeKey}`,
+        event: "textreply.direct.unavailable",
+        decision:
+          "Runtime outbound adapter did not expose sendText or sendPayload.",
+        provider: "runtime-outbound",
+        status: "skipped",
+        startedAtMs,
+        details: {
+          dedupeKey,
+          channel: binding.channel,
+          deliveryMode: adapter.deliveryMode,
+          reason: "adapter_missing_text_methods",
+        },
+      });
+    } catch (error) {
+      await this.logTextReplyEvent({
+        binding,
+        runId: `text-reply:${dedupeKey}`,
+        event: "textreply.direct.failed",
+        decision: "Direct runtime outbound send failed; CLI fallback is required.",
+        provider: "runtime-outbound",
+        status: "failure",
+        startedAtMs,
+        errorCode:
+          error instanceof Error ? error.name : "direct_text_reply_failed",
+        details: {
+          dedupeKey,
+          channel: binding.channel,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
       return undefined;
     }
 
     return undefined;
   }
+
+  private async logTextReplyEvent(input: {
+    binding: DeliveryBinding;
+    runId: string;
+    event: string;
+    decision: string;
+    provider: string;
+    status: "success" | "failure" | "skipped";
+    startedAtMs: number;
+    errorCode?: string;
+    details?: Record<string, unknown>;
+  }): Promise<void> {
+    if (!this.logger) {
+      return;
+    }
+
+    const finishedAtMs = Date.now();
+    await this.logger.log({
+      tripId: `conversation:${conversationLogKey(input.binding)}`,
+      runId: input.runId,
+      phase: "system",
+      event: input.event,
+      decision: input.decision,
+      provider: input.provider,
+      status: input.status,
+      startedAt: new Date(input.startedAtMs).toISOString(),
+      finishedAt: new Date(finishedAtMs).toISOString(),
+      latencyMs: Math.max(0, finishedAtMs - input.startedAtMs),
+      errorCode: input.errorCode,
+      details: {
+        conversationKey: conversationLogKey(input.binding),
+        ...(input.details ?? {}),
+      },
+    });
+  }
+}
+
+function conversationLogKey(binding: DeliveryBinding): string {
+  return [
+    binding.channel,
+    binding.accountId ?? "default",
+    binding.target,
+    binding.threadId === undefined ? "main" : String(binding.threadId),
+  ].join("::");
 }
 
 const benignCliNoisePatterns = [
