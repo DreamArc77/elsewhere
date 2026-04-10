@@ -1,3 +1,7 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
@@ -19,9 +23,32 @@ export interface MessageCommandRunner {
 }
 
 export interface DirectReplyRuntime {
-  runtime: PluginRuntime;
+  runtime?: PluginRuntime;
   loadConfig(): OpenClawConfig;
 }
+
+type LoadChannelOutboundAdapter = (
+  id: string,
+) => Promise<{
+  deliveryMode: "direct" | "gateway" | "hybrid";
+  sendText?: (ctx: {
+    cfg: OpenClawConfig;
+    to: string;
+    text: string;
+    accountId?: string | null;
+    threadId?: string | number | null;
+  }) => Promise<{ channel?: string; messageId: string }>;
+  sendPayload?: (ctx: {
+    cfg: OpenClawConfig;
+    to: string;
+    text: string;
+    payload: { text: string };
+    accountId?: string | null;
+    threadId?: string | number | null;
+  }) => Promise<{ channel?: string; messageId: string }>;
+} | undefined>;
+
+let outboundAdapterLoaderPromise: Promise<LoadChannelOutboundAdapter> | undefined;
 
 export class OpenClawCliMessengerPort {
   constructor(
@@ -177,9 +204,9 @@ export class OpenClawCliMessengerPort {
     try {
       const cfg = this.directReplyRuntime.loadConfig();
       const adapter =
-        await this.directReplyRuntime.runtime.channel.outbound.loadAdapter(
+        (await this.directReplyRuntime.runtime?.channel?.outbound?.loadAdapter?.(
           binding.channel,
-        );
+        )) ?? (await resolveOutboundAdapterLoader(binding.channel));
       if (!adapter) {
         await this.logTextReplyEvent({
           binding,
@@ -340,6 +367,36 @@ export class OpenClawCliMessengerPort {
       },
     });
   }
+}
+
+async function resolveOutboundAdapterLoader(
+  id: string,
+): Promise<Awaited<ReturnType<LoadChannelOutboundAdapter>>> {
+  outboundAdapterLoaderPromise ??= loadOutboundAdapterLoader();
+  const loader = await outboundAdapterLoaderPromise;
+  return loader(id);
+}
+
+async function loadOutboundAdapterLoader(): Promise<LoadChannelOutboundAdapter> {
+  const require = createRequire(import.meta.url);
+  const entryPath = require.resolve("openclaw");
+  const distDir = dirname(entryPath);
+  const fs = await import("node:fs/promises");
+  const candidates = (await fs.readdir(distDir))
+    .filter((name) => /^load-.*\.js$/u.test(name) && !/^load-options-/u.test(name))
+    .sort();
+  const fileName = candidates[0];
+  if (!fileName) {
+    throw new Error("Unable to locate OpenClaw outbound loader module.");
+  }
+
+  const moduleUrl = pathToFileURL(join(distDir, fileName)).href;
+  const module = await import(moduleUrl);
+  const loader = module.t as LoadChannelOutboundAdapter | undefined;
+  if (!loader) {
+    throw new Error("OpenClaw outbound loader module did not export a loader.");
+  }
+  return loader;
 }
 
 function conversationLogKey(binding: DeliveryBinding): string {
