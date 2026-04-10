@@ -1,8 +1,22 @@
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
-import { ConversationBindingStore } from "../domain/types.js";
+import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
+import {
+  ConversationBindingStore,
+  HostMessengerPort,
+  LoggerPort,
+  TripRepository,
+} from "../domain/types.js";
 import { bindingKey } from "./binding-state.js";
+import { handleTravelCompanionCommand } from "./command.js";
+import { TravelCompanionPluginConfig } from "./config.js";
+import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 
 interface InboundClaimEvent {
   content: string;
@@ -12,12 +26,14 @@ interface InboundClaimEvent {
   channel: string;
   accountId?: string;
   conversationId?: string;
+  parentConversationId?: string;
   senderId?: string;
   senderName?: string;
   senderUsername?: string;
   threadId?: string | number;
   messageId?: string;
   isGroup?: boolean;
+  commandAuthorized?: boolean;
 }
 
 interface InboundClaimContext {
@@ -35,7 +51,52 @@ interface InboundClaimResult {
 interface InboundClaimDependencies {
   bindings: ConversationBindingStore;
   conversationService: CompanionConversationService;
+  service: OpenClawTravelCompanionService;
+  tripRepository: TripRepository;
+  messenger: HostMessengerPort;
+  pluginConfig: TravelCompanionPluginConfig;
+  runtimeDataPaths: RuntimeDataPaths;
+  logger: LoggerPort;
 }
+
+type ConversationBindingInternals = {
+  requestPluginConversationBinding: (input: {
+    pluginId: string;
+    pluginName: string;
+    pluginRoot: string;
+    requestedBySenderId?: string;
+    conversation: {
+      channel: string;
+      accountId: string;
+      conversationId: string;
+      parentConversationId?: string;
+      threadId?: string | number;
+    };
+    binding?: { summary?: string; detachHint?: string };
+  }) => Promise<unknown>;
+  detachPluginConversationBinding: (input: {
+    pluginRoot: string;
+    conversation: {
+      channel: string;
+      accountId: string;
+      conversationId: string;
+      parentConversationId?: string;
+      threadId?: string | number;
+    };
+  }) => Promise<{ removed: boolean }>;
+  getCurrentPluginConversationBinding: (input: {
+    pluginRoot: string;
+    conversation: {
+      channel: string;
+      accountId: string;
+      conversationId: string;
+      parentConversationId?: string;
+      threadId?: string | number;
+    };
+  }) => Promise<unknown>;
+};
+
+let bindingInternalsPromise: Promise<ConversationBindingInternals> | undefined;
 
 export async function handleTravelCompanionInboundClaim(
   event: InboundClaimEvent,
@@ -44,25 +105,118 @@ export async function handleTravelCompanionInboundClaim(
 ): Promise<InboundClaimResult | void> {
   const rawText =
     event.bodyForAgent ?? event.body ?? event.transcript ?? event.content ?? "";
-  if (rawText.trim().startsWith("/")) {
+  const binding = await resolveBindingForInbound(event, ctx, deps.bindings);
+  if (!binding || binding.mode !== "companion-exclusive") {
     return;
   }
 
-  const binding = await resolveBindingForInbound(event, ctx, deps.bindings);
-  if (!binding || binding.mode !== "companion-exclusive") {
+  const trimmed = rawText.trim();
+  if (trimmed.startsWith("/travel-companion")) {
+    const reply = await handleTravelCompanionCommand(
+      buildSyntheticCommandContext(event, ctx, rawText),
+      {
+        service: deps.service,
+        conversationService: deps.conversationService,
+        tripRepository: deps.tripRepository,
+        bindings: deps.bindings,
+        pluginConfig: deps.pluginConfig,
+        runtimeDataPaths: deps.runtimeDataPaths,
+        logger: deps.logger,
+      },
+    );
+    await deps.messenger.sendTextReply({
+      binding,
+      text: reply.text,
+      dedupeKey: `command:${binding.key}:${String(event.messageId ?? randomUUID())}`,
+    });
+    return { handled: true };
+  }
+
+  if (trimmed.startsWith("/")) {
     return;
   }
 
   await deps.conversationService.claimInboundMessage({
     binding,
     messageId: String(event.messageId ?? randomUUID()),
-    content: rawText.trim(),
+    content: trimmed,
     senderId: event.senderId ?? ctx.senderId,
     senderName: event.senderName,
     senderUsername: event.senderUsername,
   });
 
   return { handled: true };
+}
+
+function buildSyntheticCommandContext(
+  event: InboundClaimEvent,
+  ctx: InboundClaimContext,
+  rawText: string,
+) {
+  const [, ...rest] = rawText.trim().split(/\s+/u);
+  const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const bindingInternals = getConversationBindingInternals();
+  const conversation = {
+    channel: event.channel,
+    accountId: event.accountId ?? ctx.accountId ?? "default",
+    conversationId: event.conversationId ?? ctx.conversationId ?? "",
+    parentConversationId: event.parentConversationId,
+    threadId: event.threadId,
+  };
+  const senderId = event.senderId ?? ctx.senderId;
+
+  return {
+    senderId,
+    channel: event.channel,
+    isAuthorizedSender: event.commandAuthorized ?? true,
+    args: rest.join(" "),
+    commandBody: rawText,
+    config: {},
+    from: event.senderId ?? ctx.senderId ?? conversation.conversationId,
+    to: conversation.conversationId,
+    accountId: conversation.accountId,
+    messageThreadId: event.threadId,
+    threadParentId: event.parentConversationId,
+    requestConversationBinding: async (binding = {}) =>
+      (await bindingInternals).requestPluginConversationBinding({
+        pluginId: "openclaw-travel-companion",
+        pluginName: "OpenClaw Travel Companion",
+        pluginRoot,
+        requestedBySenderId: senderId,
+        conversation,
+        binding,
+      }),
+    detachConversationBinding: async () =>
+      (await bindingInternals).detachPluginConversationBinding({
+        pluginRoot,
+        conversation,
+      }),
+    getCurrentConversationBinding: async () =>
+      (await bindingInternals).getCurrentPluginConversationBinding({
+        pluginRoot,
+        conversation,
+      }),
+  } as unknown as PluginCommandContext;
+}
+
+function getConversationBindingInternals(): Promise<ConversationBindingInternals> {
+  bindingInternalsPromise ??= loadConversationBindingInternals();
+  return bindingInternalsPromise;
+}
+
+async function loadConversationBindingInternals(): Promise<ConversationBindingInternals> {
+  const require = createRequire(import.meta.url);
+  const entryPath = require.resolve("openclaw");
+  const moduleUrl = pathToFileURL(
+    join(dirname(entryPath), "conversation-binding-vluCrcjh.js"),
+  ).href;
+  const module = await import(moduleUrl);
+  return {
+    requestPluginConversationBinding: module.p as ConversationBindingInternals["requestPluginConversationBinding"],
+    detachPluginConversationBinding: module.o as ConversationBindingInternals["detachPluginConversationBinding"],
+    getCurrentPluginConversationBinding:
+      module.s as ConversationBindingInternals["getCurrentPluginConversationBinding"],
+  };
 }
 
 async function resolveBindingForInbound(

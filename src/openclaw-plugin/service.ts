@@ -5,7 +5,7 @@ import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
-import { ClockPort, LoggerPort, TripRepository } from "../domain/types.js";
+import { ClockPort, HostMessengerPort, LoggerPort, TripRepository } from "../domain/types.js";
 import { GeminiRestGroundingAdapter, GeminiRestImageAdapter } from "../infrastructure/gemini-rest-adapters.js";
 import {
   JsonArtifactStore,
@@ -24,6 +24,7 @@ export interface RuntimeBundle {
   service: OpenClawTravelCompanionService;
   conversationService: CompanionConversationService;
   tripRepository: TripRepository;
+  messenger: HostMessengerPort;
   runtimeDataPaths: RuntimeDataPaths;
   logger: LoggerPort;
 }
@@ -72,12 +73,14 @@ export async function createRuntimeBundle(input: {
     },
   };
 
+  const messenger = new OpenClawCliMessengerPort(tripRepository, commandRunner);
+
   const service = new OpenClawTravelCompanionService({
     personaRepository,
     tripRepository,
     artifactStore,
     scheduler: new NoopSchedulerPort(),
-    messenger: new OpenClawCliMessengerPort(tripRepository, commandRunner),
+    messenger,
     grounding: new GeminiRestGroundingAdapter({
       apiKey,
       planningModel: input.pluginConfig.planningModel,
@@ -100,7 +103,7 @@ export async function createRuntimeBundle(input: {
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
     }),
-    messenger: new OpenClawCliMessengerPort(tripRepository, commandRunner),
+    messenger,
     clock: new SystemClockPort(),
     logger,
   });
@@ -111,6 +114,7 @@ export async function createRuntimeBundle(input: {
     service,
     conversationService,
     tripRepository,
+    messenger,
     runtimeDataPaths,
     logger,
   };

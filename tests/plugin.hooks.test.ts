@@ -50,6 +50,17 @@ describe("travel companion inbound takeover hook", () => {
       {
         bindings: runtime.bindings,
         conversationService: runtime.conversationService,
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        messenger: runtime.messenger,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+        logger: runtime.logger,
       },
     );
 
@@ -104,6 +115,17 @@ describe("travel companion inbound takeover hook", () => {
       {
         bindings: runtime.bindings,
         conversationService: runtime.conversationService,
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        messenger: runtime.messenger,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+        logger: runtime.logger,
       },
     );
 
@@ -113,7 +135,7 @@ describe("travel companion inbound takeover hook", () => {
     expect(state?.pendingUserMessages[0]?.messageId).toBe("msg-route");
   });
 
-  it("does not claim slash commands", async () => {
+  it("bridges travel-companion slash commands inside companion-exclusive conversations", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({
       channel: "telegram",
@@ -158,12 +180,90 @@ describe("travel companion inbound takeover hook", () => {
       {
         bindings: runtime.bindings,
         conversationService: runtime.conversationService,
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        messenger: runtime.messenger,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+        logger: runtime.logger,
+      },
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.pendingUserMessages).toHaveLength(0);
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text).toContain(
+      "No recent trip is recorded for this conversation yet.",
+    );
+  });
+
+  it("leaves non-travel-companion slash commands alone", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationService.activateConversation({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "/status",
+        body: "/status",
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-2b",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-2b",
+      },
+      {
+        bindings: runtime.bindings,
+        conversationService: runtime.conversationService,
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        messenger: runtime.messenger,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+        logger: runtime.logger,
       },
     );
 
     expect(result).toBeUndefined();
-    const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.pendingUserMessages).toHaveLength(0);
+    expect(runtime.messenger.sentReplies).toHaveLength(0);
   });
 
   it("leaves non-activated conversations alone", async () => {
@@ -203,6 +303,17 @@ describe("travel companion inbound takeover hook", () => {
       {
         bindings: runtime.bindings,
         conversationService: runtime.conversationService,
+        service: runtime.service,
+        tripRepository: runtime.tripRepository,
+        messenger: runtime.messenger,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+        logger: runtime.logger,
       },
     );
 

@@ -73,6 +73,12 @@ export default definePluginEntry({
         return await handleTravelCompanionInboundClaim(event, ctx, {
           bindings,
           conversationService: runtimeBundle.conversationService,
+          service: runtimeBundle.service,
+          tripRepository: runtimeBundle.tripRepository,
+          messenger: runtimeBundle.messenger,
+          pluginConfig,
+          runtimeDataPaths: runtimeBundle.runtimeDataPaths,
+          logger: runtimeBundle.logger,
         });
       } catch (error) {
         api.logger.warn(

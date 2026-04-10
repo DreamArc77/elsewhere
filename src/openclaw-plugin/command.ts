@@ -2,8 +2,13 @@ import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
-import { LoggerPort, TripRecord, TripRepository } from "../domain/types.js";
-import { BindingRegistryStore, bindingKey } from "./binding-state.js";
+import {
+  ConversationBindingStore,
+  LoggerPort,
+  TripRecord,
+  TripRepository,
+} from "../domain/types.js";
+import { bindingKey } from "./binding-state.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import {
   extractReferenceImageInput,
@@ -17,7 +22,7 @@ interface CommandDependencies {
   service: OpenClawTravelCompanionService;
   conversationService: CompanionConversationService;
   tripRepository: TripRepository;
-  bindings: BindingRegistryStore;
+  bindings: ConversationBindingStore;
   pluginConfig: TravelCompanionPluginConfig;
   runtimeDataPaths: RuntimeDataPaths;
   logger?: LoggerPort;
@@ -353,10 +358,10 @@ async function stopTrip(
 
 async function requireBinding(
   ctx: PluginCommandContext,
-  bindings: BindingRegistryStore,
+  bindings: ConversationBindingStore,
   logger?: LoggerPort,
 ): Promise<
-  | { record: NonNullable<Awaited<ReturnType<BindingRegistryStore["get"]>>> }
+  | { record: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>> }
   | { reply: CommandReply }
 > {
   const currentBinding = await ctx.getCurrentConversationBinding();
@@ -478,7 +483,7 @@ async function requireActivatedThen(
 
 function inferBindingRecord(
   ctx: PluginCommandContext,
-): Awaited<ReturnType<BindingRegistryStore["get"]>> | null {
+): Awaited<ReturnType<ConversationBindingStore["get"]>> | null {
   const target = inferConversationTarget(ctx);
   if (!target) {
     return null;
@@ -505,11 +510,11 @@ function inferBindingRecord(
 
 async function ensurePluginConversationBinding(
   ctx: PluginCommandContext,
-  bindings: BindingRegistryStore,
+  bindings: ConversationBindingStore,
   mode: "default" | "companion-exclusive",
   logger?: LoggerPort,
 ): Promise<
-  | { record: NonNullable<Awaited<ReturnType<BindingRegistryStore["get"]>>> }
+  | { record: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>> }
   | { reply: CommandReply }
 > {
   const requested = await ctx.requestConversationBinding({
@@ -635,7 +640,7 @@ async function ensurePluginConversationBinding(
 }
 
 async function findRelatedBindingRecord(
-  bindings: BindingRegistryStore,
+  bindings: ConversationBindingStore,
   ctx: PluginCommandContext,
   input: {
     channel: string;
@@ -643,7 +648,7 @@ async function findRelatedBindingRecord(
     target: string;
     threadId?: string | number;
   },
-): Promise<Awaited<ReturnType<BindingRegistryStore["get"]>>> {
+): Promise<Awaited<ReturnType<ConversationBindingStore["get"]>>> {
   const candidates = new Set<string>();
   for (const value of [
     input.target,
