@@ -1,3 +1,5 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import { describe, expect, it } from "vitest";
 
 import { OpenClawCliMessengerPort } from "../src/openclaw-plugin/ports.js";
@@ -164,5 +166,52 @@ describe("OpenClawCliMessengerPort", () => {
 
     expect(receipt.messageId).toBe("trip-1:step-1");
     expect(receipt.provider).toBe("openclaw-message-cli-timeout");
+  });
+
+  it("uses the runtime outbound adapter for text replies without invoking the CLI runner", async () => {
+    let runnerCalls = 0;
+    const messenger = new OpenClawCliMessengerPort(
+      buildTripRepository(),
+      {
+        async run() {
+          runnerCalls += 1;
+          return {
+            stdout: "",
+            stderr: "",
+            code: 0,
+          };
+        },
+      },
+      {
+        runtime: {
+          channel: {
+            outbound: {
+              loadAdapter: async () => ({
+                deliveryMode: "direct",
+                sendText: async () => ({
+                  channel: "telegram",
+                  messageId: "fast-1",
+                }),
+              }),
+            },
+          },
+        } as unknown as PluginRuntime,
+        loadConfig: () => ({}) as OpenClawConfig,
+      },
+    );
+
+    const receipt = await messenger.sendTextReply({
+      binding: {
+        channel: "telegram",
+        target: "1459473177",
+        accountId: "1459473177",
+      },
+      text: "quick bridge reply",
+      dedupeKey: "reply-1",
+    });
+
+    expect(receipt.messageId).toBe("fast-1");
+    expect(receipt.provider).toBe("telegram");
+    expect(runnerCalls).toBe(0);
   });
 });

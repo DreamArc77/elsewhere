@@ -1,3 +1,6 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
+
 import { DeliveryBinding, HostSchedulerPort, Postcard, SendReceipt, TripRepository } from "../domain/types.js";
 
 export class NoopSchedulerPort implements HostSchedulerPort {
@@ -8,10 +11,16 @@ export interface MessageCommandRunner {
   run(argv: string[]): Promise<{ stdout: string; stderr: string; code: number | null }>;
 }
 
+export interface DirectReplyRuntime {
+  runtime: PluginRuntime;
+  loadConfig(): OpenClawConfig;
+}
+
 export class OpenClawCliMessengerPort {
   constructor(
     private readonly tripRepository: TripRepository,
     private readonly runner: MessageCommandRunner,
+    private readonly directReplyRuntime?: DirectReplyRuntime,
   ) {}
 
   async sendPostcard(input: {
@@ -69,6 +78,14 @@ export class OpenClawCliMessengerPort {
     text: string;
     dedupeKey: string;
   }): Promise<SendReceipt> {
+    const directReceipt = await this.trySendDirectTextReply(
+      input.binding,
+      input.text,
+    );
+    if (directReceipt) {
+      return directReceipt;
+    }
+
     const argv = buildTextSendArgv(input.binding, input.text);
     const result = await this.runner.run(argv);
     const receipt = extractSendReceipt(result.stdout, result.stderr);
@@ -106,6 +123,63 @@ export class OpenClawCliMessengerPort {
       deduped: false,
       provider: "openclaw-message-cli",
     };
+  }
+
+  private async trySendDirectTextReply(
+    binding: DeliveryBinding,
+    text: string,
+  ): Promise<SendReceipt | undefined> {
+    if (!this.directReplyRuntime) {
+      return undefined;
+    }
+
+    try {
+      const cfg = this.directReplyRuntime.loadConfig();
+      const adapter =
+        await this.directReplyRuntime.runtime.channel.outbound.loadAdapter(
+          binding.channel,
+        );
+      if (!adapter) {
+        return undefined;
+      }
+
+      if (adapter.sendText) {
+        const result = await adapter.sendText({
+          cfg,
+          to: binding.target,
+          text,
+          accountId: binding.accountId ?? null,
+          threadId: binding.threadId ?? null,
+        });
+
+        return {
+          messageId: result.messageId,
+          deduped: false,
+          provider: result.channel ?? binding.channel,
+        };
+      }
+
+      if (adapter.sendPayload) {
+        const result = await adapter.sendPayload({
+          cfg,
+          to: binding.target,
+          text,
+          payload: { text },
+          accountId: binding.accountId ?? null,
+          threadId: binding.threadId ?? null,
+        });
+
+        return {
+          messageId: result.messageId,
+          deduped: false,
+          provider: result.channel ?? binding.channel,
+        };
+      }
+    } catch {
+      return undefined;
+    }
+
+    return undefined;
   }
 }
 

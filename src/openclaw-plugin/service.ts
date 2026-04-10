@@ -73,7 +73,10 @@ export async function createRuntimeBundle(input: {
     },
   };
 
-  const messenger = new OpenClawCliMessengerPort(tripRepository, commandRunner);
+  const messenger = new OpenClawCliMessengerPort(tripRepository, commandRunner, {
+    runtime: input.runtime,
+    loadConfig: () => input.runtime.config.loadConfig(),
+  });
 
   const service = new OpenClawTravelCompanionService({
     personaRepository,
