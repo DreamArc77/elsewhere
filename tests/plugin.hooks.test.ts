@@ -59,6 +59,60 @@ describe("travel companion inbound takeover hook", () => {
     expect(state?.pendingUserMessages[0]?.content).toBe("你到哪啦");
   });
 
+  it("claims inbound messages even when telegram target shapes differ", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "1459473177",
+      target: "telegram:1459473177",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "1459473177",
+      target: "telegram:1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationService.activateConversation({
+      key,
+      channel: "telegram",
+      accountId: "1459473177",
+      target: "telegram:1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "你现在在哪",
+        body: "你现在在哪",
+        channel: "telegram",
+        accountId: "1459473177",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-route",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "1459473177",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-route",
+      },
+      {
+        bindings: runtime.bindings,
+        conversationService: runtime.conversationService,
+      },
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.pendingUserMessages).toHaveLength(1);
+    expect(state?.pendingUserMessages[0]?.messageId).toBe("msg-route");
+  });
+
   it("does not claim slash commands", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

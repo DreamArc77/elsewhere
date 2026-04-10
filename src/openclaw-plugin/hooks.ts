@@ -48,18 +48,7 @@ export async function handleTravelCompanionInboundClaim(
     return;
   }
 
-  const target = inferInboundTarget(event, ctx);
-  if (!target) {
-    return;
-  }
-
-  const key = bindingKey({
-    channel: event.channel,
-    accountId: ctx.accountId ?? event.accountId,
-    target,
-    threadId: event.threadId,
-  });
-  const binding = await deps.bindings.get(key);
+  const binding = await resolveBindingForInbound(event, ctx, deps.bindings);
   if (!binding || binding.mode !== "companion-exclusive") {
     return;
   }
@@ -76,23 +65,99 @@ export async function handleTravelCompanionInboundClaim(
   return { handled: true };
 }
 
-function inferInboundTarget(
+async function resolveBindingForInbound(
   event: InboundClaimEvent,
   ctx: InboundClaimContext,
-): string | null {
+  bindings: ConversationBindingStore,
+): Promise<Awaited<ReturnType<ConversationBindingStore["get"]>>> {
+  const channel = event.channel;
+  const accountCandidates = [
+    normalizeRoutePart(ctx.accountId),
+    normalizeRoutePart(event.accountId),
+  ].filter((value): value is string => Boolean(value));
+  const targetCandidates = buildTargetCandidates(event, ctx);
+  const threadCandidates = buildThreadCandidates(event.threadId);
+
+  for (const accountId of accountCandidates.length > 0 ? accountCandidates : ["default"]) {
+    for (const target of targetCandidates) {
+      for (const threadId of threadCandidates) {
+        const key = bindingKey({
+          channel,
+          accountId,
+          target,
+          threadId,
+        });
+        const match = await bindings.get(key);
+        if (match) {
+          return match;
+        }
+      }
+    }
+  }
+
+  const allBindings = await bindings.list();
+  return (
+    allBindings.find((binding) => {
+      if (binding.channel !== channel) {
+        return false;
+      }
+      if (
+        accountCandidates.length > 0 &&
+        binding.accountId &&
+        !accountCandidates.includes(binding.accountId)
+      ) {
+        return false;
+      }
+      if (
+        event.threadId !== undefined &&
+        binding.threadId !== undefined &&
+        String(binding.threadId) !== String(event.threadId)
+      ) {
+        return false;
+      }
+      return targetCandidates.includes(binding.target);
+    }) ?? null
+  );
+}
+
+function buildTargetCandidates(
+  event: InboundClaimEvent,
+  ctx: InboundClaimContext,
+): string[] {
   const conversationId = normalizeRoutePart(
     event.conversationId ?? ctx.conversationId,
   );
   const senderId = normalizeRoutePart(event.senderId ?? ctx.senderId);
+  const rawCandidates = [conversationId, senderId].filter(
+    (value): value is string => Boolean(value),
+  );
+  const candidates = new Set<string>();
 
-  if (event.channel === "telegram") {
-    if (conversationId?.startsWith("-")) {
-      return conversationId;
+  for (const candidate of rawCandidates) {
+    candidates.add(candidate);
+    if (!candidate.includes(":")) {
+      candidates.add(`${event.channel}:${candidate}`);
     }
-    return conversationId ?? senderId;
   }
 
-  return conversationId ?? senderId;
+  if (
+    event.channel === "telegram" &&
+    conversationId?.startsWith("-")
+  ) {
+    candidates.add(conversationId);
+    candidates.add(`telegram:${conversationId}`);
+  }
+
+  return [...candidates];
+}
+
+function buildThreadCandidates(
+  threadId: string | number | undefined,
+): Array<string | number | undefined> {
+  if (threadId === undefined || threadId === null) {
+    return [undefined, "main"];
+  }
+  return [threadId, String(threadId)];
 }
 
 function normalizeRoutePart(value: string | number | undefined): string | null {

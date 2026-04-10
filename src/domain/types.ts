@@ -378,6 +378,7 @@ export interface LoggerPort {
 
 export interface ConversationBindingStore {
   get(key: string): Promise<ConversationBindingRecord | null>;
+  list(): Promise<ConversationBindingRecord[]>;
   upsert(record: ConversationBindingRecord): Promise<void>;
 }
 

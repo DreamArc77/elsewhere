@@ -40,6 +40,11 @@ export class BindingRegistryStore implements ConversationBindingStore {
     return registry.conversations[key] ?? null;
   }
 
+  async list(): Promise<ConversationBindingRecord[]> {
+    const registry = (await readJson<BindingRegistry>(this.filePath)) ?? emptyRegistry();
+    return Object.values(registry.conversations);
+  }
+
   async upsert(record: ConversationBindingRecord): Promise<void> {
     const registry = (await readJson<BindingRegistry>(this.filePath)) ?? emptyRegistry();
     registry.conversations[record.key] = record;
