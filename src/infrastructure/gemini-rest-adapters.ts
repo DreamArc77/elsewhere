@@ -2,24 +2,31 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 
 import {
+  companionReplyPlanJsonSchema,
+  companionReplyPlanSchema,
   extractLikelyJson,
   parseModelJson,
   tripPlanJsonSchema,
   tripPlanSchema,
 } from "../contracts/schemas.js";
 import {
+  CompanionReplyPlan,
+  CompanionTurn,
   GroundingPort,
   ImageGenerationPort,
   ImageGenerationResult,
+  InboundUserMessage,
   PhaseGroundingResult,
   RuntimeStepContext,
   StoredPersonaProfile,
   TripPhase,
   TripPlan,
+  TripRecord,
   TripRequest,
 } from "../domain/types.js";
 import {
   renderCaptionPrompt,
+  renderCompanionReplyPrompt,
   renderTripPlanPrompt,
 } from "../prompting/travel-companion-prompts.js";
 
@@ -236,6 +243,54 @@ export class GeminiRestGroundingAdapter
       caption: extractLikelyJson(extractText(response))
         .replace(/^"|"$/g, "")
         .trim(),
+      provider: this.textModel,
+    };
+  }
+
+  async composeCompanionReply(input: {
+    conversationKey: string;
+    persona: StoredPersonaProfile | null;
+    pendingUserMessages: InboundUserMessage[];
+    recentTurns: CompanionTurn[];
+    activeTrip: TripRecord | null;
+    now: string;
+  }): Promise<CompanionReplyPlan> {
+    const prompt = await renderCompanionReplyPrompt({
+      persona: input.persona,
+      conversationKey: input.conversationKey,
+      pendingUserMessages: JSON.stringify(input.pendingUserMessages, null, 2),
+      recentTurns: JSON.stringify(input.recentTurns, null, 2),
+      activeTripSummary: JSON.stringify(
+        input.activeTrip
+          ? {
+              tripId: input.activeTrip.tripId,
+              destination: input.activeTrip.request.destinationCity,
+              phase: input.activeTrip.state.currentPhase,
+              day: input.activeTrip.state.currentDay,
+              nextRunAt: input.activeTrip.state.nextRunAt,
+            }
+          : { status: "idle", note: "No active trip right now." },
+        null,
+        2,
+      ),
+      now: input.now,
+    });
+
+    const response = await this.generateContent(this.textModel, {
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseJsonSchema: companionReplyPlanJsonSchema,
+        temperature: 0.8,
+      },
+    });
+
+    return {
+      ...parseModelJson(
+        extractText(response),
+        companionReplyPlanSchema,
+        "Gemini companion reply",
+      ),
       provider: this.textModel,
     };
   }

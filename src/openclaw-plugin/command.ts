@@ -1,5 +1,6 @@
 import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 
+import { CompanionConversationService } from "../application/companion-conversation-service.js";
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
 import { TripRecord, TripRepository } from "../domain/types.js";
 import { BindingRegistryStore, bindingKey } from "./binding-state.js";
@@ -14,6 +15,7 @@ type CommandReply = { text: string; isError?: boolean };
 
 interface CommandDependencies {
   service: OpenClawTravelCompanionService;
+  conversationService: CompanionConversationService;
   tripRepository: TripRepository;
   bindings: BindingRegistryStore;
   pluginConfig: TravelCompanionPluginConfig;
@@ -34,16 +36,20 @@ export async function handleTravelCompanionCommand(
   switch (parsed.subcommand) {
     case "bind":
       return bindConversation(ctx, deps.bindings);
+    case "activate":
+      return activateConversation(ctx, deps);
+    case "deactivate":
+      return deactivateConversation(ctx, deps);
     case "setup":
-      return setupPersona(ctx, parsed.options, deps);
+      return requireActivatedThen(ctx, deps, () => setupPersona(ctx, parsed.options, deps));
     case "start":
-      return startTrip(ctx, parsed.options, deps);
+      return requireActivatedThen(ctx, deps, () => startTrip(ctx, parsed.options, deps));
     case "status":
-      return statusTrip(ctx, parsed.options, deps);
+      return requireActivatedThen(ctx, deps, () => statusTrip(ctx, parsed.options, deps));
     case "tick":
-      return tickTrip(ctx, parsed.options, deps);
+      return requireActivatedThen(ctx, deps, () => tickTrip(ctx, parsed.options, deps));
     case "stop":
-      return stopTrip(ctx, parsed.options, deps);
+      return requireActivatedThen(ctx, deps, () => stopTrip(ctx, parsed.options, deps));
     default:
       return { text: helpText() };
   }
@@ -66,8 +72,67 @@ async function bindConversation(
   return {
     text: [
       "Binding complete.",
-      "Next run /travel-companion setup to create the persona.",
-      "Then run /travel-companion start --to <city>.",
+      "Run /travel-companion activate to enter companion-exclusive mode.",
+    ].join("\n"),
+  };
+}
+
+async function activateConversation(
+  ctx: PluginCommandContext,
+  deps: CommandDependencies,
+): Promise<CommandReply> {
+  const binding = inferBindingRecord(ctx);
+  if (!binding) {
+    return {
+      text: "Could not infer the current chat route. Please try again in the chat where you want the companion takeover.",
+      isError: true,
+    };
+  }
+
+  const existing = await deps.bindings.get(binding.key);
+  const activatedBinding = {
+    ...existing,
+    ...binding,
+    mode: "companion-exclusive" as const,
+  };
+  await deps.bindings.upsert(activatedBinding);
+  await deps.conversationService.activateConversation(activatedBinding);
+
+  return {
+    text: [
+      "Travel companion takeover is now active.",
+      "This chat is in companion-exclusive mode.",
+      "You can now run setup/start/status/tick/stop here.",
+    ].join("\n"),
+  };
+}
+
+async function deactivateConversation(
+  ctx: PluginCommandContext,
+  deps: CommandDependencies,
+): Promise<CommandReply> {
+  const binding = await requireBinding(ctx, deps.bindings);
+  if ("reply" in binding) {
+    return binding.reply;
+  }
+
+  if (binding.record.lastTripId) {
+    await deps.service.stopTrip(binding.record.lastTripId);
+  }
+
+  const nextBinding = {
+    ...binding.record,
+    mode: "default" as const,
+    lastTripId: undefined,
+  };
+  await deps.bindings.upsert(nextBinding);
+  await deps.conversationService.deactivateConversation(binding.record.key);
+
+  return {
+    text: [
+      "Travel companion takeover is now deactivated.",
+      "The active trip has been stopped.",
+      "This chat is back to the default OpenClaw assistant.",
     ].join("\n"),
   };
 }
@@ -221,15 +286,27 @@ async function tickTrip(
   }
 
   const tripId = options.trip ?? binding.record.lastTripId;
-  if (!tripId) {
-    return { text: "No trip is available to tick.", isError: true };
-  }
 
   try {
+    await deps.conversationService.runConversation(binding.record.key, {
+      ignoreSchedule: true,
+    });
+
+    if (!tripId) {
+      return {
+        text: [
+          `Ticked immediately: ${binding.record.key}`,
+          "reply: processed pending conversation replies",
+          "trip: none",
+        ].join("\n"),
+      };
+    }
+
     const trip = await deps.service.runTrip(tripId, { ignoreSchedule: true });
     return {
       text: [
         `Ticked immediately: ${trip.tripId}`,
+        "reply: processed pending conversation replies",
         `status: ${trip.state.status}`,
         `phase: ${trip.state.currentPhase}`,
         `nextRunAt: ${trip.state.nextRunAt ?? "none"}`,
@@ -238,9 +315,9 @@ async function tickTrip(
   } catch {
     return {
       text: [
-        `Tick attempted: ${tripId}`,
-        "The postcard could not be confirmed just now.",
-        "The trip state was preserved. Please try /travel-companion tick again shortly.",
+        `Tick attempted: ${tripId ?? binding.record.key}`,
+        "The postcard or delayed reply could not be confirmed just now.",
+        "The state was preserved. Please try /travel-companion tick again shortly.",
       ].join("\n"),
       isError: true,
     };
@@ -298,6 +375,30 @@ async function requireBinding(
   return { record: inferred };
 }
 
+async function requireActivatedThen(
+  ctx: PluginCommandContext,
+  deps: CommandDependencies,
+  fn: () => Promise<CommandReply>,
+): Promise<CommandReply> {
+  const binding = inferBindingRecord(ctx);
+  if (!binding) {
+    return {
+      text: "This conversation is not ready yet. Run /travel-companion activate first.",
+      isError: true,
+    };
+  }
+
+  const record = await deps.bindings.get(binding.key);
+  if (!record || record.mode !== "companion-exclusive") {
+    return {
+      text: "Travel companion is not active in this chat yet. Run /travel-companion activate first.",
+      isError: true,
+    };
+  }
+
+  return fn();
+}
+
 function inferBindingRecord(
   ctx: PluginCommandContext,
 ): Awaited<ReturnType<BindingRegistryStore["get"]>> | null {
@@ -321,6 +422,7 @@ function inferBindingRecord(
     parentConversationId: ctx.threadParentId,
     threadId: ctx.messageThreadId,
     boundAt: Date.now(),
+    mode: "default",
   };
 }
 
@@ -378,11 +480,13 @@ function tokenize(input: string): string[] {
 function helpText(): string {
   return [
     "/travel-companion bind",
+    "/travel-companion activate",
+    "/travel-companion deactivate",
     "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image /abs/path/ref.png",
     "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp",
     "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
     "/travel-companion status [--trip <id>]",
-    "/travel-companion tick [--trip <id>]  # force the next step immediately",
+    "/travel-companion tick [--trip <id>]  # force delayed replies + the next trip step immediately",
     "/travel-companion stop [--trip <id>]",
   ].join("\n");
 }

@@ -220,6 +220,57 @@ export interface DeliveryBinding {
   boundAt?: number;
 }
 
+export type ConversationMode = "default" | "companion-exclusive";
+
+export interface ConversationBindingRecord extends DeliveryBinding {
+  key: string;
+  defaultPersonaId?: string;
+  lastTripId?: string;
+  mode: ConversationMode;
+}
+
+export interface InboundUserMessage {
+  messageId: string;
+  content: string;
+  receivedAt: string;
+  senderId?: string;
+  senderName?: string;
+  senderUsername?: string;
+}
+
+export interface CompanionTurn {
+  role: "user" | "companion";
+  text: string;
+  createdAt: string;
+  tripId?: string;
+}
+
+export interface PendingReplyDispatch {
+  conversationKey: string;
+  dedupeKey: string;
+  dueAt: string;
+  segments: string[];
+  sourceMessageIds: string[];
+  sentAt?: string;
+}
+
+export interface CompanionReplyPlan {
+  segments: string[];
+  provider: string;
+}
+
+export interface ConversationCompanionState {
+  conversationKey: string;
+  mode: ConversationMode;
+  pendingUserMessages: InboundUserMessage[];
+  pendingReplyDispatch: PendingReplyDispatch | null;
+  recentTurns: CompanionTurn[];
+  lastUserMessageAt: string | null;
+  lastCompanionReplyAt: string | null;
+  memorySummary?: string;
+  updatedAt: string;
+}
+
 export interface TripRecord {
   tripId: string;
   personaId: string;
@@ -267,6 +318,11 @@ export interface HostMessengerPort {
     postcard: Postcard;
     dedupeKey: string;
   }): Promise<SendReceipt>;
+  sendTextReply(input: {
+    binding: DeliveryBinding;
+    text: string;
+    dedupeKey: string;
+  }): Promise<SendReceipt>;
 }
 
 export interface GroundingPort {
@@ -286,6 +342,14 @@ export interface GroundingPort {
     grounding: PhaseGroundingResult;
     imagePrompt: string;
   }): Promise<{ caption: string; provider: string }>;
+  composeCompanionReply(input: {
+    conversationKey: string;
+    persona: StoredPersonaProfile | null;
+    pendingUserMessages: InboundUserMessage[];
+    recentTurns: CompanionTurn[];
+    activeTrip: TripRecord | null;
+    now: string;
+  }): Promise<CompanionReplyPlan>;
 }
 
 export interface ImageGenerationPort {
@@ -312,6 +376,11 @@ export interface LoggerPort {
   log(entry: LogEntry): Promise<void> | void;
 }
 
+export interface ConversationBindingStore {
+  get(key: string): Promise<ConversationBindingRecord | null>;
+  upsert(record: ConversationBindingRecord): Promise<void>;
+}
+
 export interface PersonaRepository {
   save(persona: StoredPersonaProfile): Promise<void>;
   getById(personaId: string): Promise<StoredPersonaProfile | null>;
@@ -321,6 +390,12 @@ export interface TripRepository {
   save(record: TripRecord): Promise<void>;
   getById(tripId: string): Promise<TripRecord | null>;
   listDueTrips(now: Date): Promise<TripRecord[]>;
+}
+
+export interface ConversationStateRepository {
+  save(record: ConversationCompanionState): Promise<void>;
+  getByKey(conversationKey: string): Promise<ConversationCompanionState | null>;
+  listDueConversations(now: Date): Promise<ConversationCompanionState[]>;
 }
 
 export interface ArtifactStorePort {

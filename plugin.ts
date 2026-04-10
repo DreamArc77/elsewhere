@@ -4,6 +4,7 @@ import { handleTravelCompanionCommand } from "./src/openclaw-plugin/command.js";
 import { BindingRegistryStore } from "./src/openclaw-plugin/binding-state.js";
 import { resolvePluginConfig } from "./src/openclaw-plugin/config.js";
 import { createRuntimeBundle, startPollingService } from "./src/openclaw-plugin/service.js";
+import { handleTravelCompanionInboundClaim } from "./src/openclaw-plugin/hooks.js";
 
 export default definePluginEntry({
   id: "openclaw-travel-companion",
@@ -35,6 +36,18 @@ export default definePluginEntry({
     const stateDir = api.runtime.state.resolveStateDir();
     const pluginStateDir = `${stateDir}/openclaw-travel-companion`;
     const bindings = new BindingRegistryStore(pluginStateDir);
+    let runtimeBundlePromise:
+      | ReturnType<typeof createRuntimeBundle>
+      | undefined;
+    const getRuntimeBundle = () => {
+      runtimeBundlePromise ??= createRuntimeBundle({
+        stateDir,
+        pluginConfig,
+        runtime: api.runtime,
+        logger: api.logger,
+      });
+      return runtimeBundlePromise;
+    };
 
     api.registerService({
       id: "openclaw-travel-companion-worker",
@@ -54,6 +67,23 @@ export default definePluginEntry({
 
     let serviceStop: (() => void) | undefined;
 
+    api.on("inbound_claim", async (event, ctx) => {
+      try {
+        const runtimeBundle = await getRuntimeBundle();
+        return await handleTravelCompanionInboundClaim(event, ctx, {
+          bindings,
+          conversationService: runtimeBundle.conversationService,
+        });
+      } catch (error) {
+        api.logger.warn(
+          `Travel companion inbound claim failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+    });
+
     api.registerCommand({
       name: "travel-companion",
       nativeNames: { default: "travel-companion" },
@@ -63,14 +93,10 @@ export default definePluginEntry({
       requireAuth: true,
       async handler(ctx) {
         try {
-          const runtimeBundle = await createRuntimeBundle({
-            stateDir,
-            pluginConfig,
-            runtime: api.runtime,
-            logger: api.logger,
-          });
+          const runtimeBundle = await getRuntimeBundle();
           return await handleTravelCompanionCommand(ctx, {
             service: runtimeBundle.service,
+            conversationService: runtimeBundle.conversationService,
             tripRepository: runtimeBundle.tripRepository,
             bindings,
             pluginConfig,

@@ -1,13 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { DeliveryBinding } from "../domain/types.js";
-
-export interface ConversationBindingRecord extends DeliveryBinding {
-  key: string;
-  defaultPersonaId?: string;
-  lastTripId?: string;
-}
+import { ConversationBindingRecord, ConversationBindingStore } from "../domain/types.js";
 
 interface BindingRegistry {
   conversations: Record<string, ConversationBindingRecord>;
@@ -34,7 +28,7 @@ async function readJson<T>(path: string): Promise<T | null> {
   }
 }
 
-export class BindingRegistryStore {
+export class BindingRegistryStore implements ConversationBindingStore {
   private readonly filePath: string;
 
   constructor(rootDir: string) {

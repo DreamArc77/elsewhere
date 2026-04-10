@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import { CompanionConversationService } from "../application/companion-conversation-service.js";
 import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
@@ -8,17 +9,20 @@ import { ClockPort, TripRepository } from "../domain/types.js";
 import { GeminiRestGroundingAdapter, GeminiRestImageAdapter } from "../infrastructure/gemini-rest-adapters.js";
 import {
   JsonArtifactStore,
+  JsonConversationStateRepository,
   JsonPersonaRepository,
   JsonTripRepository,
   RuntimeDataPaths,
   ensureRuntimeDataPaths,
 } from "../infrastructure/json-file-repositories.js";
 import { JsonlFileLogger } from "../infrastructure/jsonl-file-logger.js";
+import { BindingRegistryStore } from "./binding-state.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import { MessageCommandRunner, NoopSchedulerPort, OpenClawCliMessengerPort } from "./ports.js";
 
 export interface RuntimeBundle {
   service: OpenClawTravelCompanionService;
+  conversationService: CompanionConversationService;
   tripRepository: TripRepository;
   runtimeDataPaths: RuntimeDataPaths;
 }
@@ -39,8 +43,12 @@ export async function createRuntimeBundle(input: {
   const runtimeDataPaths = await ensureRuntimeDataPaths(runtimeRoot);
   const personaRepository = new JsonPersonaRepository(runtimeDataPaths.personasDir);
   const tripRepository = new JsonTripRepository(runtimeDataPaths.tripsDir);
+  const conversationStateRepository = new JsonConversationStateRepository(
+    runtimeDataPaths.conversationsDir,
+  );
   const artifactStore = new JsonArtifactStore(runtimeDataPaths.artifactsDir);
   const logger = new JsonlFileLogger(runtimeDataPaths.logsDir);
+  const bindings = new BindingRegistryStore(runtimeRoot);
 
   const apiKey = input.pluginConfig.geminiApiKey;
   if (!apiKey) {
@@ -81,11 +89,26 @@ export async function createRuntimeBundle(input: {
     clock: new SystemClockPort(),
     logger,
   });
+  const conversationService = new CompanionConversationService({
+    bindings,
+    conversationStates: conversationStateRepository,
+    tripRepository,
+    personaRepository,
+    grounding: new GeminiRestGroundingAdapter({
+      apiKey,
+      planningModel: input.pluginConfig.planningModel,
+      textModel: input.pluginConfig.textModel,
+    }),
+    messenger: new OpenClawCliMessengerPort(tripRepository, commandRunner),
+    clock: new SystemClockPort(),
+    logger,
+  });
 
   input.logger.info("OpenClaw Travel Companion runtime ready.");
 
   return {
     service,
+    conversationService,
     tripRepository,
     runtimeDataPaths,
   };
@@ -114,6 +137,7 @@ export function startPollingService(input: {
         ticking = true;
         try {
           await bundle.service.runDueTrips();
+          await bundle.conversationService.runDueConversations();
         } catch (error) {
           input.logger.error(
             `Travel companion background tick failed: ${

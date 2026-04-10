@@ -63,6 +63,50 @@ export class OpenClawCliMessengerPort {
       provider: "openclaw-message-cli",
     };
   }
+
+  async sendTextReply(input: {
+    binding: DeliveryBinding;
+    text: string;
+    dedupeKey: string;
+  }): Promise<SendReceipt> {
+    const argv = buildTextSendArgv(input.binding, input.text);
+    const result = await this.runner.run(argv);
+    const receipt = extractSendReceipt(result.stdout, result.stderr);
+
+    if (receipt) {
+      return receipt;
+    }
+
+    if (
+      result.code === null &&
+      containsOnlyBenignCliNoise(result.stdout, result.stderr)
+    ) {
+      return {
+        messageId: input.dedupeKey,
+        deduped: false,
+        provider: "openclaw-message-cli-timeout",
+      };
+    }
+
+    if (result.code !== 0) {
+      throw new Error(
+        [
+          "openclaw message send failed",
+          `code=${result.code ?? "null"}`,
+          result.stderr?.trim(),
+          result.stdout?.trim(),
+        ]
+          .filter(Boolean)
+          .join(" | "),
+      );
+    }
+
+    return {
+      messageId: input.dedupeKey,
+      deduped: false,
+      provider: "openclaw-message-cli",
+    };
+  }
 }
 
 const benignCliNoisePatterns = [
@@ -103,6 +147,29 @@ function buildMessageSendArgv(
     postcard.caption,
     "--media",
     postcard.imageAsset,
+    "--json",
+  ];
+
+  if (binding.accountId) {
+    argv.push("--account", binding.accountId);
+  }
+  if (binding.threadId !== undefined) {
+    argv.push("--thread-id", String(binding.threadId));
+  }
+
+  return argv;
+}
+
+function buildTextSendArgv(binding: DeliveryBinding, text: string): string[] {
+  const argv = [
+    "message",
+    "send",
+    "--channel",
+    binding.channel,
+    "--target",
+    binding.target,
+    "--message",
+    text,
     "--json",
   ];
 

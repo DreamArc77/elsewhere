@@ -124,6 +124,27 @@ export async function renderCaptionPrompt(input: {
   });
 }
 
+export async function renderCompanionReplyPrompt(input: {
+  persona: StoredPersonaProfile | null;
+  conversationKey: string;
+  pendingUserMessages: string;
+  recentTurns: string;
+  activeTripSummary: string;
+  now: string;
+}): Promise<string> {
+  const template = await loadTemplate("compose-reply.md");
+  return renderTemplate(template, {
+    personaSummary: input.persona
+      ? buildPersonaSummary(input.persona)
+      : "No persona is configured yet.",
+    conversationKey: input.conversationKey,
+    pendingUserMessages: input.pendingUserMessages,
+    recentTurns: input.recentTurns,
+    activeTripSummary: input.activeTripSummary,
+    now: input.now,
+  });
+}
+
 export async function renderImageGenerationPrompt(input: {
   persona: StoredPersonaProfile;
   request: TripRequest;

@@ -2,11 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import {
   ClockPort,
+  CompanionReplyPlan,
+  CompanionTurn,
   GroundingPort,
   HostMessengerPort,
   HostSchedulerPort,
   ImageGenerationPort,
   ImageGenerationResult,
+  InboundUserMessage,
   ItineraryActivity,
   PhaseGroundingResult,
   RuntimeStepContext,
@@ -305,6 +308,11 @@ export class FakeMessenger implements HostMessengerPort {
     dedupeKey: string;
     caption: string;
   }> = [];
+  public readonly sentReplies: Array<{
+    dedupeKey: string;
+    text: string;
+    target: string;
+  }> = [];
   public rawSendAttempts = 0;
 
   async sendPostcard(input: {
@@ -331,6 +339,34 @@ export class FakeMessenger implements HostMessengerPort {
       personaId: input.personaId,
       dedupeKey: input.dedupeKey,
       caption: input.postcard.caption,
+    });
+    return receipt;
+  }
+
+  async sendTextReply(input: {
+    binding: { target: string };
+    text: string;
+    dedupeKey: string;
+  }): Promise<SendReceipt> {
+    this.rawSendAttempts += 1;
+    const existing = this.receipts.get(input.dedupeKey);
+    if (existing) {
+      return {
+        ...existing,
+        deduped: true,
+      };
+    }
+
+    const receipt: SendReceipt = {
+      messageId: randomUUID(),
+      deduped: false,
+      provider: "fake-messenger",
+    };
+    this.receipts.set(input.dedupeKey, receipt);
+    this.sentReplies.push({
+      dedupeKey: input.dedupeKey,
+      text: input.text,
+      target: input.binding.target,
     });
     return receipt;
   }
@@ -369,6 +405,20 @@ export class FakeGroundingPort implements GroundingPort {
         `Day ${Math.max(input.day, 1)} ${input.phase}, ` +
         `${input.stepContext.sendMoment} update. ` +
         `Just snapped: ${input.imagePrompt.slice(0, 40)}...`,
+      provider: "fake-grounding",
+    };
+  }
+
+  async composeCompanionReply(input: {
+    persona: StoredPersonaProfile | null;
+    pendingUserMessages: InboundUserMessage[];
+    recentTurns: CompanionTurn[];
+  }): Promise<CompanionReplyPlan> {
+    const latest = input.pendingUserMessages[input.pendingUserMessages.length - 1];
+    return {
+      segments: [
+        `${input.persona?.name ?? "Companion"} heard: ${latest?.content ?? "..."}`,
+      ],
       provider: "fake-grounding",
     };
   }

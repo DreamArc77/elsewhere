@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 
 import { handleTravelCompanionCommand } from "../src/openclaw-plugin/command.js";
@@ -12,7 +12,7 @@ import {
 import { createTestRuntime } from "./helpers/runtime.js";
 
 function createTelegramContext(commandBody: string): PluginCommandContext {
-  const [commandName, ...rest] = commandBody.trim().split(/\s+/u);
+  const [, ...rest] = commandBody.trim().split(/\s+/u);
   return {
     senderId: "1459473177",
     channel: "telegram",
@@ -44,6 +44,7 @@ describe("travel companion command UX", () => {
       createTelegramContext("/travel-companion bind"),
       {
         service: runtime.service,
+        conversationService: runtime.conversationService,
         tripRepository: runtime.tripRepository,
         bindings,
         pluginConfig: {
@@ -67,9 +68,70 @@ describe("travel companion command UX", () => {
       }),
     );
     expect(binding?.target).toBe("1459473177");
+    expect(binding?.mode).toBe("default");
   });
 
-  it("creates a persona from an image URL pasted in the setup command", async () => {
+  it("requires activate before setup is available", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext(
+        "/travel-companion setup --name Mori --traits gentle --relationship soulmate --tone warm https://example.com/mori.webp",
+      ),
+      {
+        service: runtime.service,
+        conversationService: runtime.conversationService,
+        tripRepository: runtime.tripRepository,
+        bindings,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+      },
+    );
+
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain("activate");
+  });
+
+  it("activates the current chat and auto-binds it into companion-exclusive mode", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion activate"),
+      {
+        service: runtime.service,
+        conversationService: runtime.conversationService,
+        tripRepository: runtime.tripRepository,
+        bindings,
+        pluginConfig: {
+          geminiApiKey: "test-key",
+          defaultOriginCity: "Hong Kong",
+          pollIntervalSeconds: 60,
+          openclawBinaryPath: "openclaw",
+        },
+        runtimeDataPaths: runtime.paths,
+      },
+    );
+
+    expect(reply.isError).toBeUndefined();
+    expect(reply.text).toContain("companion-exclusive");
+
+    const binding = await bindings.get(
+      bindingKey({
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+      }),
+    );
+    expect(binding?.mode).toBe("companion-exclusive");
+  });
+
+  it("creates a persona from an image URL pasted in the setup command after activation", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
     const webpBytes = Buffer.from("fake-webp", "utf8");
@@ -88,22 +150,30 @@ describe("travel companion command UX", () => {
       })),
     );
 
+    const deps = {
+      service: runtime.service,
+      conversationService: runtime.conversationService,
+      tripRepository: runtime.tripRepository,
+      bindings,
+      pluginConfig: {
+        geminiApiKey: "test-key",
+        defaultOriginCity: "Hong Kong",
+        pollIntervalSeconds: 60,
+        openclawBinaryPath: "openclaw",
+      },
+      runtimeDataPaths: runtime.paths,
+    };
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion activate"),
+      deps,
+    );
+
     const reply = await handleTravelCompanionCommand(
       createTelegramContext(
         "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm https://example.com/mori.webp",
       ),
-      {
-        service: runtime.service,
-        tripRepository: runtime.tripRepository,
-        bindings,
-        pluginConfig: {
-          geminiApiKey: "test-key",
-          defaultOriginCity: "Hong Kong",
-          pollIntervalSeconds: 60,
-          openclawBinaryPath: "openclaw",
-        },
-        runtimeDataPaths: runtime.paths,
-      },
+      deps,
     );
 
     expect(reply.text).toContain("Persona created: Mori");
@@ -123,11 +193,12 @@ describe("travel companion command UX", () => {
     await expect(stat(persona!.referenceImageAsset)).resolves.toBeTruthy();
   });
 
-  it("forces the next trip step immediately when tick is used", async () => {
+  it("forces delayed replies and the next trip step immediately when tick is used", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
     const deps = {
       service: runtime.service,
+      conversationService: runtime.conversationService,
       tripRepository: runtime.tripRepository,
       bindings,
       pluginConfig: {
@@ -139,6 +210,10 @@ describe("travel companion command UX", () => {
       runtimeDataPaths: runtime.paths,
     };
 
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion activate"),
+      deps,
+    );
     const persona = await runtime.service.createPersona({
       name: "Mori",
       traits: ["gentle", "curious"],
@@ -146,16 +221,14 @@ describe("travel companion command UX", () => {
       toneStyle: "warm",
       referenceImageAsset: runtime.referenceImagePath,
     });
-    await bindings.upsert({
-      key: bindingKey({
-        channel: "telegram",
-        accountId: "default",
-        target: "1459473177",
-      }),
+    const key = bindingKey({
       channel: "telegram",
       accountId: "default",
       target: "1459473177",
-      boundAt: Date.now(),
+    });
+    const binding = await bindings.get(key);
+    await bindings.upsert({
+      ...binding!,
       defaultPersonaId: persona.personaId,
     });
 
@@ -164,22 +237,29 @@ describe("travel companion command UX", () => {
       deps,
     );
     await runtime.service.runDueTrips();
-    expect(runtime.messenger.sentMessages).toHaveLength(1);
+    await runtime.conversationService.enqueueInboundMessage({
+      binding: (await bindings.get(key))!,
+      messageId: "msg-1",
+      content: "你到哪啦",
+      senderId: "1459473177",
+    });
 
     const reply = await handleTravelCompanionCommand(
       createTelegramContext("/travel-companion tick"),
       deps,
     );
 
-    expect(reply.text).toContain("Ticked immediately:");
-    expect(runtime.messenger.sentMessages).toHaveLength(2);
+    expect(reply.text).toContain("reply: processed pending conversation replies");
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentMessages.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("stops the current trip from the chat command", async () => {
+  it("deactivates takeover and stops the active trip", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
     const deps = {
       service: runtime.service,
+      conversationService: runtime.conversationService,
       tripRepository: runtime.tripRepository,
       bindings,
       pluginConfig: {
@@ -191,6 +271,10 @@ describe("travel companion command UX", () => {
       runtimeDataPaths: runtime.paths,
     };
 
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion activate"),
+      deps,
+    );
     const persona = await runtime.service.createPersona({
       name: "Mori",
       traits: ["gentle", "curious"],
@@ -198,16 +282,14 @@ describe("travel companion command UX", () => {
       toneStyle: "warm",
       referenceImageAsset: runtime.referenceImagePath,
     });
-    await bindings.upsert({
-      key: bindingKey({
-        channel: "telegram",
-        accountId: "default",
-        target: "1459473177",
-      }),
+    const key = bindingKey({
       channel: "telegram",
       accountId: "default",
       target: "1459473177",
-      boundAt: Date.now(),
+    });
+    const binding = await bindings.get(key);
+    await bindings.upsert({
+      ...binding!,
       defaultPersonaId: persona.personaId,
     });
 
@@ -219,14 +301,16 @@ describe("travel companion command UX", () => {
     expect(tripId).toBeTruthy();
 
     const reply = await handleTravelCompanionCommand(
-      createTelegramContext("/travel-companion stop"),
+      createTelegramContext("/travel-companion deactivate"),
       deps,
     );
 
-    expect(reply.text).toContain("Stopped:");
+    expect(reply.text).toContain("deactivated");
     const trip = await runtime.tripRepository.getById(tripId!);
     expect(trip?.state.status).toBe("completed");
-    expect(trip?.state.nextRunAt).toBeNull();
+
+    const updatedBinding = await bindings.get(key);
+    expect(updatedBinding?.mode).toBe("default");
   });
 
   it("does not leak raw internal stderr when a tick fails", async () => {
@@ -242,6 +326,7 @@ describe("travel companion command UX", () => {
       target: "1459473177",
       boundAt: Date.now(),
       lastTripId: "trip-1",
+      mode: "companion-exclusive",
     });
 
     const reply = await handleTravelCompanionCommand(
@@ -253,6 +338,9 @@ describe("travel companion command UX", () => {
               "openclaw message send failed | code=null | Config warnings: ...",
             );
           },
+        } as never,
+        conversationService: {
+          async runConversation() {},
         } as never,
         tripRepository: {} as never,
         bindings,
@@ -266,6 +354,7 @@ describe("travel companion command UX", () => {
           rootDir: "C:\\temp",
           personasDir: "C:\\temp\\personas",
           tripsDir: "C:\\temp\\trips",
+          conversationsDir: "C:\\temp\\conversations",
           artifactsDir: "C:\\temp\\artifacts",
           logsDir: "C:\\temp\\logs",
         },

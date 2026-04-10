@@ -79,6 +79,10 @@ export const imageGenerationResultSchema = z.object({
   promptEcho: z.string().min(1).optional(),
 });
 
+export const companionReplyPlanSchema = z.object({
+  segments: z.array(z.string().min(1)).min(1).max(5),
+});
+
 export function parseModelJson<T>(
   rawText: string,
   schema: z.ZodType<T>,
@@ -194,6 +198,19 @@ export const tripPlanJsonSchema = {
             },
           },
         },
+      },
+    },
+  },
+};
+
+export const companionReplyPlanJsonSchema = {
+  type: "OBJECT",
+  required: ["segments"],
+  properties: {
+    segments: {
+      type: "ARRAY",
+      items: {
+        type: "STRING",
       },
     },
   },

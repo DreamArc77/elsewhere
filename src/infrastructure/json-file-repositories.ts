@@ -3,6 +3,8 @@ import { dirname, join } from "node:path";
 
 import {
   ArtifactStorePort,
+  ConversationCompanionState,
+  ConversationStateRepository,
   PersonaRepository,
   StoredPersonaProfile,
   TripRecord,
@@ -41,6 +43,7 @@ export interface RuntimeDataPaths {
   rootDir: string;
   personasDir: string;
   tripsDir: string;
+  conversationsDir: string;
   artifactsDir: string;
   logsDir: string;
 }
@@ -52,6 +55,7 @@ export async function ensureRuntimeDataPaths(
     rootDir,
     personasDir: join(rootDir, "personas"),
     tripsDir: join(rootDir, "trips"),
+    conversationsDir: join(rootDir, "conversations"),
     artifactsDir: join(rootDir, "artifacts"),
     logsDir: join(rootDir, "logs"),
   };
@@ -59,6 +63,7 @@ export async function ensureRuntimeDataPaths(
   await Promise.all([
     ensureDir(paths.personasDir),
     ensureDir(paths.tripsDir),
+    ensureDir(paths.conversationsDir),
     ensureDir(paths.artifactsDir),
     ensureDir(paths.logsDir),
   ]);
@@ -111,6 +116,46 @@ export class JsonTripRepository implements TripRepository {
         }
 
         return new Date(record.state.nextRunAt).getTime() <= now.getTime();
+      });
+  }
+}
+
+export class JsonConversationStateRepository implements ConversationStateRepository {
+  constructor(private readonly conversationsDir: string) {}
+
+  async save(record: ConversationCompanionState): Promise<void> {
+    const path = join(this.conversationsDir, `${sanitizeFileName(record.conversationKey)}.json`);
+    await atomicWriteText(path, JSON.stringify(record, null, 2));
+  }
+
+  async getByKey(conversationKey: string): Promise<ConversationCompanionState | null> {
+    return readJsonFile<ConversationCompanionState>(
+      join(this.conversationsDir, `${sanitizeFileName(conversationKey)}.json`),
+    );
+  }
+
+  async listDueConversations(now: Date): Promise<ConversationCompanionState[]> {
+    const entries = await readdir(this.conversationsDir, { withFileTypes: true });
+    const records = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+        .map((entry) =>
+          readJsonFile<ConversationCompanionState>(
+            join(this.conversationsDir, entry.name),
+          ),
+        ),
+    );
+
+    return records
+      .filter((record): record is ConversationCompanionState => Boolean(record))
+      .filter((record) => {
+        if (record.mode !== "companion-exclusive") {
+          return false;
+        }
+        if (!record.pendingReplyDispatch?.dueAt) {
+          return false;
+        }
+        return new Date(record.pendingReplyDispatch.dueAt).getTime() <= now.getTime();
       });
   }
 }

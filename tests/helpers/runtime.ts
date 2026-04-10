@@ -3,14 +3,17 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { OpenClawTravelCompanionService } from "../../src/application/openclaw-travel-companion-service.js";
+import { CompanionConversationService } from "../../src/application/companion-conversation-service.js";
 import { RuntimeHooks } from "../../src/domain/types.js";
 import {
   JsonArtifactStore,
+  JsonConversationStateRepository,
   JsonPersonaRepository,
   JsonTripRepository,
   ensureRuntimeDataPaths,
 } from "../../src/infrastructure/json-file-repositories.js";
 import { JsonlFileLogger } from "../../src/infrastructure/jsonl-file-logger.js";
+import { BindingRegistryStore } from "../../src/openclaw-plugin/binding-state.js";
 import {
   FakeClock,
   FakeGroundingPort,
@@ -40,7 +43,11 @@ export async function createTestRuntime(options?: {
   const logger = new JsonlFileLogger(paths.logsDir);
   const personaRepository = new JsonPersonaRepository(paths.personasDir);
   const tripRepository = new JsonTripRepository(paths.tripsDir);
+  const conversationStateRepository = new JsonConversationStateRepository(
+    paths.conversationsDir,
+  );
   const artifactStore = new JsonArtifactStore(paths.artifactsDir);
+  const bindings = new BindingRegistryStore(rootDir);
   const service = new OpenClawTravelCompanionService({
     personaRepository,
     tripRepository,
@@ -53,6 +60,16 @@ export async function createTestRuntime(options?: {
     logger,
     hooks: options?.hooks,
   });
+  const conversationService = new CompanionConversationService({
+    bindings,
+    conversationStates: conversationStateRepository,
+    tripRepository,
+    personaRepository,
+    grounding,
+    messenger,
+    clock,
+    logger,
+  });
 
   return {
     rootDir,
@@ -64,9 +81,12 @@ export async function createTestRuntime(options?: {
     grounding,
     imageGeneration,
     logger,
+    bindings,
     personaRepository,
     tripRepository,
+    conversationStateRepository,
     artifactStore,
     service,
+    conversationService,
   };
 }
