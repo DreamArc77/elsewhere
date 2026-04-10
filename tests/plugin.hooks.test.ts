@@ -1,3 +1,5 @@
+import { readdir, readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
 import { handleTravelCompanionInboundClaim } from "../src/openclaw-plugin/hooks.js";
@@ -201,6 +203,18 @@ describe("travel companion inbound takeover hook", () => {
     expect(runtime.messenger.sentReplies[0]?.text).toContain(
       "No recent trip is recorded for this conversation yet.",
     );
+
+    const logFiles = await readdir(runtime.paths.logsDir);
+    const payload = (
+      await Promise.all(
+        logFiles.map((file) =>
+          readFile(`${runtime.paths.logsDir}\\${file}`, "utf8"),
+        ),
+      )
+    ).join("\n");
+    expect(payload).toContain('"event":"command.bridge.received"');
+    expect(payload).toContain('"event":"command.bridge.executed"');
+    expect(payload).toContain('"event":"command.bridge.replied"');
   });
 
   it("leaves non-travel-companion slash commands alone", async () => {

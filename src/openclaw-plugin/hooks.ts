@@ -112,6 +112,22 @@ export async function handleTravelCompanionInboundClaim(
 
   const trimmed = rawText.trim();
   if (trimmed.startsWith("/travel-companion")) {
+    const commandRunId = `command:${String(event.messageId ?? randomUUID())}`;
+    await logCommandBridgeEvent(deps.logger, {
+      binding,
+      runId: commandRunId,
+      event: "command.bridge.received",
+      decision: "Received travel-companion slash command inside a companion-exclusive conversation.",
+      provider: "inbound-claim",
+      status: "success",
+      details: {
+        commandBody: rawText,
+        messageId: String(event.messageId ?? ""),
+        mode: binding.mode,
+      },
+    });
+
+    const commandStartedAt = Date.now();
     const reply = await handleTravelCompanionCommand(
       buildSyntheticCommandContext(event, ctx, rawText),
       {
@@ -124,11 +140,61 @@ export async function handleTravelCompanionInboundClaim(
         logger: deps.logger,
       },
     );
-    await deps.messenger.sendTextReply({
+    await logCommandBridgeEvent(deps.logger, {
       binding,
-      text: reply.text,
-      dedupeKey: `command:${binding.key}:${String(event.messageId ?? randomUUID())}`,
+      runId: commandRunId,
+      event: "command.bridge.executed",
+      decision: "Executed the bridged travel-companion slash command.",
+      provider: "command-handler",
+      status: "success",
+      startedAtMs: commandStartedAt,
+      details: {
+        commandBody: rawText,
+        messageId: String(event.messageId ?? ""),
+        isError: reply.isError ?? false,
+      },
     });
+
+    const replyStartedAt = Date.now();
+    try {
+      await deps.messenger.sendTextReply({
+        binding,
+        text: reply.text,
+        dedupeKey: `command:${binding.key}:${String(event.messageId ?? randomUUID())}`,
+      });
+      await logCommandBridgeEvent(deps.logger, {
+        binding,
+        runId: commandRunId,
+        event: "command.bridge.replied",
+        decision: "Delivered bridged slash-command output back into the bound conversation.",
+        provider: "command-bridge",
+        status: "success",
+        startedAtMs: replyStartedAt,
+        details: {
+          commandBody: rawText,
+          messageId: String(event.messageId ?? ""),
+          replyLength: reply.text.length,
+        },
+      });
+    } catch (error) {
+      await logCommandBridgeEvent(deps.logger, {
+        binding,
+        runId: commandRunId,
+        event: "command.bridge.reply_failed",
+        decision: "Failed to deliver bridged slash-command output back into the bound conversation.",
+        provider: "command-bridge",
+        status: "failure",
+        startedAtMs: replyStartedAt,
+        errorCode: error instanceof Error ? error.name : "command_bridge_reply_failed",
+        details: {
+          commandBody: rawText,
+          messageId: String(event.messageId ?? ""),
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
+      throw error;
+    }
+
     return { handled: true };
   }
 
@@ -320,4 +386,39 @@ function normalizeRoutePart(value: string | number | undefined): string | null {
   }
   const normalized = String(value).trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+async function logCommandBridgeEvent(
+  logger: LoggerPort,
+  input: {
+    binding: { key: string };
+    runId: string;
+    event: string;
+    decision: string;
+    provider: string;
+    status: "success" | "failure" | "skipped";
+    startedAtMs?: number;
+    errorCode?: string;
+    details?: Record<string, unknown>;
+  },
+): Promise<void> {
+  const finishedAtMs = Date.now();
+  const startedAtMs = input.startedAtMs ?? finishedAtMs;
+  await logger.log({
+    tripId: `conversation:${input.binding.key}`,
+    runId: input.runId,
+    phase: "system",
+    event: input.event,
+    decision: input.decision,
+    provider: input.provider,
+    status: input.status,
+    startedAt: new Date(startedAtMs).toISOString(),
+    finishedAt: new Date(finishedAtMs).toISOString(),
+    latencyMs: Math.max(0, finishedAtMs - startedAtMs),
+    errorCode: input.errorCode,
+    details: {
+      conversationKey: input.binding.key,
+      ...(input.details ?? {}),
+    },
+  });
 }
