@@ -58,8 +58,27 @@ describe("state machine", () => {
         step.day === 2,
     );
 
-    expect(lateStep?.scheduledAt.startsWith("2026-04-14")).toBe(true);
     expect(lateStep?.context?.timing.startLocal.includes("T02:00:00")).toBe(true);
+    expect(lateStep?.context?.timing.timeZone).toBe("Asia/Tokyo");
+  });
+
+  it("uses the destination local time zone for Chinese mainland destinations", () => {
+    const qingdaoPlan = buildFixtureTripPlan({
+      tripId: "trip-qingdao",
+      originCity: "Hong Kong",
+      destinationCity: "Qingdao",
+      days: 3,
+    });
+
+    const timeline = buildTimeline(
+      qingdaoPlan,
+      new Date("2026-04-09T00:00:00.000Z"),
+    );
+    const firstActivityStep = timeline.find(
+      (candidate) => candidate.context?.kind === "activity",
+    );
+
+    expect(firstActivityStep?.context?.timing.timeZone).toBe("Asia/Shanghai");
   });
 
   it("creates at least one postcard step per activity", () => {

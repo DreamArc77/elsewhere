@@ -121,6 +121,8 @@ describe("travel companion prompts", () => {
 
     expect(prompts[1]).toContain(request.destinationCity);
     expect(prompts[1]).toContain(selfieImagePrompt);
+    expect(prompts[1]).toContain("不要写成这趟旅行是在“去找用户”");
+    expect(prompts[1]).toContain("不能是你此行的目标");
 
     expect(prompts[2]).toContain("reference image");
     expect(prompts[2]).toContain("Do not include any companion");
@@ -193,6 +195,8 @@ describe("travel companion prompts", () => {
 
     expect(prompt).toContain("Current companion state:");
     expect(prompt).toContain('"scene": "food"');
+    expect(prompt).toContain("You are traveling alone.");
+    expect(prompt).toContain("Do not describe the trip as moving toward the user");
     expect(prompt).toContain("Current state grounding:");
     expect(prompt).toContain("成桂西餐厅");
     expect(prompt).toContain("Latest pending user message time:");

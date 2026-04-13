@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { OpenClawTravelCompanionService } from "../src/application/openclaw-travel-companion-service.js";
+import type { TripPlan } from "../src/domain/types.js";
 import { JsonArtifactStore, JsonPersonaRepository, JsonTripRepository } from "../src/infrastructure/json-file-repositories.js";
 import { JsonlFileLogger } from "../src/infrastructure/jsonl-file-logger.js";
 import { createTestRuntime } from "./helpers/runtime.js";
+import { buildFixtureTripPlan } from "../src/testing/fakes.js";
 
 describe("service scheduling and crash recovery", () => {
   it("does not send duplicate postcards when the same trip is ticked concurrently", async () => {
@@ -202,5 +204,56 @@ describe("service scheduling and crash recovery", () => {
     await resumedService.runTrip(trip.tripId);
     expect(runtime.messenger.sentMessages).toHaveLength(1);
     expect(runtime.messenger.rawSendAttempts).toBe(2);
+  });
+
+  it("normalizes boundary arrival context for the first and last activities", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const brokenPlan: TripPlan = buildFixtureTripPlan({
+      tripId: "trip-broken",
+      originCity: "Hong Kong",
+      destinationCity: "Qingdao",
+      days: 3,
+    });
+    brokenPlan.daily_itinerary[0]!.activities[0]!.arrival_context.from_location =
+      "Hong Kong International Airport";
+    brokenPlan.daily_itinerary[0]!.activities[0]!.arrival_context.transport_mode =
+      "airplane";
+    brokenPlan.daily_itinerary[0]!.activities[0]!.route!.from_location =
+      "Hong Kong International Airport";
+    brokenPlan.daily_itinerary[0]!.activities[0]!.location =
+      "Hong Kong International Airport -> Qingdao Central Hotel";
+    brokenPlan.daily_itinerary[2]!.activities[2]!.route!.to_location =
+      "Some Wrong Place";
+    brokenPlan.daily_itinerary[2]!.activities[2]!.location =
+      "Qingdao Downtown -> Some Wrong Place";
+
+    runtime.grounding.planTrip = async ({ tripId }) => ({
+      ...brokenPlan,
+      tripId,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Qingdao",
+    });
+
+    expect(
+      trip.plan.daily_itinerary[0]!.activities[0]!.arrival_context.from_location,
+    ).toBe("Qingdao International Airport");
+    expect(trip.plan.daily_itinerary[0]!.activities[0]!.route?.from_location).toBe(
+      "Qingdao International Airport",
+    );
+    expect(trip.plan.daily_itinerary[2]!.activities[2]!.route?.to_location).toBe(
+      "Qingdao International Airport",
+    );
   });
 });

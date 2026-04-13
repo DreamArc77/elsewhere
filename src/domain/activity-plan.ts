@@ -15,11 +15,13 @@ const SYNTHETIC_REFLECTION_DELAY_MINUTES = 120;
 const DESTINATION_TIME_ZONE_MAP: Array<[RegExp, string]> = [
   [/tokyo|東京/u, "Asia/Tokyo"],
   [/osaka|kyoto|京都|大阪/u, "Asia/Tokyo"],
-  [/shanghai|上海/u, "Asia/Shanghai"],
+  [/shanghai|上海|beijing|北京|tianjin|天津|qingdao|青岛/u, "Asia/Shanghai"],
   [/hong\s*kong|香港/u, "Asia/Hong_Kong"],
   [/taipei|台北/u, "Asia/Taipei"],
   [/seoul|首尔|首爾/u, "Asia/Seoul"],
   [/singapore|新加坡/u, "Asia/Singapore"],
+  [/istanbul|伊斯坦布尔/u, "Europe/Istanbul"],
+  [/chiang\s*mai|清迈/u, "Asia/Bangkok"],
   [/new\s*york|纽约|紐約/u, "America/New_York"],
   [/los\s*angeles|洛杉矶|洛杉磯/u, "America/Los_Angeles"],
   [/paris|巴黎/u, "Europe/Paris"],
@@ -256,7 +258,7 @@ function durationMinutesFromRange(
 }
 
 export function inferDestinationTimeZone(plan: TripPlan): string {
-  const destination = plan.metadata.destination.trim();
+  const destination = plan.metadata.destination.trim().toLowerCase();
   for (const [pattern, timeZone] of DESTINATION_TIME_ZONE_MAP) {
     if (pattern.test(destination)) {
       return timeZone;

@@ -77,10 +77,13 @@ export class OpenClawTravelCompanionService {
         persona,
         request,
       });
-      const normalizedPlan: TripPlan = {
-        ...plan,
-        tripId,
-      };
+      const normalizedPlan = normalizeTripPlan(
+        {
+          ...plan,
+          tripId,
+        },
+        request,
+      );
       const planArtifactId = randomUUID();
       const planPath = await this.dependencies.artifactStore.writeJsonArtifact({
         tripId,
@@ -646,4 +649,68 @@ function errorCode(error: unknown): string {
     return error.name;
   }
   return "UnknownError";
+}
+
+function normalizeTripPlan(plan: TripPlan, request: TripRequest): TripPlan {
+  const normalizedDays = plan.daily_itinerary.map((day) => ({
+    ...day,
+    activities: day.activities.map((activity) => ({
+      ...activity,
+      arrival_context: {
+        ...activity.arrival_context,
+      },
+      route: activity.route
+        ? {
+            ...activity.route,
+          }
+        : undefined,
+      real_time_info: {
+        ...activity.real_time_info,
+      },
+    })),
+  }));
+
+  if (normalizedDays.length === 0) {
+    return {
+      ...plan,
+      tripId: plan.tripId,
+      metadata: {
+        ...plan.metadata,
+        origin: request.originCity,
+        destination: plan.metadata.destination,
+      },
+      daily_itinerary: normalizedDays,
+    };
+  }
+
+  const firstDay = normalizedDays[0]!;
+  const firstActivity = firstDay.activities[0];
+  if (firstActivity) {
+    firstActivity.arrival_context.from_location =
+      plan.transportation.departure.arrival.station;
+    firstActivity.arrival_context.transport_mode =
+      plan.transportation.departure.transport_mode;
+
+    if (firstActivity.type === "transport" && firstActivity.route) {
+      firstActivity.route.from_location =
+        plan.transportation.departure.arrival.station;
+      firstActivity.location = `${firstActivity.route.from_location} -> ${firstActivity.route.to_location}`;
+    }
+  }
+
+  const lastDay = normalizedDays[normalizedDays.length - 1]!;
+  const lastActivity = lastDay.activities[lastDay.activities.length - 1];
+  if (lastActivity?.type === "transport" && lastActivity.route) {
+    lastActivity.route.to_location = plan.transportation.return.departure.station;
+    lastActivity.location = `${lastActivity.route.from_location} -> ${lastActivity.route.to_location}`;
+  }
+
+  return {
+    ...plan,
+    metadata: {
+      ...plan.metadata,
+      origin: request.originCity,
+    },
+    daily_itinerary: normalizedDays,
+  };
 }
