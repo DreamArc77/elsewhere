@@ -4,16 +4,15 @@ import { deriveCompanionBusinessSituation } from "../src/domain/business-situati
 import { createTestRuntime } from "./helpers/runtime.js";
 
 describe("companion business situation", () => {
-  it("derives an idle situation when there is no active trip", () => {
+  it("derives idle when there is no active trip", () => {
     const situation = deriveCompanionBusinessSituation(null);
 
+    expect(situation.state).toBe("idle");
+    expect(situation.substate).toBe("idle");
     expect(situation.mode).toBe("idle");
-    expect(situation.scene).toBe("idle");
-    expect(situation.presence).toBe("available");
-    expect(situation.replyDelayMs).toBe(2 * 60 * 1000);
   });
 
-  it("derives a planning situation before the trip leaves", async () => {
+  it("starts in planning right after trip creation", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
@@ -30,15 +29,16 @@ describe("companion business situation", () => {
     });
 
     const record = await runtime.tripRepository.getById(trip.tripId);
-    const situation = deriveCompanionBusinessSituation(record!);
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      new Date(record!.createdAt),
+    );
 
-    expect(situation.mode).toBe("traveling");
-    expect(situation.scene).toBe("planning");
-    expect(situation.presence).toBe("busy");
-    expect(situation.replyDelayMs).toBe(3 * 60 * 1000);
+    expect(situation.state).toBe("plan");
+    expect(situation.substate).toBe("planning");
   });
 
-  it("derives a moving situation during departure and keeps the slower delay", async () => {
+  it("moves into packing after the short planning state", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
@@ -54,17 +54,17 @@ describe("companion business situation", () => {
       destinationCity: "Tokyo",
     });
 
-    await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
     const record = await runtime.tripRepository.getById(trip.tripId);
-    const situation = deriveCompanionBusinessSituation(record!);
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      new Date(new Date(record!.createdAt).getTime() + 2 * 60 * 1000),
+    );
 
-    expect(situation.currentPhase).toBe("departing");
-    expect(situation.scene).toBe("airport");
-    expect(situation.presence).toBe("moving");
-    expect(situation.replyDelayMs).toBe(8 * 60 * 1000);
+    expect(situation.state).toBe("plan");
+    expect(situation.substate).toBe("packing");
   });
 
-  it("derives a regular exploration situation for non-transport travel steps", async () => {
+  it("derives before_departure in the final three hours before outbound transport", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
@@ -80,15 +80,92 @@ describe("companion business situation", () => {
       destinationCity: "Tokyo",
     });
 
-    await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
-    await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
-    await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
     const record = await runtime.tripRepository.getById(trip.tripId);
-    const situation = deriveCompanionBusinessSituation(record!);
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      new Date("2026-04-11T22:00:00.000Z"),
+    );
 
-    expect(situation.currentPhase).toBe("day_exploration");
-    expect(situation.scene).toBe("shopping");
-    expect(situation.presence).toBe("available");
-    expect(situation.replyDelayMs).toBe(3 * 60 * 1000);
+    expect(situation.state).toBe("departure");
+    expect(situation.substate).toBe("before_departure");
+  });
+
+  it("derives freetime between finished activity and next moving window", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    const record = await runtime.tripRepository.getById(trip.tripId);
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      new Date("2026-04-13T03:05:00.000Z"),
+    );
+
+    expect(situation.state).toBe("activities");
+    expect(situation.substate).toBe("freetime");
+  });
+
+  it("derives moving_to_next_activity right before a timed activity", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    const record = await runtime.tripRepository.getById(trip.tripId);
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      new Date("2026-04-13T03:12:00.000Z"),
+    );
+
+    expect(situation.state).toBe("activities");
+    expect(situation.substate).toBe("moving_to_next_activity");
+  });
+
+  it("derives food during an active food activity", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    const record = await runtime.tripRepository.getById(trip.tripId);
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      new Date("2026-04-13T03:20:00.000Z"),
+    );
+
+    expect(situation.state).toBe("activities");
+    expect(situation.substate).toBe("food");
+    expect(situation.scene).toBe("food");
   });
 });

@@ -26,15 +26,25 @@ export function buildDerivedGrounding(input: {
     phase: input.phase,
     day: input.day,
     locality: activity.location,
-    weatherSummary: input.plan.search_summary.weather_forecast,
-    transitSummary: activity.transport_memo,
+    weatherSummary:
+      input.plan.daily_itinerary.find((entry) => entry.day === input.day)
+        ?.weather_forecast ?? "",
+    transitSummary: buildTransitSummary(activity),
     venueSummary: `${activity.description} ${liveUpdate}`.trim(),
     photoBrief: `${input.stepContext.sendMoment} phone-shot update at ${activity.location}.`,
     sensoryHighlights: uniqueHighlights([
       liveUpdate,
       activity.description,
-      activity.transport_memo,
+      buildTransitSummary(activity),
     ]),
     groundingSources: [],
   };
+}
+
+function buildTransitSummary(activity: RuntimeStepContext["activity"]): string {
+  if (activity.type === "transport" && activity.route) {
+    return `${activity.route.transport_mode} from ${activity.route.from_location} to ${activity.route.to_location}`;
+  }
+
+  return `${activity.arrival_context.transport_mode} from ${activity.arrival_context.from_location} in about ${activity.arrival_context.duration_minutes} minutes`;
 }

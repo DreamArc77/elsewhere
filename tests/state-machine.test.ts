@@ -27,7 +27,7 @@ describe("state machine", () => {
     expect(timeline[0]?.phase).toBe("planning");
     expect(timeline[0]?.day).toBe(0);
     expect(timeline[0]?.context?.activity.description).toContain(
-      "pre-departure preparation",
+      "Before leaving Hong Kong for Tokyo",
     );
     expect(timeline[0]?.context?.activity.location).toContain("Departure prep");
     expect(timeline.at(-1)?.phase).toBe("home_reflection");
@@ -40,7 +40,7 @@ describe("state machine", () => {
           step.context?.kind === "activity" &&
           step.context.activity.type === "transport",
       ).length,
-    ).toBe(1);
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("supports cross-day single-slot timestamps like 02:00 (+1)", () => {

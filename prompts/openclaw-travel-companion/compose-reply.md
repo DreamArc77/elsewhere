@@ -15,8 +15,17 @@ Persona:
 Conversation key:
 {{conversationKey}}
 
+Current companion state:
+{{currentStateSummary}}
+
+Current state grounding:
+{{currentStateGrounding}}
+
 Current time:
 {{now}}
+
+Latest pending user message time:
+{{latestUserMessageAt}}
 
 Active trip snapshot:
 {{activeTripSummary}}

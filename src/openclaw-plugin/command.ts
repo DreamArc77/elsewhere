@@ -272,6 +272,15 @@ async function statusTrip(
     return { text: `Trip not found: ${tripId}`, isError: true };
   }
 
+  const inspection = await deps.conversationService.inspectConversation({
+    binding: binding.record,
+  });
+  const pendingReplyCount = inspection.state?.pendingUserMessages.length ?? 0;
+  const replyDueAt = inspection.state?.pendingReplyDispatch?.dueAt ?? "none";
+  const hotWindow = inspection.state?.instantReplyWindow
+    ? `${inspection.state.instantReplyWindow.source}:${inspection.state.instantReplyWindow.triggerAt} -> ${inspection.state.instantReplyWindow.expiresAt} (${Math.max(inspection.state.instantReplyWindow.cap - inspection.state.instantReplyWindow.usedCount, 0)} left)`
+    : "none";
+
   return {
     text: [
       `tripId: ${trip.tripId}`,
@@ -280,6 +289,12 @@ async function statusTrip(
       `day: ${trip.state.currentDay}`,
       `nextRunAt: ${trip.state.nextRunAt ?? "none"}`,
       `artifacts: ${trip.state.artifacts.length}`,
+      `conversationMode: ${binding.record.mode}`,
+      `state: ${inspection.businessSituation.state}`,
+      `substate: ${inspection.businessSituation.substate}`,
+      `pendingReplyCount: ${pendingReplyCount}`,
+      `replyDueAt: ${replyDueAt}`,
+      `instantReplyWindow: ${hotWindow}`,
     ].join("\n"),
   };
 }

@@ -17,7 +17,11 @@ import {
   TripRecord,
   TripRepository,
 } from "../domain/types.js";
-import { deriveCompanionBusinessSituation } from "../domain/business-situation.js";
+import {
+  createReplyHotWindow,
+  deriveCompanionBusinessSituation,
+  deriveReplyDueAt,
+} from "../domain/business-situation.js";
 
 function nowIso(clock: ClockPort): string {
   return clock.now().toISOString();
@@ -45,6 +49,7 @@ function emptyConversationState(
     mode,
     pendingUserMessages: [],
     pendingReplyDispatch: null,
+    instantReplyWindow: null,
     recentHandledCommandMessageIds: [],
     recentTurns: [],
     lastUserMessageAt: null,
@@ -119,6 +124,7 @@ export class CompanionConversationService {
       mode: "default",
       pendingUserMessages: [],
       pendingReplyDispatch: null,
+      instantReplyWindow: null,
       updatedAt,
     };
     await this.dependencies.conversationStates.save(nextState);
@@ -229,15 +235,20 @@ export class CompanionConversationService {
   }): Promise<ConversationCompanionState> {
     const startedAt = nowIso(this.dependencies.clock);
     const activeTrip = await this.getActiveTrip(input.binding);
-    const businessSituation = deriveCompanionBusinessSituation(activeTrip);
     const updatedAt = nowIso(this.dependencies.clock);
     const state =
       (await this.dependencies.conversationStates.getByKey(input.binding.key)) ??
       emptyConversationState(input.binding.key, input.binding.mode, updatedAt);
 
-    const dueAt = new Date(
-      this.dependencies.clock.now().getTime() + businessSituation.replyDelayMs,
-    ).toISOString();
+    const replySchedule = deriveReplyDueAt({
+      conversationKey: input.binding.key,
+      messageId: input.messageId,
+      now: this.dependencies.clock.now(),
+      activeTrip,
+      conversationState: state,
+    });
+    const businessSituation = replySchedule.businessSituation;
+    const dueAt = replySchedule.dueAt;
     const pendingUserMessages = [
       ...state.pendingUserMessages,
       {
@@ -260,7 +271,9 @@ export class CompanionConversationService {
         dueAt,
         segments: [],
         sourceMessageIds: pendingUserMessages.map((message) => message.messageId),
+        instantSeen: replySchedule.instantSeen,
       },
+      instantReplyWindow: replySchedule.instantReplyWindow,
       recentTurns: trimTurns(
         [
           ...state.recentTurns,
@@ -295,8 +308,11 @@ export class CompanionConversationService {
         replyDueAt: dueAt,
         mode: input.binding.mode,
         businessMode: businessSituation.mode,
+        businessState: businessSituation.state,
+        businessSubstate: businessSituation.substate,
         businessScene: businessSituation.scene,
         businessPresence: businessSituation.presence,
+        instantSeen: replySchedule.instantSeen,
       },
     });
 
@@ -316,8 +332,11 @@ export class CompanionConversationService {
         replyDueAt: dueAt,
         mode: input.binding.mode,
         businessMode: businessSituation.mode,
+        businessState: businessSituation.state,
+        businessSubstate: businessSituation.substate,
         businessScene: businessSituation.scene,
         businessPresence: businessSituation.presence,
+        instantSeen: replySchedule.instantSeen,
       },
     });
 
@@ -415,6 +434,29 @@ export class CompanionConversationService {
     }
   }
 
+  async inspectConversation(input: {
+    binding: ConversationBindingRecord;
+  }): Promise<{
+    state: ConversationCompanionState | null;
+    activeTrip: TripRecord | null;
+    businessSituation: CompanionBusinessSituation;
+  }> {
+    const state = await this.dependencies.conversationStates.getByKey(
+      input.binding.key,
+    );
+    const activeTrip = await this.getActiveTrip(input.binding);
+    const businessSituation = deriveCompanionBusinessSituation(
+      activeTrip,
+      this.dependencies.clock.now(),
+    );
+
+    return {
+      state,
+      activeTrip,
+      businessSituation,
+    };
+  }
+
   private async generateAndDispatch(
     binding: ConversationBindingRecord,
     state: ConversationCompanionState,
@@ -422,7 +464,10 @@ export class CompanionConversationService {
     startedAt: string,
   ): Promise<ConversationCompanionState> {
     const activeTrip = await this.getActiveTrip(binding);
-    const businessSituation = deriveCompanionBusinessSituation(activeTrip);
+    const businessSituation = deriveCompanionBusinessSituation(
+      activeTrip,
+      this.dependencies.clock.now(),
+    );
     const persona = await this.getPersona(binding);
     await this.log({
       tripId: activeTrip?.tripId ?? `conversation:${binding.key}`,
@@ -438,6 +483,8 @@ export class CompanionConversationService {
         conversationKey: binding.key,
         queuedMessageCount: state.pendingUserMessages.length,
         businessMode: businessSituation.mode,
+        businessState: businessSituation.state,
+        businessSubstate: businessSituation.substate,
         businessScene: businessSituation.scene,
         businessPresence: businessSituation.presence,
       },
@@ -489,6 +536,8 @@ export class CompanionConversationService {
         segmentCount: replyPlan.segments.length,
         replyDueAt: pendingReplyDispatch.dueAt,
         businessMode: businessSituation.mode,
+        businessState: businessSituation.state,
+        businessSubstate: businessSituation.substate,
         businessScene: businessSituation.scene,
         businessPresence: businessSituation.presence,
       },
@@ -528,7 +577,10 @@ export class CompanionConversationService {
     }
 
     const activeTrip = await this.getActiveTrip(binding);
-    const businessSituation = deriveCompanionBusinessSituation(activeTrip);
+    const businessSituation = deriveCompanionBusinessSituation(
+      activeTrip,
+      this.dependencies.clock.now(),
+    );
     const sentAt = nowIso(this.dependencies.clock);
     for (const [index, segment] of pending.segments.entries()) {
       await this.dependencies.messenger.sendTextReply({
@@ -542,6 +594,12 @@ export class CompanionConversationService {
       ...state,
       pendingUserMessages: [],
       pendingReplyDispatch: null,
+      instantReplyWindow: createReplyHotWindow({
+        conversationKey: binding.key,
+        businessSituation,
+        triggerAt: sentAt,
+        source: "reply",
+      }),
       recentTurns: trimTurns(
         [
           ...state.recentTurns,
@@ -574,6 +632,8 @@ export class CompanionConversationService {
         segmentCount: pending.segments.length,
         queuedMessageCount: pending.sourceMessageIds.length,
         businessMode: businessSituation.mode,
+        businessState: businessSituation.state,
+        businessSubstate: businessSituation.substate,
         businessScene: businessSituation.scene,
         businessPresence: businessSituation.presence,
       },

@@ -18,7 +18,18 @@ export const itineraryActivitySchema = z.object({
     "accommodation",
   ]),
   description: z.string().min(1),
-  transport_memo: z.string().min(1),
+  arrival_context: z.object({
+    from_location: z.string().min(1),
+    transport_mode: z.enum(["airplane", "train", "car", "subway", "walk"]),
+    duration_minutes: z.number().int().min(0).max(600),
+  }),
+  route: z
+    .object({
+      from_location: z.string().min(1),
+      to_location: z.string().min(1),
+      transport_mode: z.enum(["airplane", "train", "car", "subway", "walk"]),
+    })
+    .optional(),
   real_time_info: z.object({
     live_update: z.string().min(1),
   }),
@@ -27,6 +38,7 @@ export const itineraryActivitySchema = z.object({
 export const dailyItinerarySchema = z.object({
   day: z.number().int().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  weather_forecast: z.string().min(1),
   theme: z.string().min(1),
   activities: z.array(itineraryActivitySchema).min(1),
 });
@@ -34,40 +46,39 @@ export const dailyItinerarySchema = z.object({
 export const tripPlanSchema = z.object({
   tripId: z.string().min(1),
   metadata: z.object({
+    origin: z.string().min(1),
     destination: z.string().min(1),
     days: z.number().int().min(1).max(14),
   }),
   transportation: z.object({
-    outbound: z.object({
+    departure: z.object({
       type: z.enum(["flight", "train"]),
+      transport_mode: z.enum(["airplane", "train"]),
       identifier: z.string().min(1),
-      airline_operator: z.string().min(1).optional(),
+      operator: z.string().min(1),
       departure: z.object({
-        airport_station: z.string().min(1),
+        station: z.string().min(1),
         time: z.string().min(1),
       }),
       arrival: z.object({
-        airport_station: z.string().min(1),
+        station: z.string().min(1),
         time: z.string().min(1),
       }),
     }),
     return: z.object({
       type: z.enum(["flight", "train"]),
+      transport_mode: z.enum(["airplane", "train"]),
       identifier: z.string().min(1),
-      airline_operator: z.string().min(1).optional(),
+      operator: z.string().min(1),
       departure: z.object({
-        airport_station: z.string().min(1),
+        station: z.string().min(1),
         time: z.string().min(1),
       }),
       arrival: z.object({
-        airport_station: z.string().min(1),
+        station: z.string().min(1),
         time: z.string().min(1),
       }),
     }),
-  }),
-  search_summary: z.object({
-    weather_forecast: z.string().min(1),
-    major_events: z.array(z.string().min(1)),
   }),
   daily_itinerary: z.array(dailyItinerarySchema).min(1),
 });
@@ -119,44 +130,35 @@ export function extractLikelyJson(rawText: string): string {
 
 export const tripPlanJsonSchema = {
   type: "OBJECT",
-  required: ["tripId", "metadata", "transportation", "search_summary", "daily_itinerary"],
+  required: ["tripId", "metadata", "transportation", "daily_itinerary"],
   properties: {
     tripId: { type: "STRING" },
     metadata: {
       type: "OBJECT",
-      required: ["destination", "days"],
+      required: ["origin", "destination", "days"],
       properties: {
+        origin: { type: "STRING" },
         destination: { type: "STRING" },
         days: { type: "INTEGER", minimum: 1, maximum: 14 },
       },
     },
     transportation: {
       type: "OBJECT",
-      required: ["outbound", "return"],
+      required: ["departure", "return"],
       properties: {
-        outbound: transportLegJsonSchema(),
+        departure: transportLegJsonSchema(),
         return: transportLegJsonSchema(),
-      },
-    },
-    search_summary: {
-      type: "OBJECT",
-      required: ["weather_forecast", "major_events"],
-      properties: {
-        weather_forecast: { type: "STRING" },
-        major_events: {
-          type: "ARRAY",
-          items: { type: "STRING" },
-        },
       },
     },
     daily_itinerary: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
-        required: ["day", "date", "theme", "activities"],
+        required: ["day", "date", "weather_forecast", "theme", "activities"],
         properties: {
           day: { type: "INTEGER" },
           date: { type: "STRING" },
+          weather_forecast: { type: "STRING" },
           theme: { type: "STRING" },
           activities: {
             type: "ARRAY",
@@ -168,7 +170,7 @@ export const tripPlanJsonSchema = {
                 "address",
                 "type",
                 "description",
-                "transport_memo",
+                "arrival_context",
                 "real_time_info",
               ],
               properties: {
@@ -186,7 +188,38 @@ export const tripPlanJsonSchema = {
                   ],
                 },
                 description: { type: "STRING" },
-                transport_memo: { type: "STRING" },
+                arrival_context: {
+                  type: "OBJECT",
+                  required: [
+                    "from_location",
+                    "transport_mode",
+                    "duration_minutes",
+                  ],
+                  properties: {
+                    from_location: { type: "STRING" },
+                    transport_mode: {
+                      type: "STRING",
+                      enum: ["airplane", "train", "car", "subway", "walk"],
+                    },
+                    duration_minutes: { type: "INTEGER", minimum: 0, maximum: 600 },
+                  },
+                },
+                route: {
+                  type: "OBJECT",
+                  required: [
+                    "from_location",
+                    "to_location",
+                    "transport_mode",
+                  ],
+                  properties: {
+                    from_location: { type: "STRING" },
+                    to_location: { type: "STRING" },
+                    transport_mode: {
+                      type: "STRING",
+                      enum: ["airplane", "train", "car", "subway", "walk"],
+                    },
+                  },
+                },
                 real_time_info: {
                   type: "OBJECT",
                   required: ["live_update"],
@@ -219,24 +252,32 @@ export const companionReplyPlanJsonSchema = {
 function transportLegJsonSchema() {
   return {
     type: "OBJECT",
-    required: ["type", "identifier", "departure", "arrival"],
+    required: [
+      "type",
+      "transport_mode",
+      "identifier",
+      "operator",
+      "departure",
+      "arrival",
+    ],
     properties: {
       type: { type: "STRING", enum: ["flight", "train"] },
+      transport_mode: { type: "STRING", enum: ["airplane", "train"] },
       identifier: { type: "STRING" },
-      airline_operator: { type: "STRING" },
+      operator: { type: "STRING" },
       departure: {
         type: "OBJECT",
-        required: ["airport_station", "time"],
+        required: ["station", "time"],
         properties: {
-          airport_station: { type: "STRING" },
+          station: { type: "STRING" },
           time: { type: "STRING" },
         },
       },
       arrival: {
         type: "OBJECT",
-        required: ["airport_station", "time"],
+        required: ["station", "time"],
         properties: {
-          airport_station: { type: "STRING" },
+          station: { type: "STRING" },
           time: { type: "STRING" },
         },
       },

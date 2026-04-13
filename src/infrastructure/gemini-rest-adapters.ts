@@ -9,6 +9,7 @@ import {
   tripPlanJsonSchema,
   tripPlanSchema,
 } from "../contracts/schemas.js";
+import { deriveCompanionState } from "../domain/business-situation.js";
 import {
   CompanionBusinessSituation,
   CompanionReplyPlan,
@@ -97,6 +98,123 @@ function truncate(value: string, maxLength: number): string {
     : value;
 }
 
+function latestPendingUserMessageAt(
+  pendingUserMessages: InboundUserMessage[],
+): string {
+  return (
+    pendingUserMessages[pendingUserMessages.length - 1]?.receivedAt ??
+    "No pending user messages."
+  );
+}
+
+function buildCurrentStateSummary(input: {
+  activeTrip: TripRecord | null;
+  businessSituation: CompanionBusinessSituation;
+  now: string;
+}): string {
+  if (!input.activeTrip) {
+    return JSON.stringify(
+      {
+        mode: input.businessSituation.mode,
+        scene: input.businessSituation.scene,
+        presence: input.businessSituation.presence,
+        note: "No active trip right now.",
+      },
+      null,
+      2,
+    );
+  }
+
+  const derived = deriveCompanionState(
+    input.activeTrip,
+    new Date(input.now),
+  );
+  return JSON.stringify(
+    {
+      tripId: input.activeTrip.tripId,
+      destination: input.activeTrip.request.destinationCity,
+      mode: input.businessSituation.mode,
+      state: input.businessSituation.state,
+      substate: input.businessSituation.substate,
+      scene: input.businessSituation.scene,
+      presence: input.businessSituation.presence,
+      phase: input.businessSituation.currentPhase,
+      day: input.businessSituation.currentDay,
+      contextKind: input.businessSituation.contextKind,
+      sendMoment: input.businessSituation.sendMoment,
+      postcardEligible: input.businessSituation.postcardEligible,
+      isExtraMessage: input.businessSituation.isExtraMessage,
+      stateStartedAt: input.businessSituation.stateStartedAt ?? null,
+      stateEndsAt: input.businessSituation.stateEndsAt ?? null,
+      weatherForecast: derived.weatherForecast ?? null,
+    },
+    null,
+    2,
+  );
+}
+
+function buildCurrentStateGrounding(
+  activeTrip: TripRecord | null,
+  now: string,
+): string {
+  if (!activeTrip) {
+    return JSON.stringify(
+      {
+        note: "Idle state. No trip grounding is available right now.",
+      },
+      null,
+      2,
+    );
+  }
+
+  const derived = deriveCompanionState(activeTrip, new Date(now));
+  if (!derived.currentActivity && !derived.previousActivity && !derived.nextActivity) {
+    return JSON.stringify(
+      {
+        note: "Trip exists, but there is no current activity-like grounding for this state.",
+        weatherForecast: derived.weatherForecast ?? null,
+      },
+      null,
+      2,
+    );
+  }
+
+  return JSON.stringify(
+    {
+      weatherForecast: derived.weatherForecast ?? null,
+      stateStartedAt: derived.timing.startedAt,
+      stateEndsAt: derived.timing.endsAt ?? null,
+      currentActivity: derived.currentActivity
+        ? {
+            type: derived.currentActivity.type,
+            location: derived.currentActivity.location,
+            address: derived.currentActivity.address,
+            description: derived.currentActivity.description,
+            arrivalContext: derived.currentActivity.arrival_context,
+            route: derived.currentActivity.route ?? null,
+            liveUpdate: derived.currentActivity.real_time_info.live_update,
+          }
+        : null,
+      previousActivity: derived.previousActivity
+        ? {
+            type: derived.previousActivity.type,
+            location: derived.previousActivity.location,
+            description: derived.previousActivity.description,
+          }
+        : null,
+      nextActivity: derived.nextActivity
+        ? {
+            type: derived.nextActivity.type,
+            location: derived.nextActivity.location,
+            description: derived.nextActivity.description,
+          }
+        : null,
+    },
+    null,
+    2,
+  );
+}
+
 function mimeTypeFromPath(path: string): string {
   const extension = extname(path).toLowerCase();
   switch (extension) {
@@ -179,7 +297,7 @@ export class GeminiRestGroundingAdapter
         "纠错提醒：上一次输出不合格。请重新生成完整 JSON，并严格遵守这些额外要求：",
         "1. 不允许把用户写进旅行现场，用户只是远端收消息的人。",
         "2. 不允许出现恋爱对白、病娇台词、威胁、占有欲、牵手、见面、同行叙事。",
-        "3. `description`、`transport_memo`、`live_update` 必须是客观、可执行的旅行信息。",
+        "3. `description`、`arrival_context`、`route`、`live_update` 必须是客观、可执行的旅行信息。",
         "4. 日期必须晚于或等于今天，不能回到过去年份。",
       ].join("\n"),
     ];
@@ -257,6 +375,15 @@ export class GeminiRestGroundingAdapter
     businessSituation: CompanionBusinessSituation;
     now: string;
   }): Promise<CompanionReplyPlan> {
+    const currentStateSummary = buildCurrentStateSummary({
+      activeTrip: input.activeTrip,
+      businessSituation: input.businessSituation,
+      now: input.now,
+    });
+    const currentStateGrounding = buildCurrentStateGrounding(
+      input.activeTrip,
+      input.now,
+    );
     const prompt = await renderCompanionReplyPrompt({
       persona: input.persona,
       conversationKey: input.conversationKey,
@@ -280,7 +407,10 @@ export class GeminiRestGroundingAdapter
         null,
         2,
       ),
+      currentStateSummary,
+      currentStateGrounding,
       now: input.now,
+      latestUserMessageAt: latestPendingUserMessageAt(input.pendingUserMessages),
     });
 
     const response = await this.generateContent(this.textModel, {

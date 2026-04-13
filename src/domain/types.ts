@@ -47,6 +47,12 @@ export interface GroundingSource {
 }
 
 export type TransportType = "flight" | "train";
+export type TransitMode =
+  | "airplane"
+  | "train"
+  | "car"
+  | "subway"
+  | "walk";
 export type ActivityType =
   | "sightseeing"
   | "food"
@@ -55,21 +61,29 @@ export type ActivityType =
   | "accommodation";
 
 export interface TransportEndpoint {
-  airport_station: string;
+  station: string;
   time: string;
 }
 
 export interface TransportationLeg {
   type: TransportType;
+  transport_mode: "airplane" | "train";
   identifier: string;
-  airline_operator?: string;
+  operator: string;
   departure: TransportEndpoint;
   arrival: TransportEndpoint;
 }
 
-export interface SearchSummary {
-  weather_forecast: string;
-  major_events: string[];
+export interface ArrivalContext {
+  from_location: string;
+  transport_mode: TransitMode;
+  duration_minutes: number;
+}
+
+export interface ActivityRoute {
+  from_location: string;
+  to_location: string;
+  transport_mode: TransitMode;
 }
 
 export interface ItineraryActivity {
@@ -78,7 +92,8 @@ export interface ItineraryActivity {
   address: string;
   type: ActivityType;
   description: string;
-  transport_memo: string;
+  arrival_context: ArrivalContext;
+  route?: ActivityRoute;
   real_time_info: {
     live_update: string;
   };
@@ -87,6 +102,7 @@ export interface ItineraryActivity {
 export interface DailyItinerary {
   day: number;
   date: string;
+  weather_forecast: string;
   theme: string;
   activities: ItineraryActivity[];
 }
@@ -94,14 +110,14 @@ export interface DailyItinerary {
 export interface TripPlan {
   tripId: string;
   metadata: {
+    origin: string;
     destination: string;
     days: number;
   };
   transportation: {
-    outbound: TransportationLeg;
+    departure: TransportationLeg;
     return: TransportationLeg;
   };
-  search_summary: SearchSummary;
   daily_itinerary: DailyItinerary[];
 }
 
@@ -252,6 +268,7 @@ export interface PendingReplyDispatch {
   segments: string[];
   sourceMessageIds: string[];
   sentAt?: string;
+  instantSeen?: boolean;
 }
 
 export interface CompanionReplyPlan {
@@ -260,6 +277,26 @@ export interface CompanionReplyPlan {
 }
 
 export type CompanionBusinessMode = "idle" | "traveling" | "trip-finished";
+export type CompanionStateGroup =
+  | "idle"
+  | "plan"
+  | "departure"
+  | "activities"
+  | "return";
+export type CompanionStateSubstate =
+  | "idle"
+  | "planning"
+  | "packing"
+  | "before_departure"
+  | "departing"
+  | "arrive"
+  | "freetime"
+  | "moving_to_next_activity"
+  | "transport"
+  | "sightseeing"
+  | "food"
+  | "accommodation"
+  | "shopping";
 export type CompanionBusinessScene =
   | "idle"
   | "planning"
@@ -278,6 +315,8 @@ export type CompanionBusinessPresence =
 
 export interface CompanionBusinessSituation {
   mode: CompanionBusinessMode;
+  state: CompanionStateGroup;
+  substate: CompanionStateSubstate;
   scene: CompanionBusinessScene;
   presence: CompanionBusinessPresence;
   currentPhase: TripPhase | "system";
@@ -287,6 +326,16 @@ export interface CompanionBusinessSituation {
   isExtraMessage: boolean;
   postcardEligible: boolean;
   replyDelayMs: number;
+  stateStartedAt?: string;
+  stateEndsAt?: string;
+}
+
+export interface InstantReplyWindow {
+  source: "reply" | "postcard";
+  triggerAt: string;
+  expiresAt: string;
+  cap: number;
+  usedCount: number;
 }
 
 export interface ConversationCompanionState {
@@ -294,6 +343,7 @@ export interface ConversationCompanionState {
   mode: ConversationMode;
   pendingUserMessages: InboundUserMessage[];
   pendingReplyDispatch: PendingReplyDispatch | null;
+  instantReplyWindow: InstantReplyWindow | null;
   recentHandledCommandMessageIds: string[];
   recentTurns: CompanionTurn[];
   lastUserMessageAt: string | null;

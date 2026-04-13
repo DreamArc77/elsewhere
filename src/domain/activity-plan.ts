@@ -314,7 +314,9 @@ function looksLikeTerminalContext(activity: ItineraryActivity): boolean {
     activity.location,
     activity.address,
     activity.description,
-    activity.transport_memo,
+    activity.route?.from_location,
+    activity.route?.to_location,
+    activity.arrival_context.from_location,
   ]
     .join(" ")
     .toLowerCase();
@@ -404,16 +406,26 @@ function buildSyntheticTiming(now: Date, timeZone: string): ActivityTiming {
 }
 
 function buildPlanningActivity(plan: TripPlan): ItineraryActivity {
-  const departure = plan.transportation.outbound.departure;
+  const departure = plan.transportation.departure.departure;
+  const firstDayWeather = plan.daily_itinerary[0]?.weather_forecast ?? "";
   return {
     time_slot: departure.time,
-    location: `Departure prep near ${departure.airport_station}`,
-    address: departure.airport_station,
+    location: `Departure prep near ${departure.station}`,
+    address: departure.station,
     type: "transport",
-    description: `Before leaving for ${plan.metadata.destination}, review the plan, pack lightly, check the route to ${departure.airport_station}, and get ready for departure. This is still pre-departure preparation, not arrival at the destination.`,
-    transport_memo: `Leave with enough buffer to reach ${departure.airport_station} before ${departure.time}.`,
+    description: `Before leaving ${plan.metadata.origin} for ${plan.metadata.destination}, review the plan, pack lightly, and get ready to reach ${departure.station} before departure.`,
+    arrival_context: {
+      from_location: departure.station,
+      transport_mode: plan.transportation.departure.transport_mode,
+      duration_minutes: 0,
+    },
+    route: {
+      from_location: departure.station,
+      to_location: departure.station,
+      transport_mode: plan.transportation.departure.transport_mode,
+    },
     real_time_info: {
-      live_update: plan.search_summary.weather_forecast,
+      live_update: firstDayWeather,
     },
   };
 }
@@ -513,6 +525,7 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
         itinerary: {
           day: 0,
           date: planningTiming.rawDate,
+          weather_forecast: firstDay.weather_forecast,
           theme: `Preparing to leave for ${plan.metadata.destination}`,
           activities: [planningActivity],
         },

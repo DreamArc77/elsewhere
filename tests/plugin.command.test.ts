@@ -429,6 +429,69 @@ describe("travel companion command UX", () => {
     expect(tripAfter?.timelineIndex).toBe(1);
   });
 
+  it("shows conversation reply debug info in status", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = {
+      service: runtime.service,
+      conversationService: runtime.conversationService,
+      tripRepository: runtime.tripRepository,
+      bindings,
+      pluginConfig: {
+        geminiApiKey: "test-key",
+        defaultOriginCity: "Hong Kong",
+        pollIntervalSeconds: 60,
+        openclawBinaryPath: "openclaw",
+      },
+      runtimeDataPaths: runtime.paths,
+    };
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion activate"),
+      deps,
+    );
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const binding = await bindings.get(key);
+    await bindings.upsert({
+      ...binding!,
+      defaultPersonaId: persona.personaId,
+    });
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion start --to Tokyo"),
+      deps,
+    );
+    await runtime.conversationService.enqueueInboundMessage({
+      binding: (await bindings.get(key))!,
+      messageId: "msg-status",
+      content: "你在吗",
+      senderId: "1459473177",
+    });
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion status"),
+      deps,
+    );
+
+    expect(reply.text).toContain("conversationMode: companion-exclusive");
+    expect(reply.text).toContain("pendingReplyCount: 1");
+    expect(reply.text).toContain("replyDueAt:");
+    expect(reply.text).toContain("state:");
+    expect(reply.text).toContain("substate:");
+    expect(reply.text).toContain("instantReplyWindow:");
+  });
+
   it("deactivates takeover and stops the active trip", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);

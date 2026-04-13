@@ -130,7 +130,10 @@ export async function renderCompanionReplyPrompt(input: {
   pendingUserMessages: string;
   recentTurns: string;
   activeTripSummary: string;
+  currentStateSummary: string;
+  currentStateGrounding: string;
   now: string;
+  latestUserMessageAt: string;
 }): Promise<string> {
   const template = await loadTemplate("compose-reply.md");
   return renderTemplate(template, {
@@ -141,7 +144,10 @@ export async function renderCompanionReplyPrompt(input: {
     pendingUserMessages: input.pendingUserMessages,
     recentTurns: input.recentTurns,
     activeTripSummary: input.activeTripSummary,
+    currentStateSummary: input.currentStateSummary,
+    currentStateGrounding: input.currentStateGrounding,
     now: input.now,
+    latestUserMessageAt: input.latestUserMessageAt,
   });
 }
 

@@ -9,6 +9,7 @@ import { deriveImageIntent } from "../src/domain/image-intent.js";
 import { buildTimeline } from "../src/domain/state-machine.js";
 import {
   renderCaptionPrompt,
+  renderCompanionReplyPrompt,
   renderImageGenerationPrompt,
   renderTripPlanPrompt,
 } from "../src/prompting/travel-companion-prompts.js";
@@ -129,5 +130,72 @@ describe("travel companion prompts", () => {
     expect(prompts[3]).toContain(snapshotIntent.currentTimeLocal);
     expect(prompts[3]).toContain(snapshotIntent.destinationWithLocation);
     expect(prompts[3]).toContain(snapshotIntent.activityDescription);
+  });
+
+  it("renders companion reply prompt with state grounding and latest user message time", async () => {
+    const prompt = await renderCompanionReplyPrompt({
+      persona,
+      conversationKey: "telegram::1::1::main",
+      pendingUserMessages: JSON.stringify(
+        [
+          {
+            messageId: "msg-1",
+            content: "你现在在哪",
+            receivedAt: "2026-04-13T10:15:00.000Z",
+          },
+        ],
+        null,
+        2,
+      ),
+      recentTurns: JSON.stringify(
+        [
+          {
+            role: "companion",
+            text: "刚落地",
+            createdAt: "2026-04-13T10:10:00.000Z",
+          },
+        ],
+        null,
+        2,
+      ),
+      activeTripSummary: JSON.stringify(
+        {
+          tripId: "trip-1",
+          destination: "Tokyo",
+          phase: "day_exploration",
+        },
+        null,
+        2,
+      ),
+      currentStateSummary: JSON.stringify(
+        {
+          mode: "traveling",
+          scene: "food",
+          presence: "available",
+        },
+        null,
+        2,
+      ),
+      currentStateGrounding: JSON.stringify(
+        {
+          weatherForecast: "22C, light rain",
+          currentActivity: {
+            location: "成桂西餐厅",
+            description: "正在吃午饭",
+          },
+        },
+        null,
+        2,
+      ),
+      now: "2026-04-13T10:18:00.000Z",
+      latestUserMessageAt: "2026-04-13T10:15:00.000Z",
+    });
+
+    expect(prompt).toContain("Current companion state:");
+    expect(prompt).toContain('"scene": "food"');
+    expect(prompt).toContain("Current state grounding:");
+    expect(prompt).toContain("成桂西餐厅");
+    expect(prompt).toContain("Latest pending user message time:");
+    expect(prompt).toContain("2026-04-13T10:15:00.000Z");
   });
 });
