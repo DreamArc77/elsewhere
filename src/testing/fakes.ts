@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   ClockPort,
+  CompanionBusinessSituation,
   CompanionReplyPlan,
   CompanionTurn,
   GroundingPort,
@@ -413,6 +414,7 @@ export class FakeGroundingPort implements GroundingPort {
     persona: StoredPersonaProfile | null;
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
+    businessSituation: CompanionBusinessSituation;
   }): Promise<CompanionReplyPlan> {
     const latest = input.pendingUserMessages[input.pendingUserMessages.length - 1];
     return {

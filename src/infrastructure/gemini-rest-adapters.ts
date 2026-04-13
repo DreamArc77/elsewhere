@@ -10,6 +10,7 @@ import {
   tripPlanSchema,
 } from "../contracts/schemas.js";
 import {
+  CompanionBusinessSituation,
   CompanionReplyPlan,
   CompanionTurn,
   GroundingPort,
@@ -253,6 +254,7 @@ export class GeminiRestGroundingAdapter
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
     activeTrip: TripRecord | null;
+    businessSituation: CompanionBusinessSituation;
     now: string;
   }): Promise<CompanionReplyPlan> {
     const prompt = await renderCompanionReplyPrompt({
@@ -268,8 +270,13 @@ export class GeminiRestGroundingAdapter
               phase: input.activeTrip.state.currentPhase,
               day: input.activeTrip.state.currentDay,
               nextRunAt: input.activeTrip.state.nextRunAt,
+              businessSituation: input.businessSituation,
             }
-          : { status: "idle", note: "No active trip right now." },
+          : {
+              status: "idle",
+              note: "No active trip right now.",
+              businessSituation: input.businessSituation,
+            },
         null,
         2,
       ),

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   ClockPort,
   CompanionReplyPlan,
+  CompanionBusinessSituation,
   ConversationBindingRecord,
   ConversationBindingStore,
   ConversationCompanionState,
@@ -16,6 +17,7 @@ import {
   TripRecord,
   TripRepository,
 } from "../domain/types.js";
+import { deriveCompanionBusinessSituation } from "../domain/business-situation.js";
 
 function nowIso(clock: ClockPort): string {
   return clock.now().toISOString();
@@ -31,21 +33,6 @@ function trimTurns<T>(items: T[], max: number): T[] {
 
 function trimRecentMessageIds(items: string[], max: number): string[] {
   return items.slice(Math.max(0, items.length - max));
-}
-
-function computeReplyDelayMs(activeTrip: TripRecord | null): number {
-  if (!activeTrip) {
-    return 2 * 60 * 1000;
-  }
-
-  switch (activeTrip.state.currentPhase) {
-    case "departing":
-    case "in_transit":
-    case "returning":
-      return 8 * 60 * 1000;
-    default:
-      return 3 * 60 * 1000;
-  }
 }
 
 function emptyConversationState(
@@ -242,13 +229,14 @@ export class CompanionConversationService {
   }): Promise<ConversationCompanionState> {
     const startedAt = nowIso(this.dependencies.clock);
     const activeTrip = await this.getActiveTrip(input.binding);
+    const businessSituation = deriveCompanionBusinessSituation(activeTrip);
     const updatedAt = nowIso(this.dependencies.clock);
     const state =
       (await this.dependencies.conversationStates.getByKey(input.binding.key)) ??
       emptyConversationState(input.binding.key, input.binding.mode, updatedAt);
 
     const dueAt = new Date(
-      this.dependencies.clock.now().getTime() + computeReplyDelayMs(activeTrip),
+      this.dependencies.clock.now().getTime() + businessSituation.replyDelayMs,
     ).toISOString();
     const pendingUserMessages = [
       ...state.pendingUserMessages,
@@ -306,6 +294,9 @@ export class CompanionConversationService {
         queuedMessageCount: pendingUserMessages.length,
         replyDueAt: dueAt,
         mode: input.binding.mode,
+        businessMode: businessSituation.mode,
+        businessScene: businessSituation.scene,
+        businessPresence: businessSituation.presence,
       },
     });
 
@@ -324,6 +315,9 @@ export class CompanionConversationService {
         messageId: input.messageId,
         replyDueAt: dueAt,
         mode: input.binding.mode,
+        businessMode: businessSituation.mode,
+        businessScene: businessSituation.scene,
+        businessPresence: businessSituation.presence,
       },
     });
 
@@ -428,6 +422,7 @@ export class CompanionConversationService {
     startedAt: string,
   ): Promise<ConversationCompanionState> {
     const activeTrip = await this.getActiveTrip(binding);
+    const businessSituation = deriveCompanionBusinessSituation(activeTrip);
     const persona = await this.getPersona(binding);
     await this.log({
       tripId: activeTrip?.tripId ?? `conversation:${binding.key}`,
@@ -442,6 +437,9 @@ export class CompanionConversationService {
       details: {
         conversationKey: binding.key,
         queuedMessageCount: state.pendingUserMessages.length,
+        businessMode: businessSituation.mode,
+        businessScene: businessSituation.scene,
+        businessPresence: businessSituation.presence,
       },
     });
 
@@ -459,6 +457,7 @@ export class CompanionConversationService {
             pendingUserMessages: state.pendingUserMessages,
             recentTurns: state.recentTurns,
             activeTrip,
+            businessSituation,
             now: nowIso(this.dependencies.clock),
           });
 
@@ -489,6 +488,9 @@ export class CompanionConversationService {
         queuedMessageCount: state.pendingUserMessages.length,
         segmentCount: replyPlan.segments.length,
         replyDueAt: pendingReplyDispatch.dueAt,
+        businessMode: businessSituation.mode,
+        businessScene: businessSituation.scene,
+        businessPresence: businessSituation.presence,
       },
     });
 
@@ -505,6 +507,9 @@ export class CompanionConversationService {
       details: {
         conversationKey: binding.key,
         queuedMessageCount: state.pendingUserMessages.length,
+        businessMode: businessSituation.mode,
+        businessScene: businessSituation.scene,
+        businessPresence: businessSituation.presence,
       },
     });
 
@@ -523,6 +528,7 @@ export class CompanionConversationService {
     }
 
     const activeTrip = await this.getActiveTrip(binding);
+    const businessSituation = deriveCompanionBusinessSituation(activeTrip);
     const sentAt = nowIso(this.dependencies.clock);
     for (const [index, segment] of pending.segments.entries()) {
       await this.dependencies.messenger.sendTextReply({
@@ -567,6 +573,9 @@ export class CompanionConversationService {
         conversationKey: binding.key,
         segmentCount: pending.segments.length,
         queuedMessageCount: pending.sourceMessageIds.length,
+        businessMode: businessSituation.mode,
+        businessScene: businessSituation.scene,
+        businessPresence: businessSituation.presence,
       },
     });
 

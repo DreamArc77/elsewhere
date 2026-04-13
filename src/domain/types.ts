@@ -259,6 +259,36 @@ export interface CompanionReplyPlan {
   provider: string;
 }
 
+export type CompanionBusinessMode = "idle" | "traveling" | "trip-finished";
+export type CompanionBusinessScene =
+  | "idle"
+  | "planning"
+  | "airport"
+  | "transport"
+  | "hotel"
+  | "food"
+  | "sightseeing"
+  | "shopping"
+  | "reflection";
+export type CompanionBusinessPresence =
+  | "available"
+  | "busy"
+  | "moving"
+  | "resting";
+
+export interface CompanionBusinessSituation {
+  mode: CompanionBusinessMode;
+  scene: CompanionBusinessScene;
+  presence: CompanionBusinessPresence;
+  currentPhase: TripPhase | "system";
+  currentDay: number;
+  contextKind: RuntimeStepContext["kind"] | "none";
+  sendMoment: RuntimeStepContext["sendMoment"] | "none";
+  isExtraMessage: boolean;
+  postcardEligible: boolean;
+  replyDelayMs: number;
+}
+
 export interface ConversationCompanionState {
   conversationKey: string;
   mode: ConversationMode;
@@ -349,6 +379,7 @@ export interface GroundingPort {
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
     activeTrip: TripRecord | null;
+    businessSituation: CompanionBusinessSituation;
     now: string;
   }): Promise<CompanionReplyPlan>;
 }
