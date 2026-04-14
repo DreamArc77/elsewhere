@@ -96,4 +96,88 @@ describe("reply seen strategy", () => {
     expect(state.pendingReplyDispatch?.dueAt).toBe(runtime.clock.now().toISOString());
     expect(state.instantReplyWindow).not.toBeNull();
   });
+
+  it("filters old-trip turns out of the reply context", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Qingdao",
+    });
+
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+      lastTripId: trip.tripId,
+    });
+    await runtime.conversationService.activateConversation({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+      lastTripId: trip.tripId,
+    });
+
+    const existing = await runtime.conversationStateRepository.getByKey(key);
+    await runtime.conversationStateRepository.save({
+      ...existing!,
+      recentTurns: [
+        {
+          role: "companion",
+          text: "old polluted turn",
+          createdAt: "2026-04-01T00:00:00.000Z",
+          tripId: "old-trip",
+        },
+      ],
+      updatedAt: runtime.clock.now().toISOString(),
+    });
+
+    let capturedTurns: Array<{ text: string }> = [];
+    runtime.grounding.composeCompanionReply = async (input) => {
+      capturedTurns = input.recentTurns;
+      return {
+        segments: ["ok"],
+        provider: "fake-grounding",
+      };
+    };
+
+    await runtime.conversationService.enqueueInboundMessage({
+      binding: {
+        key,
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+        boundAt: Date.now(),
+        mode: "companion-exclusive",
+        defaultPersonaId: persona.personaId,
+        lastTripId: trip.tripId,
+      },
+      messageId: "msg-filter-1",
+      content: "你现在在哪",
+    });
+
+    await runtime.conversationService.runConversation(key, { ignoreSchedule: true });
+
+    expect(capturedTurns.map((turn) => turn.text)).not.toContain("old polluted turn");
+  });
 });

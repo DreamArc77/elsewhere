@@ -1,4 +1,7 @@
 import {
+  CompanionStateAnchor,
+  CompanionStateSnapshot,
+  CompanionStateTimingWindow,
   CompanionBusinessSituation,
   CompanionBusinessPresence,
   CompanionBusinessScene,
@@ -7,6 +10,7 @@ import {
   ConversationCompanionState,
   InstantReplyWindow,
   ItineraryActivity,
+  TimelineStep,
   TransitMode,
   TripRecord,
 } from "./types.js";
@@ -17,11 +21,6 @@ type SeenPolicy =
   | { kind: "until_state_end" }
   | { kind: "defer_to_next_state" };
 
-interface StateTimingWindow {
-  startedAt: string;
-  endsAt?: string;
-}
-
 interface StateStrategy {
   seenPolicy: SeenPolicy;
   hotWindowMinutes: { min: number; max: number };
@@ -29,8 +28,9 @@ interface StateStrategy {
 }
 
 interface DerivedStateResult {
+  source?: "clock" | "anchor";
   situation: CompanionBusinessSituation;
-  timing: StateTimingWindow;
+  timing: CompanionStateTimingWindow;
   currentActivity?: ItineraryActivity;
   previousActivity?: ItineraryActivity;
   nextActivity?: ItineraryActivity;
@@ -136,6 +136,9 @@ const STATE_STRATEGIES: Record<string, StateStrategy> = {
 
 function inferTimeZoneFromText(text: string): string {
   const normalized = text.trim().toLowerCase();
+  if (normalized.includes("qingdao")) {
+    return "Asia/Shanghai";
+  }
   for (const [pattern, timeZone] of TIME_ZONE_MAP) {
     if (pattern.test(normalized)) {
       return timeZone;
@@ -465,7 +468,7 @@ function makeSituation(input: {
   sendMoment: CompanionBusinessSituation["sendMoment"];
   isExtraMessage: boolean;
   postcardEligible: boolean;
-  timing: StateTimingWindow;
+  timing: CompanionStateTimingWindow;
 }): CompanionBusinessSituation {
   const strategy = requireStrategy(input.state, input.substate);
   const replyDelayMs =
@@ -516,6 +519,177 @@ function transportScene(mode: TransitMode, labelSource: string): CompanionBusine
   return "transport";
 }
 
+function makeSnapshot(input: {
+  situation: CompanionBusinessSituation;
+  timing: CompanionStateTimingWindow;
+  currentActivity?: ItineraryActivity;
+  previousActivity?: ItineraryActivity;
+  nextActivity?: ItineraryActivity;
+  weatherForecast?: string;
+}): CompanionStateSnapshot {
+  return {
+    situation: input.situation,
+    timing: input.timing,
+    currentActivity: input.currentActivity,
+    previousActivity: input.previousActivity,
+    nextActivity: input.nextActivity,
+    weatherForecast: input.weatherForecast,
+  };
+}
+
+function deriveSnapshotFromTimelineStep(
+  record: TripRecord,
+  step: TimelineStep,
+): CompanionStateSnapshot | null {
+  const context = step.context;
+  if (!context) {
+    return null;
+  }
+
+  const weatherForecast =
+    record.plan.daily_itinerary.find((entry) => entry.day === step.day)
+      ?.weather_forecast;
+
+  if (context.kind === "planning") {
+    const timing = {
+      startedAt: context.timing.startUtc,
+      endsAt: context.timing.endUtc,
+    };
+    return makeSnapshot({
+      situation: makeSituation({
+        mode: "traveling",
+        state: "plan",
+        substate: "packing",
+        scene: "planning",
+        presence: "busy",
+        currentPhase: "planning",
+        currentDay: 0,
+        contextKind: "planning",
+        sendMoment: context.sendMoment,
+        isExtraMessage: context.isExtraMessage,
+        postcardEligible: true,
+        timing,
+      }),
+      timing,
+      currentActivity: context.activity,
+      previousActivity: context.previousActivity,
+      nextActivity: context.nextActivity,
+      weatherForecast,
+    });
+  }
+
+  if (context.kind === "home_reflection") {
+    const timing = {
+      startedAt: context.timing.startUtc,
+      endsAt: context.timing.endUtc,
+    };
+    return makeSnapshot({
+      situation: makeSituation({
+        mode: "trip-finished",
+        state: "return",
+        substate: "arrive",
+        scene: "reflection",
+        presence: "available",
+        currentPhase: "home_reflection",
+        currentDay: step.day,
+        contextKind: "home_reflection",
+        sendMoment: context.sendMoment,
+        isExtraMessage: context.isExtraMessage,
+        postcardEligible: true,
+        timing,
+      }),
+      timing,
+      currentActivity: context.activity,
+      previousActivity: context.previousActivity,
+      nextActivity: context.nextActivity,
+      weatherForecast,
+    });
+  }
+
+  const activity = context.activity;
+  const substate = activity.type;
+  const scene =
+    activity.type === "transport"
+      ? transportScene(
+          activity.route?.transport_mode ?? activity.arrival_context.transport_mode,
+          activity.location,
+        )
+      : activity.type === "accommodation"
+        ? "hotel"
+        : (activity.type as Exclude<
+            CompanionBusinessScene,
+            "idle" | "planning" | "airport" | "transport" | "hotel" | "reflection"
+          >);
+  const presence: CompanionBusinessPresence =
+    activity.type === "transport"
+      ? "moving"
+      : activity.type === "accommodation"
+        ? "resting"
+        : "available";
+  const state =
+    activity.type === "transport" && step.phase === "returning"
+      ? "return"
+      : activity.type === "transport" ||
+          activity.type === "sightseeing" ||
+          activity.type === "food" ||
+          activity.type === "accommodation" ||
+          activity.type === "shopping"
+        ? "activities"
+        : "activities";
+  const timing = {
+    startedAt: context.timing.startUtc,
+    endsAt: context.timing.endUtc,
+  };
+  const derivedSubstate = state === "return" ? "departing" : substate;
+
+  return makeSnapshot({
+    situation: makeSituation({
+      mode: "traveling",
+      state,
+      substate: derivedSubstate,
+      scene,
+      presence,
+      currentPhase: step.phase,
+      currentDay: step.day,
+      contextKind: context.kind,
+      sendMoment: context.sendMoment,
+      isExtraMessage: context.isExtraMessage,
+      postcardEligible: step.emitsPostcard,
+      timing,
+    }),
+    timing,
+    currentActivity: activity,
+    previousActivity: context.previousActivity,
+    nextActivity: context.nextActivity,
+    weatherForecast,
+  });
+}
+
+export function createStateAnchorFromTimelineStep(input: {
+  record: TripRecord;
+  step: TimelineStep;
+  sentAt: string;
+}): CompanionStateAnchor | null {
+  const snapshot = deriveSnapshotFromTimelineStep(input.record, input.step);
+  if (!snapshot) {
+    return null;
+  }
+
+  const sentAtMs = new Date(input.sentAt).getTime();
+  const naturalEndMs = snapshot.timing.endsAt
+    ? new Date(snapshot.timing.endsAt).getTime()
+    : Number.POSITIVE_INFINITY;
+  const expiresAtMs = Math.min(naturalEndMs, sentAtMs + 30 * 60 * 1000);
+
+  return {
+    source: "postcard",
+    stepId: input.step.stepId,
+    sentAt: input.sentAt,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    snapshot,
+  };
+}
+
 export function deriveCompanionBusinessSituation(
   activeTrip: TripRecord | null,
   now: Date = new Date(),
@@ -547,9 +721,18 @@ export function deriveCompanionState(
     };
   }
 
+  const latestDelivery = latestPostcardSentAt(activeTrip);
+  const anchor = activeTrip.state.activeStateAnchor;
+  if (anchor && new Date(anchor.expiresAt).getTime() > now.getTime()) {
+    return {
+      source: "anchor",
+      ...anchor.snapshot,
+      latestPostcardSentAt: latestDelivery,
+    };
+  }
+
   const departureWindow = resolveDepartureWindow(activeTrip);
   const returnWindow = resolveReturnWindow(activeTrip);
-  const latestDelivery = latestPostcardSentAt(activeTrip);
   const tripCreatedAt = new Date(activeTrip.createdAt);
   const planningEndsAt = new Date(
     Math.min(

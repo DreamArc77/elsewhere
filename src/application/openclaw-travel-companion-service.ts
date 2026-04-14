@@ -22,6 +22,7 @@ import {
   isPostcardStep,
   isTripDue,
 } from "../domain/state-machine.js";
+import { createStateAnchorFromTimelineStep } from "../domain/business-situation.js";
 import { deriveImageIntent } from "../domain/image-intent.js";
 import { buildDerivedGrounding } from "../domain/step-grounding.js";
 import { renderImageGenerationPrompt } from "../prompting/travel-companion-prompts.js";
@@ -182,6 +183,7 @@ export class OpenClawTravelCompanionService {
         status: "completed",
         nextRunAt: null,
         pendingPostcard: null,
+        activeStateAnchor: null,
       },
       pendingDispatch: null,
       updatedAt: stoppedAt,
@@ -489,6 +491,15 @@ export class OpenClawTravelCompanionService {
     });
 
     const advanced = advanceAfterCurrentStep(record, this.dependencies.clock.now());
+    const currentStep = getCurrentStep(record);
+    const activeStateAnchor =
+      currentStep && currentStep.context
+        ? createStateAnchorFromTimelineStep({
+            record,
+            step: currentStep,
+            sentAt,
+          })
+        : null;
     const nextRecord: TripRecord = {
       ...record,
       state: {
@@ -504,6 +515,7 @@ export class OpenClawTravelCompanionService {
             createdAt: sentAt,
           },
         ],
+        activeStateAnchor,
       },
       timelineIndex: advanced.timelineIndex,
       pendingDispatch: null,

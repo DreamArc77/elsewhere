@@ -118,6 +118,7 @@ function buildCurrentStateSummary(input: {
         mode: input.businessSituation.mode,
         scene: input.businessSituation.scene,
         presence: input.businessSituation.presence,
+        stateSource: "clock",
         note: "No active trip right now.",
       },
       null,
@@ -146,6 +147,7 @@ function buildCurrentStateSummary(input: {
       isExtraMessage: input.businessSituation.isExtraMessage,
       stateStartedAt: input.businessSituation.stateStartedAt ?? null,
       stateEndsAt: input.businessSituation.stateEndsAt ?? null,
+      stateSource: derived.source ?? "clock",
       weatherForecast: derived.weatherForecast ?? null,
     },
     null,
@@ -171,6 +173,7 @@ function buildCurrentStateGrounding(
   if (!derived.currentActivity && !derived.previousActivity && !derived.nextActivity) {
     return JSON.stringify(
       {
+        stateSource: derived.source ?? "clock",
         note: "Trip exists, but there is no current activity-like grounding for this state.",
         weatherForecast: derived.weatherForecast ?? null,
       },
@@ -181,6 +184,7 @@ function buildCurrentStateGrounding(
 
   return JSON.stringify(
     {
+      stateSource: derived.source ?? "clock",
       weatherForecast: derived.weatherForecast ?? null,
       stateStartedAt: derived.timing.startedAt,
       stateEndsAt: derived.timing.endsAt ?? null,

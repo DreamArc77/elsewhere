@@ -168,4 +168,34 @@ describe("companion business situation", () => {
     expect(situation.substate).toBe("food");
     expect(situation.scene).toBe("food");
   });
+
+  it("prefers the latest postcard state anchor over wall-clock planning state", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Qingdao",
+    });
+
+    await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
+    await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
+
+    const record = await runtime.tripRepository.getById(trip.tripId);
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      runtime.clock.now(),
+    );
+
+    expect(record?.state.activeStateAnchor?.source).toBe("postcard");
+    expect(situation.state).toBe("activities");
+    expect(situation.substate).toBe("transport");
+  });
 });

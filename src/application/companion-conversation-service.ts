@@ -39,6 +39,25 @@ function trimRecentMessageIds(items: string[], max: number): string[] {
   return items.slice(Math.max(0, items.length - max));
 }
 
+function filterReplyTurnsForActiveTrip(
+  turns: ConversationCompanionState["recentTurns"],
+  activeTrip: TripRecord | null,
+): ConversationCompanionState["recentTurns"] {
+  if (!activeTrip) {
+    return trimTurns(turns, 12);
+  }
+
+  const tripCreatedAt = new Date(activeTrip.createdAt).getTime();
+  return trimTurns(
+    turns.filter(
+      (turn) =>
+        turn.tripId === activeTrip.tripId ||
+        new Date(turn.createdAt).getTime() >= tripCreatedAt,
+    ),
+    12,
+  );
+}
+
 function emptyConversationState(
   conversationKey: string,
   mode: ConversationBindingRecord["mode"],
@@ -502,7 +521,10 @@ export class CompanionConversationService {
             conversationKey: binding.key,
             persona,
             pendingUserMessages: state.pendingUserMessages,
-            recentTurns: state.recentTurns,
+            recentTurns: filterReplyTurnsForActiveTrip(
+              state.recentTurns,
+              activeTrip,
+            ),
             activeTrip,
             businessSituation,
             now: nowIso(this.dependencies.clock),

@@ -147,6 +147,7 @@ export interface TripState {
   nextRunAt: string | null;
   pendingPostcard: Postcard | null;
   artifacts: ArtifactReference[];
+  activeStateAnchor?: CompanionStateAnchor | null;
 }
 
 export interface TimelineStep {
@@ -328,6 +329,28 @@ export interface CompanionBusinessSituation {
   replyDelayMs: number;
   stateStartedAt?: string;
   stateEndsAt?: string;
+}
+
+export interface CompanionStateTimingWindow {
+  startedAt: string;
+  endsAt?: string;
+}
+
+export interface CompanionStateSnapshot {
+  situation: CompanionBusinessSituation;
+  timing: CompanionStateTimingWindow;
+  currentActivity?: ItineraryActivity;
+  previousActivity?: ItineraryActivity;
+  nextActivity?: ItineraryActivity;
+  weatherForecast?: string;
+}
+
+export interface CompanionStateAnchor {
+  source: "postcard";
+  stepId: string;
+  sentAt: string;
+  expiresAt: string;
+  snapshot: CompanionStateSnapshot;
 }
 
 export interface InstantReplyWindow {

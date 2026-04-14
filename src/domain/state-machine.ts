@@ -18,6 +18,7 @@ export function createInitialTripState(
     nextRunAt: firstStep.scheduledAt,
     pendingPostcard: null,
     artifacts: [],
+    activeStateAnchor: null,
   };
 }
 
@@ -65,6 +66,7 @@ export function advanceAfterCurrentStep(
         currentDay: current.day,
         nextRunAt: null,
         pendingPostcard: null,
+        activeStateAnchor: null,
       },
       timelineIndex: nextIndex,
     };
@@ -78,6 +80,7 @@ export function advanceAfterCurrentStep(
       currentDay: nextStep.day,
       nextRunAt: nextStep.scheduledAt,
       pendingPostcard: null,
+      activeStateAnchor: record.state.activeStateAnchor ?? null,
     },
     timelineIndex: nextIndex,
   };
