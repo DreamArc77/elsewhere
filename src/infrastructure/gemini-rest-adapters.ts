@@ -18,6 +18,8 @@ import {
   ImageGenerationPort,
   ImageGenerationResult,
   InboundUserMessage,
+  LogEntry,
+  LoggerPort,
   PhaseGroundingResult,
   RuntimeStepContext,
   StoredPersonaProfile,
@@ -39,6 +41,7 @@ interface GeminiOptions {
   textModel?: string;
   imageModel?: string;
   fetchImpl?: typeof fetch;
+  logger?: LoggerPort;
 }
 
 interface GenerateContentResponse {
@@ -170,7 +173,11 @@ function buildCurrentStateGrounding(
   }
 
   const derived = deriveCompanionState(activeTrip, new Date(now));
-  if (!derived.currentActivity && !derived.previousActivity && !derived.nextActivity) {
+  if (
+    !derived.currentActivity &&
+    !derived.previousActivity &&
+    !derived.nextActivity
+  ) {
     return JSON.stringify(
       {
         stateSource: derived.source ?? "clock",
@@ -234,15 +241,25 @@ function mimeTypeFromPath(path: string): string {
   }
 }
 
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function elapsedMs(startedAt: string, finishedAt: string): number {
+  return new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+}
+
 abstract class BaseGeminiAdapter {
   protected readonly apiKey: string;
   protected readonly baseUrl: string;
   protected readonly fetchImpl: typeof fetch;
+  protected readonly logger?: LoggerPort;
 
   constructor(options: GeminiOptions) {
     this.apiKey = options.apiKey;
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.logger = options.logger;
   }
 
   protected async generateContent(
@@ -287,6 +304,10 @@ export class GeminiRestGroundingAdapter
     this.textModel = options.textModel ?? "gemini-3-flash-preview";
   }
 
+  private async logPlanEntry(entry: LogEntry): Promise<void> {
+    await this.logger?.log(entry);
+  }
+
   async planTrip(input: {
     tripId: string;
     persona: StoredPersonaProfile;
@@ -307,7 +328,31 @@ export class GeminiRestGroundingAdapter
     ];
 
     let lastError: unknown;
-    for (const prompt of prompts) {
+    const runId = `plan:${input.tripId}`;
+
+    for (const [index, prompt] of prompts.entries()) {
+      const attempt = index + 1;
+      const requestStartedAt = nowIso();
+
+      await this.logPlanEntry({
+        tripId: input.tripId,
+        runId,
+        phase: "planning",
+        event: "plan.request.started",
+        decision: "Started Gemini trip planning request.",
+        provider: this.planningModel,
+        status: "success",
+        startedAt: requestStartedAt,
+        finishedAt: requestStartedAt,
+        latencyMs: 0,
+        details: {
+          attempt,
+          usesGoogleSearch: true,
+          promptLength: prompt.length,
+          destinationCity: input.request.destinationCity,
+        },
+      });
+
       try {
         const response = await this.generateContent(this.planningModel, {
           contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -319,13 +364,73 @@ export class GeminiRestGroundingAdapter
           },
         });
 
-        return parseModelJson(
+        const responseFinishedAt = nowIso();
+        await this.logPlanEntry({
+          tripId: input.tripId,
+          runId,
+          phase: "planning",
+          event: "plan.request.finished",
+          decision: "Gemini trip planning request returned a response payload.",
+          provider: this.planningModel,
+          status: "success",
+          startedAt: requestStartedAt,
+          finishedAt: responseFinishedAt,
+          latencyMs: elapsedMs(requestStartedAt, responseFinishedAt),
+          details: { attempt },
+        });
+
+        const parseStartedAt = nowIso();
+        const parsed = parseModelJson(
           extractText(response),
           tripPlanSchema,
           "Gemini trip plan",
         );
+        const parseFinishedAt = nowIso();
+
+        await this.logPlanEntry({
+          tripId: input.tripId,
+          runId,
+          phase: "planning",
+          event: "plan.parse.finished",
+          decision: "Validated trip plan JSON against the contract schema.",
+          provider: this.planningModel,
+          status: "success",
+          startedAt: parseStartedAt,
+          finishedAt: parseFinishedAt,
+          latencyMs: elapsedMs(parseStartedAt, parseFinishedAt),
+          details: {
+            attempt,
+            days: parsed.metadata.days,
+          },
+        });
+
+        return parsed;
       } catch (error) {
         lastError = error;
+        const failedAt = nowIso();
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        await this.logPlanEntry({
+          tripId: input.tripId,
+          runId,
+          phase: "planning",
+          event:
+            attempt < prompts.length ? "plan.request.retry" : "plan.request.failed",
+          decision:
+            attempt < prompts.length
+              ? "Gemini trip planning attempt failed; retrying with a stricter corrective prompt."
+              : "Gemini trip planning failed after exhausting all attempts.",
+          provider: this.planningModel,
+          status: "failure",
+          startedAt: requestStartedAt,
+          finishedAt: failedAt,
+          latencyMs: elapsedMs(requestStartedAt, failedAt),
+          errorCode: "plan_generation_failed",
+          details: {
+            attempt,
+            error: truncate(errorMessage, 600),
+          },
+        });
       }
     }
 

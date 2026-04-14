@@ -4,3 +4,4 @@ coverage/
 runtime-data/
 .env
 .DS_Store
+docs/

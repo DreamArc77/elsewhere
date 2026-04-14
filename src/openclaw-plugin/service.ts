@@ -93,6 +93,7 @@ export async function createRuntimeBundle(input: {
       apiKey,
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
+      logger,
     }),
     imageGeneration: new GeminiRestImageAdapter({
       apiKey,
@@ -110,6 +111,7 @@ export async function createRuntimeBundle(input: {
       apiKey,
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
+      logger,
     }),
     messenger,
     clock: new SystemClockPort(),

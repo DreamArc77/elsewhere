@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { GeminiRestGroundingAdapter } from "../src/infrastructure/gemini-rest-adapters.js";
+import { buildFixtureTripPlan } from "../src/testing/fakes.js";
 import { createTestRuntime } from "./helpers/runtime.js";
 
 describe("structured logging", () => {
@@ -48,5 +50,76 @@ describe("structured logging", () => {
     expect(imageEntry?.details).toMatchObject({
       shotKind: expect.stringMatching(/^(selfie|snapshot)$/),
     });
+  });
+
+  it("logs planning request attempts and retries", async () => {
+    const entries: Array<Record<string, unknown>> = [];
+    const plan = buildFixtureTripPlan({
+      tripId: "trip-logging",
+      originCity: "Hong Kong",
+      destinationCity: "Ho Chi Minh City",
+      days: 4,
+    });
+    let callCount = 0;
+    const adapter = new GeminiRestGroundingAdapter({
+      apiKey: "test-key",
+      logger: {
+        log(entry) {
+          entries.push(entry as unknown as Record<string, unknown>);
+        },
+      },
+      fetchImpl: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Response(
+            JSON.stringify({
+              candidates: [{ content: { parts: [{ text: "{ not-json" }] } }],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: JSON.stringify(plan) }],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+
+    const result = await adapter.planTrip({
+      tripId: "trip-logging",
+      persona: {
+        personaId: "persona-1",
+        createdAt: "2026-04-09T00:00:00.000Z",
+        name: "Mori",
+        traits: ["gentle"],
+        relationship: "travel soulmate",
+        toneStyle: "warm",
+        referenceImageAsset: "/tmp/reference.png",
+      },
+      request: {
+        personaId: "persona-1",
+        originCity: "Hong Kong",
+        destinationCity: "Ho Chi Minh City",
+      },
+    });
+
+    expect(result.metadata.destination).toContain("Ho Chi Minh City");
+    expect(entries.map((entry) => entry.event)).toEqual(
+      expect.arrayContaining([
+        "plan.request.started",
+        "plan.request.retry",
+        "plan.request.finished",
+        "plan.parse.finished",
+      ]),
+    );
   });
 });

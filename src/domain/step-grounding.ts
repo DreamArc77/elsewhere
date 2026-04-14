@@ -43,6 +43,9 @@ export function buildDerivedGrounding(input: {
 
 function buildTransitSummary(activity: RuntimeStepContext["activity"]): string {
   if (activity.type === "transport" && activity.route) {
+    if (activity.route.from_location === activity.route.to_location) {
+      return `Preparing to depart from ${activity.route.to_location}`;
+    }
     return `${activity.route.transport_mode} from ${activity.route.from_location} to ${activity.route.to_location}`;
   }
 
