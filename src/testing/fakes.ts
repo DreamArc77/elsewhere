@@ -507,11 +507,17 @@ export class FakeGroundingPort implements GroundingPort {
 
 export class FakeImageGenerationPort implements ImageGenerationPort {
   async generateImage(input: {
+    tripId: string;
+    persona: StoredPersonaProfile;
+    request: TripRequest;
+    plan: TripPlan;
     phase: RuntimeStepContext["phase"];
     day: number;
     stepContext: RuntimeStepContext;
+    grounding: PhaseGroundingResult;
     shotKind: "selfie" | "snapshot";
     usesReferenceImage: boolean;
+    prompt: string;
   }): Promise<ImageGenerationResult> {
     return {
       mimeType: "image/png",

@@ -51,6 +51,22 @@ function detectImageExtension(mimeType: string): string {
   }
 }
 
+function sanitizeImagePromptForCaption(imagePrompt: string): string {
+  const summaryMarkerPatterns = [
+    /\n+\s*生图后同时输出该图片的提要信息[\s\S]*$/u,
+    /\n+\s*输出该图片的提要信息[\s\S]*$/u,
+  ];
+
+  for (const pattern of summaryMarkerPatterns) {
+    const sanitized = imagePrompt.replace(pattern, "").trim();
+    if (sanitized !== imagePrompt.trim()) {
+      return sanitized;
+    }
+  }
+
+  return imagePrompt.trim();
+}
+
 export class OpenClawTravelCompanionService {
   private readonly inFlightTripIds = new Set<string>();
 
@@ -382,6 +398,7 @@ export class OpenClawTravelCompanionService {
       bytesBase64: image.bytesBase64,
     });
 
+    const captionImagePrompt = sanitizeImagePromptForCaption(imagePrompt);
     const captionResult = await this.dependencies.grounding.composeCaption({
       tripId: record.tripId,
       persona,
@@ -396,7 +413,7 @@ export class OpenClawTravelCompanionService {
         step,
         persona,
       }),
-      imagePrompt,
+      imagePrompt: captionImagePrompt,
     });
 
     const pendingPostcard: Postcard = {

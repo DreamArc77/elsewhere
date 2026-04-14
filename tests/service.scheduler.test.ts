@@ -256,4 +256,44 @@ describe("service scheduling and crash recovery", () => {
       "Qingdao International Airport",
     );
   });
+
+  it("keeps the image summary instruction out of compose-caption while preserving it for image generation", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    let generatedImagePrompt = "";
+    let captionImagePrompt = "";
+
+    const originalGenerateImage =
+      runtime.imageGeneration.generateImage.bind(runtime.imageGeneration);
+    runtime.imageGeneration.generateImage = async (input) => {
+      generatedImagePrompt = input.prompt;
+      return await originalGenerateImage(input);
+    };
+
+    const originalComposeCaption =
+      runtime.grounding.composeCaption.bind(runtime.grounding);
+    runtime.grounding.composeCaption = async (input) => {
+      captionImagePrompt = input.imagePrompt;
+      return await originalComposeCaption(input);
+    };
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
+
+    expect(generatedImagePrompt).toContain("输出该图片的提要信息");
+    expect(captionImagePrompt).not.toContain("输出该图片的提要信息");
+    expect(captionImagePrompt).not.toContain('"otherPeopleVisible"');
+  });
 });
