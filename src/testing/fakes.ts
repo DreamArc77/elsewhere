@@ -15,6 +15,7 @@ import {
   InboundUserMessage,
   ItineraryActivity,
   PhaseGroundingResult,
+  ResolvedAgentState,
   RuntimeStepContext,
   SendReceipt,
   StoredPersonaProfile,
@@ -465,6 +466,7 @@ export class FakeGroundingPort implements GroundingPort {
     day: number;
     stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
+    resolvedState: ResolvedAgentState;
     imagePrompt: string;
   }): Promise<{ caption: string; provider: string }> {
     return {
@@ -481,7 +483,7 @@ export class FakeGroundingPort implements GroundingPort {
     persona: StoredPersonaProfile | null;
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
-    businessSituation: CompanionBusinessSituation;
+    resolvedState: ResolvedAgentState;
   }): Promise<CompanionReplyPlan> {
     const latest = input.pendingUserMessages[input.pendingUserMessages.length - 1];
     return {

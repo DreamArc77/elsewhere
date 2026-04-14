@@ -3,8 +3,10 @@ import type {
   PhaseGroundingResult,
   RuntimeStepContext,
   TripPlan,
+  TripRecord,
 } from "../src/domain/types.js";
 
+import { resolveAgentStateForTimelineStep } from "../src/domain/business-situation.js";
 import { deriveImageIntent } from "../src/domain/image-intent.js";
 import { buildTimeline } from "../src/domain/state-machine.js";
 import {
@@ -46,6 +48,33 @@ const step = timeline.find(
     candidate.phase === "day_exploration",
 )!;
 const stepContext = step.context as RuntimeStepContext;
+
+const record: TripRecord = {
+  tripId: "trip-base",
+  personaId: persona.personaId,
+  request,
+  plan,
+  state: {
+    status: "planned",
+    currentPhase: "planning",
+    currentDay: 0,
+    nextRunAt: timeline[0]!.scheduledAt,
+    pendingPostcard: null,
+    artifacts: [],
+    activeStateAnchor: null,
+  },
+  timeline,
+  timelineIndex: 0,
+  pendingDispatch: null,
+  createdAt: "2026-04-09T00:00:00.000Z",
+  updatedAt: "2026-04-09T00:00:00.000Z",
+};
+
+const resolvedState = resolveAgentStateForTimelineStep({
+  record,
+  step,
+  persona,
+});
 
 const grounding: PhaseGroundingResult = {
   phase: "day_exploration",
@@ -97,6 +126,24 @@ describe("travel companion prompts", () => {
         day: stepContext.day,
         stepContext,
         grounding,
+        resolvedState,
+        currentStateSummary: JSON.stringify(
+          {
+            stage: resolvedState.stage,
+            state: resolvedState.state,
+          },
+          null,
+          2,
+        ),
+        currentStateGrounding: JSON.stringify(
+          {
+            currentActivity: resolvedState.state.currentActivity,
+            previousActivity: resolvedState.state.previousActivity,
+            nextActivity: resolvedState.state.nextActivity,
+          },
+          null,
+          2,
+        ),
         imagePrompt: selfieImagePrompt,
       }),
       Promise.resolve(selfieImagePrompt),
@@ -121,8 +168,9 @@ describe("travel companion prompts", () => {
 
     expect(prompts[1]).toContain(request.destinationCity);
     expect(prompts[1]).toContain(selfieImagePrompt);
-    expect(prompts[1]).toContain("不要写成这趟旅行是在“去找用户”");
-    expect(prompts[1]).toContain("不能是你此行的目标");
+    expect(prompts[1]).toContain("当前中心状态摘要");
+    expect(prompts[1]).toContain("当前中心状态 grounding");
+    expect(prompts[1]).toContain("不要把旅行写成“去找用户”");
 
     expect(prompts[2]).toContain("reference image");
     expect(prompts[2]).toContain("Do not include any companion");
@@ -153,7 +201,7 @@ describe("travel companion prompts", () => {
         [
           {
             role: "companion",
-            text: "刚落地",
+            text: "刚落地。",
             createdAt: "2026-04-13T10:10:00.000Z",
           },
         ],
@@ -171,9 +219,12 @@ describe("travel companion prompts", () => {
       ),
       currentStateSummary: JSON.stringify(
         {
-          mode: "traveling",
-          scene: "food",
-          presence: "available",
+          stage: {
+            substate: "food",
+          },
+          state: {
+            presence: "available",
+          },
         },
         null,
         2,
@@ -183,7 +234,7 @@ describe("travel companion prompts", () => {
           weatherForecast: "22C, light rain",
           currentActivity: {
             location: "成桂西餐厅",
-            description: "正在吃午饭",
+            description: "正在吃午饭。",
           },
         },
         null,
@@ -194,7 +245,7 @@ describe("travel companion prompts", () => {
     });
 
     expect(prompt).toContain("Current companion state:");
-    expect(prompt).toContain('"scene": "food"');
+    expect(prompt).toContain('"substate": "food"');
     expect(prompt).toContain("You are traveling alone.");
     expect(prompt).toContain("Do not describe the trip as moving toward the user");
     expect(prompt).toContain("Current state grounding:");

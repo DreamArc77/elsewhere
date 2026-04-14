@@ -313,6 +313,93 @@ export type CompanionBusinessPresence =
   | "busy"
   | "moving"
   | "resting";
+export type SeenPolicy =
+  | { kind: "range"; minMinutes: number; maxMinutes: number }
+  | { kind: "until_state_end" }
+  | { kind: "defer_to_next_state" };
+
+export type AgentStateBlockSourceKind =
+  | "synthetic_plan"
+  | "transportation_leg"
+  | "activity"
+  | "synthetic_gap"
+  | "synthetic_transition"
+  | "synthetic_idle";
+
+export type ResolvedAgentStateSource = "clock" | "anchor";
+
+export interface ResolvedAgentIdentity {
+  personaId: string | null;
+  personaSummary?: string;
+  relationshipSummary?: string;
+  memorySummary?: string;
+  relationshipNotes?: string;
+}
+
+export interface ResolvedAgentPolicy {
+  seenPolicy: SeenPolicy;
+  hotWindowMinutes: { min: number; max: number };
+  instantReplyCap: { min: number; max: number };
+  allowCarryToNextState: boolean;
+}
+
+export interface AgentStateBlock {
+  blockId: string;
+  group: CompanionStateGroup;
+  substate: CompanionStateSubstate;
+  sourceKind: AgentStateBlockSourceKind;
+  startedAtUtc: string;
+  endsAtUtc?: string;
+  day: number;
+  timeZone: string;
+  location?: string;
+  address?: string;
+  weatherForecast?: string;
+  presence: CompanionBusinessPresence;
+  currentActivity?: ItineraryActivity;
+  previousActivity?: ItineraryActivity;
+  nextActivity?: ItineraryActivity;
+  arrivalContext?: ArrivalContext;
+  route?: ActivityRoute;
+  note?: string;
+  phaseLabel?: TripPhase | "system";
+  contextKind: RuntimeStepContext["kind"] | "none";
+  sendMoment: RuntimeStepContext["sendMoment"] | "none";
+  isExtraMessage: boolean;
+  postcardEligible: boolean;
+}
+
+export interface ResolvedAgentStage {
+  substate: CompanionStateSubstate;
+  group?: CompanionStateGroup;
+  startedAtUtc: string;
+  endsAtUtc?: string;
+  day: number;
+  timeZone: string;
+}
+
+export interface ResolvedAgentStageState {
+  location?: string;
+  address?: string;
+  weatherForecast?: string;
+  presence: CompanionBusinessPresence;
+  currentActivity?: ItineraryActivity;
+  previousActivity?: ItineraryActivity;
+  nextActivity?: ItineraryActivity;
+  arrivalContext?: ArrivalContext;
+  route?: ActivityRoute;
+  note?: string;
+  phaseLabel?: TripPhase | "system";
+  source: ResolvedAgentStateSource;
+}
+
+export interface ResolvedAgentState {
+  identity: ResolvedAgentIdentity;
+  stage: ResolvedAgentStage;
+  state: ResolvedAgentStageState;
+  policy: ResolvedAgentPolicy;
+  block: AgentStateBlock;
+}
 
 export interface CompanionBusinessSituation {
   mode: CompanionBusinessMode;
@@ -348,9 +435,10 @@ export interface CompanionStateSnapshot {
 export interface CompanionStateAnchor {
   source: "postcard";
   stepId: string;
+  stateBlockId: string;
   sentAt: string;
   expiresAt: string;
-  snapshot: CompanionStateSnapshot;
+  snapshot?: CompanionStateSnapshot;
 }
 
 export interface InstantReplyWindow {
@@ -444,6 +532,7 @@ export interface GroundingPort {
     day: number;
     stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
+    resolvedState: ResolvedAgentState;
     imagePrompt: string;
   }): Promise<{ caption: string; provider: string }>;
   composeCompanionReply(input: {
@@ -452,7 +541,7 @@ export interface GroundingPort {
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
     activeTrip: TripRecord | null;
-    businessSituation: CompanionBusinessSituation;
+    resolvedState: ResolvedAgentState;
     now: string;
   }): Promise<CompanionReplyPlan>;
 }

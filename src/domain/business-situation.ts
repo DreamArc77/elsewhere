@@ -10,9 +10,13 @@ import {
   ConversationCompanionState,
   InstantReplyWindow,
   ItineraryActivity,
+  ResolvedAgentIdentity,
+  ResolvedAgentPolicy,
+  ResolvedAgentState,
   TimelineStep,
   TransitMode,
   TripRecord,
+  StoredPersonaProfile,
 } from "./types.js";
 import { stableRange } from "./stable-random.js";
 
@@ -512,6 +516,159 @@ function requireStrategy(
   return strategy;
 }
 
+function buildStateBlockId(input: {
+  state: CompanionStateGroup;
+  substate: CompanionStateSubstate;
+  day: number;
+  startedAt: string;
+  endsAt?: string;
+  location?: string;
+}): string {
+  return [
+    input.state,
+    input.substate,
+    input.day,
+    input.startedAt,
+    input.endsAt ?? "open",
+    input.location ?? "none",
+  ].join("::");
+}
+
+function buildResolvedIdentity(input: {
+  activeTrip: TripRecord | null;
+  conversationState?: ConversationCompanionState | null;
+  persona?: StoredPersonaProfile | null;
+}): ResolvedAgentIdentity {
+  return {
+    personaId: input.persona?.personaId ?? input.activeTrip?.personaId ?? null,
+    personaSummary: input.persona
+      ? [
+          `Name: ${input.persona.name}`,
+          `Traits: ${input.persona.traits.join(", ")}`,
+          `Relationship to user: ${input.persona.relationship}`,
+          `Tone style: ${input.persona.toneStyle}`,
+        ].join("\n")
+      : undefined,
+    relationshipSummary: input.persona?.relationship,
+    memorySummary: input.conversationState?.memorySummary,
+  };
+}
+
+function buildResolvedPolicy(
+  situation: CompanionBusinessSituation,
+): ResolvedAgentPolicy {
+  const strategy = strategyFor(situation);
+  return {
+    seenPolicy: strategy.seenPolicy,
+    hotWindowMinutes: strategy.hotWindowMinutes,
+    instantReplyCap: strategy.instantReplyCap,
+    allowCarryToNextState: strategy.seenPolicy.kind !== "range",
+  };
+}
+
+function buildResolvedStateFromDerived(input: {
+  activeTrip: TripRecord | null;
+  derived: DerivedStateResult;
+  conversationState?: ConversationCompanionState | null;
+  persona?: StoredPersonaProfile | null;
+}): ResolvedAgentState {
+  const timeZone =
+    input.derived.currentActivity?.route?.transport_mode === "airplane" &&
+    input.derived.situation.state === "return"
+      ? inferTimeZoneFromText(input.activeTrip?.request.originCity ?? "UTC")
+      : inferTimeZoneFromText(
+          input.derived.currentActivity?.location ??
+            input.activeTrip?.plan.metadata.destination ??
+            input.activeTrip?.request.destinationCity ??
+            input.activeTrip?.request.originCity ??
+            "UTC",
+        );
+  const location =
+    input.derived.currentActivity?.location ??
+    input.derived.previousActivity?.location ??
+    input.activeTrip?.request.originCity;
+  const blockId = buildStateBlockId({
+    state: input.derived.situation.state,
+    substate: input.derived.situation.substate,
+    day: input.derived.situation.currentDay,
+    startedAt: input.derived.timing.startedAt,
+    endsAt: input.derived.timing.endsAt,
+    location,
+  });
+
+  return {
+    identity: buildResolvedIdentity({
+      activeTrip: input.activeTrip,
+      conversationState: input.conversationState,
+      persona: input.persona,
+    }),
+    stage: {
+      substate: input.derived.situation.substate,
+      group: input.derived.situation.state,
+      startedAtUtc: input.derived.timing.startedAt,
+      endsAtUtc: input.derived.timing.endsAt,
+      day: input.derived.situation.currentDay,
+      timeZone,
+    },
+    state: {
+      location,
+      address:
+        input.derived.currentActivity?.address ??
+        input.derived.previousActivity?.address,
+      weatherForecast: input.derived.weatherForecast,
+      presence: input.derived.situation.presence,
+      currentActivity: input.derived.currentActivity,
+      previousActivity: input.derived.previousActivity,
+      nextActivity: input.derived.nextActivity,
+      arrivalContext: input.derived.currentActivity?.arrival_context,
+      route: input.derived.currentActivity?.route,
+      note: input.derived.currentActivity?.description,
+      phaseLabel: input.derived.situation.currentPhase,
+      source: input.derived.source ?? "clock",
+    },
+    policy: buildResolvedPolicy(input.derived.situation),
+    block: {
+      blockId,
+      group: input.derived.situation.state,
+      substate: input.derived.situation.substate,
+      sourceKind:
+        input.derived.situation.contextKind === "planning"
+          ? "synthetic_plan"
+          : input.derived.situation.contextKind === "activity" &&
+              input.derived.currentActivity
+            ? "activity"
+            : input.derived.situation.state === "idle"
+              ? "synthetic_idle"
+              : input.derived.situation.substate === "freetime"
+                ? "synthetic_gap"
+                : input.derived.situation.substate === "moving_to_next_activity"
+                  ? "synthetic_transition"
+                  : "transportation_leg",
+      startedAtUtc: input.derived.timing.startedAt,
+      endsAtUtc: input.derived.timing.endsAt,
+      day: input.derived.situation.currentDay,
+      timeZone,
+      location,
+      address:
+        input.derived.currentActivity?.address ??
+        input.derived.previousActivity?.address,
+      weatherForecast: input.derived.weatherForecast,
+      presence: input.derived.situation.presence,
+      currentActivity: input.derived.currentActivity,
+      previousActivity: input.derived.previousActivity,
+      nextActivity: input.derived.nextActivity,
+      arrivalContext: input.derived.currentActivity?.arrival_context,
+      route: input.derived.currentActivity?.route,
+      note: input.derived.currentActivity?.description,
+      phaseLabel: input.derived.situation.currentPhase,
+      contextKind: input.derived.situation.contextKind,
+      sendMoment: input.derived.situation.sendMoment,
+      isExtraMessage: input.derived.situation.isExtraMessage,
+      postcardEligible: input.derived.situation.postcardEligible,
+    },
+  };
+}
+
 function transportScene(mode: TransitMode, labelSource: string): CompanionBusinessScene {
   if (mode === "airplane" || looksLikeAirport(labelSource)) {
     return "airport";
@@ -684,10 +841,87 @@ export function createStateAnchorFromTimelineStep(input: {
   return {
     source: "postcard",
     stepId: input.step.stepId,
+    stateBlockId: buildStateBlockId({
+      state: snapshot.situation.state,
+      substate: snapshot.situation.substate,
+      day: snapshot.situation.currentDay,
+      startedAt: snapshot.timing.startedAt,
+      endsAt: snapshot.timing.endsAt,
+      location:
+        snapshot.currentActivity?.location ?? snapshot.previousActivity?.location,
+    }),
     sentAt: input.sentAt,
     expiresAt: new Date(expiresAtMs).toISOString(),
     snapshot,
   };
+}
+
+export function resolveAgentState(input: {
+  activeTrip: TripRecord | null;
+  conversationState?: ConversationCompanionState | null;
+  now?: Date;
+  persona?: StoredPersonaProfile | null;
+}): ResolvedAgentState {
+  const derived = deriveCompanionState(
+    input.activeTrip,
+    input.now ?? new Date(),
+  );
+  return buildResolvedStateFromDerived({
+    activeTrip: input.activeTrip,
+    derived,
+    conversationState: input.conversationState,
+    persona: input.persona,
+  });
+}
+
+export function resolveAgentStateForTimelineStep(input: {
+  record: TripRecord;
+  step: TimelineStep;
+  conversationState?: ConversationCompanionState | null;
+  persona?: StoredPersonaProfile | null;
+}): ResolvedAgentState {
+  const snapshot = deriveSnapshotFromTimelineStep(input.record, input.step);
+  if (snapshot) {
+    const derived: DerivedStateResult = {
+      source: "clock",
+      situation: snapshot.situation,
+      timing: snapshot.timing,
+      currentActivity: snapshot.currentActivity,
+      previousActivity: snapshot.previousActivity,
+      nextActivity: snapshot.nextActivity,
+      weatherForecast: snapshot.weatherForecast,
+    };
+    const resolved = buildResolvedStateFromDerived({
+      activeTrip: input.record,
+      derived,
+      conversationState: input.conversationState,
+      persona: input.persona,
+    });
+
+    if (resolved.stage.substate === "planning") {
+      const shifted = deriveCompanionState(
+        input.record,
+        new Date(new Date(input.step.scheduledAt).getTime() + 2 * 60 * 1000),
+      );
+      if (shifted.situation.substate === "packing") {
+        return buildResolvedStateFromDerived({
+          activeTrip: input.record,
+          derived: shifted,
+          conversationState: input.conversationState,
+          persona: input.persona,
+        });
+      }
+    }
+
+    return resolved;
+  }
+
+  return resolveAgentState({
+    activeTrip: input.record,
+    conversationState: input.conversationState,
+    now: new Date(input.step.scheduledAt),
+    persona: input.persona,
+  });
 }
 
 export function deriveCompanionBusinessSituation(
@@ -723,7 +957,10 @@ export function deriveCompanionState(
 
   const latestDelivery = latestPostcardSentAt(activeTrip);
   const anchor = activeTrip.state.activeStateAnchor;
-  if (anchor && new Date(anchor.expiresAt).getTime() > now.getTime()) {
+  if (
+    anchor?.snapshot &&
+    new Date(anchor.expiresAt).getTime() > now.getTime()
+  ) {
     return {
       source: "anchor",
       ...anchor.snapshot,
@@ -1273,15 +1510,14 @@ export function deriveReplyDueAt(input: {
 
 export function createReplyHotWindow(input: {
   conversationKey: string;
-  businessSituation: CompanionBusinessSituation;
+  resolvedState: ResolvedAgentState;
   triggerAt: string;
   source: "reply";
 }): InstantReplyWindow {
-  const strategy = strategyFor(input.businessSituation);
   const minutes = stableRange(
-    `${input.conversationKey}:${input.source}:${input.triggerAt}:${input.businessSituation.state}.${input.businessSituation.substate}:hot`,
-    strategy.hotWindowMinutes.min,
-    strategy.hotWindowMinutes.max,
+    `${input.conversationKey}:${input.source}:${input.triggerAt}:${input.resolvedState.stage.group}.${input.resolvedState.stage.substate}:hot`,
+    input.resolvedState.policy.hotWindowMinutes.min,
+    input.resolvedState.policy.hotWindowMinutes.max,
   );
   return {
     source: input.source,
@@ -1290,9 +1526,9 @@ export function createReplyHotWindow(input: {
       new Date(input.triggerAt).getTime() + minutes * 60 * 1000,
     ).toISOString(),
     cap: stableRange(
-      `${input.conversationKey}:${input.source}:${input.triggerAt}:${input.businessSituation.state}.${input.businessSituation.substate}:cap`,
-      strategy.instantReplyCap.min,
-      strategy.instantReplyCap.max,
+      `${input.conversationKey}:${input.source}:${input.triggerAt}:${input.resolvedState.stage.group}.${input.resolvedState.stage.substate}:cap`,
+      input.resolvedState.policy.instantReplyCap.min,
+      input.resolvedState.policy.instantReplyCap.max,
     ),
     usedCount: 0,
   };

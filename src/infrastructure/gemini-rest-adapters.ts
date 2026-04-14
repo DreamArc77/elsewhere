@@ -9,9 +9,11 @@ import {
   tripPlanJsonSchema,
   tripPlanSchema,
 } from "../contracts/schemas.js";
-import { deriveCompanionState } from "../domain/business-situation.js";
 import {
-  CompanionBusinessSituation,
+  resolveAgentState,
+  resolveAgentStateForTimelineStep,
+} from "../domain/business-situation.js";
+import {
   CompanionReplyPlan,
   CompanionTurn,
   GroundingPort,
@@ -21,6 +23,7 @@ import {
   LogEntry,
   LoggerPort,
   PhaseGroundingResult,
+  ResolvedAgentState,
   RuntimeStepContext,
   StoredPersonaProfile,
   TripPhase,
@@ -111,47 +114,21 @@ function latestPendingUserMessageAt(
 }
 
 function buildCurrentStateSummary(input: {
-  activeTrip: TripRecord | null;
-  businessSituation: CompanionBusinessSituation;
-  now: string;
+  resolvedState: ResolvedAgentState;
 }): string {
-  if (!input.activeTrip) {
-    return JSON.stringify(
-      {
-        mode: input.businessSituation.mode,
-        scene: input.businessSituation.scene,
-        presence: input.businessSituation.presence,
-        stateSource: "clock",
-        note: "No active trip right now.",
-      },
-      null,
-      2,
-    );
-  }
-
-  const derived = deriveCompanionState(
-    input.activeTrip,
-    new Date(input.now),
-  );
   return JSON.stringify(
     {
-      tripId: input.activeTrip.tripId,
-      destination: input.activeTrip.request.destinationCity,
-      mode: input.businessSituation.mode,
-      state: input.businessSituation.state,
-      substate: input.businessSituation.substate,
-      scene: input.businessSituation.scene,
-      presence: input.businessSituation.presence,
-      phase: input.businessSituation.currentPhase,
-      day: input.businessSituation.currentDay,
-      contextKind: input.businessSituation.contextKind,
-      sendMoment: input.businessSituation.sendMoment,
-      postcardEligible: input.businessSituation.postcardEligible,
-      isExtraMessage: input.businessSituation.isExtraMessage,
-      stateStartedAt: input.businessSituation.stateStartedAt ?? null,
-      stateEndsAt: input.businessSituation.stateEndsAt ?? null,
-      stateSource: derived.source ?? "clock",
-      weatherForecast: derived.weatherForecast ?? null,
+      identity: input.resolvedState.identity,
+      stage: input.resolvedState.stage,
+      state: {
+        location: input.resolvedState.state.location ?? null,
+        address: input.resolvedState.state.address ?? null,
+        presence: input.resolvedState.state.presence,
+        weatherForecast: input.resolvedState.state.weatherForecast ?? null,
+        phaseLabel: input.resolvedState.state.phaseLabel ?? null,
+        source: input.resolvedState.state.source,
+        note: input.resolvedState.state.note ?? null,
+      },
     },
     null,
     2,
@@ -159,30 +136,20 @@ function buildCurrentStateSummary(input: {
 }
 
 function buildCurrentStateGrounding(
-  activeTrip: TripRecord | null,
-  now: string,
+  resolvedState: ResolvedAgentState,
 ): string {
-  if (!activeTrip) {
-    return JSON.stringify(
-      {
-        note: "Idle state. No trip grounding is available right now.",
-      },
-      null,
-      2,
-    );
-  }
-
-  const derived = deriveCompanionState(activeTrip, new Date(now));
   if (
-    !derived.currentActivity &&
-    !derived.previousActivity &&
-    !derived.nextActivity
+    !resolvedState.state.currentActivity &&
+    !resolvedState.state.previousActivity &&
+    !resolvedState.state.nextActivity
   ) {
     return JSON.stringify(
       {
-        stateSource: derived.source ?? "clock",
-        note: "Trip exists, but there is no current activity-like grounding for this state.",
-        weatherForecast: derived.weatherForecast ?? null,
+        stateSource: resolvedState.state.source,
+        note:
+          resolvedState.state.note ??
+          "No activity-like grounding is available for this state.",
+        weatherForecast: resolvedState.state.weatherForecast ?? null,
       },
       null,
       2,
@@ -191,35 +158,39 @@ function buildCurrentStateGrounding(
 
   return JSON.stringify(
     {
-      stateSource: derived.source ?? "clock",
-      weatherForecast: derived.weatherForecast ?? null,
-      stateStartedAt: derived.timing.startedAt,
-      stateEndsAt: derived.timing.endsAt ?? null,
-      currentActivity: derived.currentActivity
+      stateSource: resolvedState.state.source,
+      weatherForecast: resolvedState.state.weatherForecast ?? null,
+      stateStartedAt: resolvedState.stage.startedAtUtc,
+      stateEndsAt: resolvedState.stage.endsAtUtc ?? null,
+      currentActivity: resolvedState.state.currentActivity
         ? {
-            type: derived.currentActivity.type,
-            location: derived.currentActivity.location,
-            address: derived.currentActivity.address,
-            description: derived.currentActivity.description,
-            arrivalContext: derived.currentActivity.arrival_context,
-            route: derived.currentActivity.route ?? null,
-            liveUpdate: derived.currentActivity.real_time_info.live_update,
+            type: resolvedState.state.currentActivity.type,
+            location: resolvedState.state.currentActivity.location,
+            address: resolvedState.state.currentActivity.address,
+            description: resolvedState.state.currentActivity.description,
+            arrivalContext: resolvedState.state.currentActivity.arrival_context,
+            route: resolvedState.state.currentActivity.route ?? null,
+            liveUpdate:
+              resolvedState.state.currentActivity.real_time_info.live_update,
           }
         : null,
-      previousActivity: derived.previousActivity
+      previousActivity: resolvedState.state.previousActivity
         ? {
-            type: derived.previousActivity.type,
-            location: derived.previousActivity.location,
-            description: derived.previousActivity.description,
+            type: resolvedState.state.previousActivity.type,
+            location: resolvedState.state.previousActivity.location,
+            description: resolvedState.state.previousActivity.description,
           }
         : null,
-      nextActivity: derived.nextActivity
+      nextActivity: resolvedState.state.nextActivity
         ? {
-            type: derived.nextActivity.type,
-            location: derived.nextActivity.location,
-            description: derived.nextActivity.description,
+            type: resolvedState.state.nextActivity.type,
+            location: resolvedState.state.nextActivity.location,
+            description: resolvedState.state.nextActivity.description,
           }
         : null,
+      arrivalContext: resolvedState.state.arrivalContext ?? null,
+      route: resolvedState.state.route ?? null,
+      note: resolvedState.state.note ?? null,
     },
     null,
     2,
@@ -448,8 +419,13 @@ export class GeminiRestGroundingAdapter
     day: number;
     stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
+    resolvedState: ResolvedAgentState;
     imagePrompt: string;
   }): Promise<{ caption: string; provider: string }> {
+    const currentStateSummary = buildCurrentStateSummary({
+      resolvedState: input.resolvedState,
+    });
+    const currentStateGrounding = buildCurrentStateGrounding(input.resolvedState);
     const prompt = await renderCaptionPrompt({
       persona: input.persona,
       request: input.request,
@@ -457,6 +433,9 @@ export class GeminiRestGroundingAdapter
       day: input.day,
       stepContext: input.stepContext,
       grounding: input.grounding,
+      resolvedState: input.resolvedState,
+      currentStateSummary,
+      currentStateGrounding,
       imagePrompt: input.imagePrompt,
     });
 
@@ -481,18 +460,13 @@ export class GeminiRestGroundingAdapter
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
     activeTrip: TripRecord | null;
-    businessSituation: CompanionBusinessSituation;
+    resolvedState: ResolvedAgentState;
     now: string;
   }): Promise<CompanionReplyPlan> {
     const currentStateSummary = buildCurrentStateSummary({
-      activeTrip: input.activeTrip,
-      businessSituation: input.businessSituation,
-      now: input.now,
+      resolvedState: input.resolvedState,
     });
-    const currentStateGrounding = buildCurrentStateGrounding(
-      input.activeTrip,
-      input.now,
-    );
+    const currentStateGrounding = buildCurrentStateGrounding(input.resolvedState);
     const prompt = await renderCompanionReplyPrompt({
       persona: input.persona,
       conversationKey: input.conversationKey,
@@ -506,12 +480,14 @@ export class GeminiRestGroundingAdapter
               phase: input.activeTrip.state.currentPhase,
               day: input.activeTrip.state.currentDay,
               nextRunAt: input.activeTrip.state.nextRunAt,
-              businessSituation: input.businessSituation,
+              stage: input.resolvedState.stage,
+              state: input.resolvedState.state,
             }
           : {
               status: "idle",
               note: "No active trip right now.",
-              businessSituation: input.businessSituation,
+              stage: input.resolvedState.stage,
+              state: input.resolvedState.state,
             },
         null,
         2,

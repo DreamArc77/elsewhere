@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import type {
   ImageIntent,
   PhaseGroundingResult,
+  ResolvedAgentState,
   RuntimeStepContext,
   StoredPersonaProfile,
   TripPlan,
@@ -110,6 +111,9 @@ export async function renderCaptionPrompt(input: {
   day: number;
   stepContext: RuntimeStepContext;
   grounding: PhaseGroundingResult;
+  resolvedState: ResolvedAgentState;
+  currentStateSummary: string;
+  currentStateGrounding: string;
   imagePrompt: string;
 }): Promise<string> {
   const template = await loadTemplate("compose-caption.md");
@@ -120,6 +124,8 @@ export async function renderCaptionPrompt(input: {
     day: input.day,
     stepContext: summarizeStepContext(input.stepContext),
     grounding: JSON.stringify(input.grounding, null, 2),
+    currentStateSummary: input.currentStateSummary,
+    currentStateGrounding: input.currentStateGrounding,
     imagePrompt: input.imagePrompt,
   });
 }

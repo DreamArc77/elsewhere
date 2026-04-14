@@ -21,6 +21,7 @@ import {
   createReplyHotWindow,
   deriveCompanionBusinessSituation,
   deriveReplyDueAt,
+  resolveAgentState,
 } from "../domain/business-situation.js";
 
 function nowIso(clock: ClockPort): string {
@@ -459,20 +460,26 @@ export class CompanionConversationService {
     state: ConversationCompanionState | null;
     activeTrip: TripRecord | null;
     businessSituation: CompanionBusinessSituation;
+    resolvedState: ReturnType<typeof resolveAgentState>;
   }> {
     const state = await this.dependencies.conversationStates.getByKey(
       input.binding.key,
     );
     const activeTrip = await this.getActiveTrip(input.binding);
-    const businessSituation = deriveCompanionBusinessSituation(
+    const resolvedState = resolveAgentState({
       activeTrip,
-      this.dependencies.clock.now(),
-    );
+      conversationState: state,
+      now: this.dependencies.clock.now(),
+    });
+    const businessSituation = resolvedState
+      ? deriveCompanionBusinessSituation(activeTrip, this.dependencies.clock.now())
+      : deriveCompanionBusinessSituation(activeTrip, this.dependencies.clock.now());
 
     return {
       state,
       activeTrip,
       businessSituation,
+      resolvedState,
     };
   }
 
@@ -483,6 +490,11 @@ export class CompanionConversationService {
     startedAt: string,
   ): Promise<ConversationCompanionState> {
     const activeTrip = await this.getActiveTrip(binding);
+    const resolvedState = resolveAgentState({
+      activeTrip,
+      conversationState: state,
+      now: this.dependencies.clock.now(),
+    });
     const businessSituation = deriveCompanionBusinessSituation(
       activeTrip,
       this.dependencies.clock.now(),
@@ -526,7 +538,7 @@ export class CompanionConversationService {
               activeTrip,
             ),
             activeTrip,
-            businessSituation,
+            resolvedState,
             now: nowIso(this.dependencies.clock),
           });
 
@@ -599,6 +611,11 @@ export class CompanionConversationService {
     }
 
     const activeTrip = await this.getActiveTrip(binding);
+    const resolvedState = resolveAgentState({
+      activeTrip,
+      conversationState: state,
+      now: this.dependencies.clock.now(),
+    });
     const businessSituation = deriveCompanionBusinessSituation(
       activeTrip,
       this.dependencies.clock.now(),
@@ -618,7 +635,7 @@ export class CompanionConversationService {
       pendingReplyDispatch: null,
       instantReplyWindow: createReplyHotWindow({
         conversationKey: binding.key,
-        businessSituation,
+        resolvedState,
         triggerAt: sentAt,
         source: "reply",
       }),

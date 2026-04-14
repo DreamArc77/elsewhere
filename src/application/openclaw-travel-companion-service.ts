@@ -22,7 +22,10 @@ import {
   isPostcardStep,
   isTripDue,
 } from "../domain/state-machine.js";
-import { createStateAnchorFromTimelineStep } from "../domain/business-situation.js";
+import {
+  createStateAnchorFromTimelineStep,
+  resolveAgentStateForTimelineStep,
+} from "../domain/business-situation.js";
 import { deriveImageIntent } from "../domain/image-intent.js";
 import { buildDerivedGrounding } from "../domain/step-grounding.js";
 import { renderImageGenerationPrompt } from "../prompting/travel-companion-prompts.js";
@@ -388,6 +391,11 @@ export class OpenClawTravelCompanionService {
       day: step.day,
       stepContext: step.context,
       grounding,
+      resolvedState: resolveAgentStateForTimelineStep({
+        record,
+        step,
+        persona,
+      }),
       imagePrompt,
     });
 
