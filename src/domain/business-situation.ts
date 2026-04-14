@@ -728,8 +728,8 @@ function deriveSnapshotFromTimelineStep(
         timing,
       }),
       timing,
-      currentActivity: context.activity,
-      previousActivity: context.previousActivity,
+      currentActivity: undefined,
+      previousActivity: undefined,
       nextActivity: context.nextActivity,
       weatherForecast,
     });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveCompanionBusinessSituation } from "../src/domain/business-situation.js";
+import {
+  createStateAnchorFromTimelineStep,
+  deriveCompanionBusinessSituation,
+} from "../src/domain/business-situation.js";
 import { createTestRuntime } from "./helpers/runtime.js";
 
 describe("companion business situation", () => {
@@ -197,5 +200,36 @@ describe("companion business situation", () => {
     expect(record?.state.activeStateAnchor?.source).toBe("postcard");
     expect(situation.state).toBe("activities");
     expect(situation.substate).toBe("transport");
+  });
+
+  it("does not carry synthetic airport activity into planning anchors", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Qingdao",
+    });
+
+    const record = await runtime.tripRepository.getById(trip.tripId);
+    const planningStep = record?.timeline[0];
+    expect(planningStep?.phase).toBe("planning");
+
+    const anchor = createStateAnchorFromTimelineStep({
+      record: record!,
+      step: planningStep!,
+      sentAt: planningStep!.scheduledAt,
+    });
+
+    expect(anchor?.snapshot?.situation.substate).toBe("packing");
+    expect(anchor?.snapshot?.currentActivity).toBeUndefined();
+    expect(anchor?.snapshot?.nextActivity?.location).toBeTruthy();
   });
 });

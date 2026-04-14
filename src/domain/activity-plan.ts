@@ -408,23 +408,23 @@ function buildSyntheticTiming(now: Date, timeZone: string): ActivityTiming {
 }
 
 function buildPlanningActivity(plan: TripPlan): ItineraryActivity {
-  const departure = plan.transportation.departure.departure;
+  const origin = plan.metadata.origin;
   const firstDayWeather = plan.daily_itinerary[0]?.weather_forecast ?? "";
   return {
-    time_slot: departure.time,
-    location: `Departure prep near ${departure.station}`,
-    address: departure.station,
+    time_slot: "00:00 - 00:30",
+    location: `Final packing in ${origin}`,
+    address: origin,
     type: "transport",
-    description: `Before leaving ${plan.metadata.origin} for ${plan.metadata.destination}, review the plan, pack lightly, and get ready to reach ${departure.station} before departure.`,
+    description: `Before leaving ${origin} for ${plan.metadata.destination}, review the plan, pack the essentials, and finish the last round of departure prep.`,
     arrival_context: {
-      from_location: departure.station,
-      transport_mode: plan.transportation.departure.transport_mode,
+      from_location: origin,
+      transport_mode: "walk",
       duration_minutes: 0,
     },
     route: {
-      from_location: departure.station,
-      to_location: departure.station,
-      transport_mode: plan.transportation.departure.transport_mode,
+      from_location: origin,
+      to_location: origin,
+      transport_mode: "walk",
     },
     real_time_info: {
       live_update: firstDayWeather,

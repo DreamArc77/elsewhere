@@ -29,7 +29,9 @@ describe("state machine", () => {
     expect(timeline[0]?.context?.activity.description).toContain(
       "Before leaving Hong Kong for Tokyo",
     );
-    expect(timeline[0]?.context?.activity.location).toContain("Departure prep");
+    expect(timeline[0]?.context?.activity.location).toBe(
+      "Final packing in Hong Kong",
+    );
     expect(timeline.at(-1)?.phase).toBe("home_reflection");
     expect(
       timeline.filter((step) => step.context?.isExtraMessage).length,

@@ -5,7 +5,7 @@ import { buildTimeline } from "../src/domain/state-machine.js";
 import { buildFixtureTripPlan } from "../src/testing/fakes.js";
 
 describe("derived grounding", () => {
-  it("does not describe planning transit as moving from the airport to the same airport", () => {
+  it("keeps planning grounding in a neutral packing state", () => {
     const plan = buildFixtureTripPlan({
       tripId: "trip-grounding",
       originCity: "Hong Kong",
@@ -23,7 +23,8 @@ describe("derived grounding", () => {
     });
 
     expect(grounding.phase).toBe("planning");
-    expect(grounding.transitSummary).toContain("Preparing to depart from");
-    expect(grounding.transitSummary).not.toContain("to 香港国际机场");
+    expect(grounding.locality).toBe("Final packing in Hong Kong");
+    expect(grounding.transitSummary).toBe("Preparing to depart from Hong Kong");
+    expect(grounding.venueSummary.toLowerCase()).not.toContain("airport");
   });
 });
