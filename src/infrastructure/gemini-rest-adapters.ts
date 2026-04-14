@@ -293,14 +293,22 @@ function buildRecentPhotoContext(input: {
     return JSON.stringify({ available: false }, null, 2);
   }
 
+  let parsedSummary: unknown = input.latestPostcardPhoto.imageSummary ?? null;
+  if (typeof parsedSummary === "string") {
+    try {
+      parsedSummary = JSON.parse(parsedSummary);
+    } catch {
+      parsedSummary = parsedSummary;
+    }
+  }
+
   return JSON.stringify(
     {
       available: true,
-      tripId: input.latestPostcardPhoto.tripId,
       sentAt: input.latestPostcardPhoto.sentAt,
       shotKind: input.latestPostcardPhoto.shotKind,
       caption: input.latestPostcardPhoto.caption,
-      imageSummary: input.latestPostcardPhoto.imageSummary ?? null,
+      imageSummary: parsedSummary,
     },
     null,
     2,

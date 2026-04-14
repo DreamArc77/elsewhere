@@ -33,7 +33,9 @@ describe("reply prompt", () => {
     expect(prompt).toContain("Current transport details:");
     expect(prompt).toContain('"identifier":"MU5478"');
     expect(prompt).toContain('"time":"09:15"');
-    expect(prompt).toContain("Recent photo you sent:");
+    expect(prompt).toContain(
+      "Recent photo you sent (hidden context only, do not quote verbatim):",
+    );
     expect(prompt).toContain('"scene":"car interior"');
   });
 });
