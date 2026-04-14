@@ -135,9 +135,11 @@ export async function renderCompanionReplyPrompt(input: {
   conversationKey: string;
   pendingUserMessages: string;
   recentTurns: string;
+  recentPhotoContext: string;
   activeTripSummary: string;
   currentStateSummary: string;
   currentStateGrounding: string;
+  currentTransportDetails: string;
   now: string;
   latestUserMessageAt: string;
 }): Promise<string> {
@@ -147,11 +149,13 @@ export async function renderCompanionReplyPrompt(input: {
       ? buildPersonaSummary(input.persona)
       : "No persona is configured yet.",
     conversationKey: input.conversationKey,
-    pendingUserMessages: input.pendingUserMessages,
-    recentTurns: input.recentTurns,
-    activeTripSummary: input.activeTripSummary,
-    currentStateSummary: input.currentStateSummary,
-    currentStateGrounding: input.currentStateGrounding,
+      pendingUserMessages: input.pendingUserMessages,
+      recentTurns: input.recentTurns,
+      recentPhotoContext: input.recentPhotoContext,
+      activeTripSummary: input.activeTripSummary,
+      currentStateSummary: input.currentStateSummary,
+      currentStateGrounding: input.currentStateGrounding,
+    currentTransportDetails: input.currentTransportDetails,
     now: input.now,
     latestUserMessageAt: input.latestUserMessageAt,
   });
@@ -171,9 +175,19 @@ export async function renderImageGenerationPrompt(input: {
       : "generate-image-snapshot.md",
   );
 
+  if (input.imageIntent.shotKind === "selfie") {
+    return renderTemplate(template, {
+      currentTime: input.imageIntent.currentTimeLocal,
+      weatherSummary: input.imageIntent.weatherSummary,
+      promptLocation: input.imageIntent.promptLocation,
+      promptBehavior: input.imageIntent.promptBehavior,
+    });
+  }
+
   return renderTemplate(template, {
     currentTime: input.imageIntent.currentTimeLocal,
-    destinationWithLocation: input.imageIntent.destinationWithLocation,
-    activityDescription: input.imageIntent.activityDescription,
+    weatherSummary: input.imageIntent.weatherSummary,
+    promptLocation: input.imageIntent.promptLocation,
+    promptBehavior: input.imageIntent.promptBehavior,
   });
 }

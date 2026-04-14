@@ -206,6 +206,9 @@ export interface ImageIntent {
   destinationWithLocation: string;
   activityLocation: string;
   activityDescription: string;
+  weatherSummary: string;
+  promptLocation: string;
+  promptBehavior: string;
 }
 
 export interface ImageGenerationResult {
@@ -213,6 +216,7 @@ export interface ImageGenerationResult {
   bytesBase64: string;
   provider: string;
   promptEcho?: string;
+  imageSummary?: string;
 }
 
 export interface PendingDispatch {
@@ -224,6 +228,7 @@ export interface PendingDispatch {
   dedupeKey: string;
   grounding: PhaseGroundingResult;
   imagePrompt: string;
+  imageSummary?: string;
   artifactIds: string[];
 }
 
@@ -260,6 +265,14 @@ export interface CompanionTurn {
   text: string;
   createdAt: string;
   tripId?: string;
+}
+
+export interface RecentPostcardPhotoContext {
+  tripId: string;
+  sentAt: string;
+  shotKind: ShotKind;
+  caption: string;
+  imageSummary?: string;
 }
 
 export interface PendingReplyDispatch {
@@ -457,6 +470,7 @@ export interface ConversationCompanionState {
   instantReplyWindow: InstantReplyWindow | null;
   recentHandledCommandMessageIds: string[];
   recentTurns: CompanionTurn[];
+  latestPostcardPhoto?: RecentPostcardPhotoContext;
   lastUserMessageAt: string | null;
   lastCompanionReplyAt: string | null;
   memorySummary?: string;
@@ -540,6 +554,7 @@ export interface GroundingPort {
     persona: StoredPersonaProfile | null;
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
+    latestPostcardPhoto?: RecentPostcardPhotoContext;
     activeTrip: TripRecord | null;
     resolvedState: ResolvedAgentState;
     now: string;

@@ -63,6 +63,9 @@ describe("image intent", () => {
     expect(intent.currentTimeLocal).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(intent.destinationWithLocation).toContain(plan.metadata.destination);
     expect(intent.destinationWithLocation).toContain(stepContext.activity.location);
+    expect(intent.weatherSummary.length).toBeGreaterThan(0);
+    expect(intent.promptLocation.length).toBeGreaterThan(0);
+    expect(intent.promptBehavior.length).toBeGreaterThan(0);
     expect(intent.usesReferenceImage).toBe(intent.shotKind === "selfie");
   });
 });

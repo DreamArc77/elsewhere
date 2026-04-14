@@ -72,6 +72,7 @@ function emptyConversationState(
     instantReplyWindow: null,
     recentHandledCommandMessageIds: [],
     recentTurns: [],
+    latestPostcardPhoto: undefined,
     lastUserMessageAt: null,
     lastCompanionReplyAt: null,
     memorySummary: undefined,
@@ -145,6 +146,7 @@ export class CompanionConversationService {
       pendingUserMessages: [],
       pendingReplyDispatch: null,
       instantReplyWindow: null,
+      latestPostcardPhoto: state.latestPostcardPhoto,
       updatedAt,
     };
     await this.dependencies.conversationStates.save(nextState);
@@ -537,6 +539,10 @@ export class CompanionConversationService {
               state.recentTurns,
               activeTrip,
             ),
+            latestPostcardPhoto:
+              state.latestPostcardPhoto?.tripId === activeTrip?.tripId
+                ? state.latestPostcardPhoto
+                : undefined,
             activeTrip,
             resolvedState,
             now: nowIso(this.dependencies.clock),

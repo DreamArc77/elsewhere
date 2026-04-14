@@ -441,6 +441,7 @@ export class OpenClawTravelCompanionService {
         dedupeKey: `${record.tripId}:${step.stepId}`,
         grounding,
         imagePrompt,
+        imageSummary: image.imageSummary,
         artifactIds: [groundingArtifactId, imageArtifactId],
       },
       updatedAt: nowIso(this.dependencies.clock),

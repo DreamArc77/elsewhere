@@ -480,10 +480,20 @@ export class FakeGroundingPort implements GroundingPort {
   }
 
   async composeCompanionReply(input: {
+    conversationKey: string;
     persona: StoredPersonaProfile | null;
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
+    latestPostcardPhoto?: {
+      tripId: string;
+      sentAt: string;
+      shotKind: string;
+      caption: string;
+      imageSummary?: string;
+    };
+    activeTrip: unknown | null;
     resolvedState: ResolvedAgentState;
+    now: string;
   }): Promise<CompanionReplyPlan> {
     const latest = input.pendingUserMessages[input.pendingUserMessages.length - 1];
     return {
@@ -511,6 +521,8 @@ export class FakeImageGenerationPort implements ImageGenerationPort {
       ).toString("base64"),
       provider: "fake-image",
       promptEcho: "fixture prompt",
+      imageSummary:
+        '{"scene":"fixture scene","otherPeopleVisible":"none","notableDetails":["fixture"]}',
     };
   }
 }

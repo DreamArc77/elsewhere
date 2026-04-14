@@ -24,6 +24,9 @@ Current companion state:
 Current state grounding:
 {{currentStateGrounding}}
 
+Current transport details:
+{{currentTransportDetails}}
+
 Current time:
 {{now}}
 
@@ -38,6 +41,9 @@ Pending user messages to reply to:
 
 Recent conversation turns:
 {{recentTurns}}
+
+Recent photo you sent:
+{{recentPhotoContext}}
 
 Return exactly this JSON shape:
 {

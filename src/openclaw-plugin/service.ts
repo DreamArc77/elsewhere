@@ -101,6 +101,38 @@ export async function createRuntimeBundle(input: {
     }),
     clock: new SystemClockPort(),
     logger,
+    hooks: {
+      afterMessageSent: async (record) => {
+        const pending = record.pendingDispatch;
+        if (!pending) {
+          return;
+        }
+
+        const allBindings = await bindings.list();
+        const targetBindings = allBindings.filter(
+          (binding) => binding.lastTripId === record.tripId,
+        );
+
+        for (const binding of targetBindings) {
+          const state = await conversationStateRepository.getByKey(binding.key);
+          if (!state) {
+            continue;
+          }
+
+          await conversationStateRepository.save({
+            ...state,
+            latestPostcardPhoto: {
+              tripId: record.tripId,
+              sentAt: new Date().toISOString(),
+              shotKind: pending.shotKind,
+              caption: pending.postcard.caption,
+              imageSummary: pending.imageSummary,
+            },
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      },
+    },
   });
   const conversationService = new CompanionConversationService({
     bindings,

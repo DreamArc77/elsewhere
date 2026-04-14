@@ -88,6 +88,7 @@ export const imageGenerationResultSchema = z.object({
   bytesBase64: z.string().min(1),
   provider: z.string().min(1),
   promptEcho: z.string().min(1).optional(),
+  imageSummary: z.string().min(1).optional(),
 });
 
 export const companionReplyPlanSchema = z.object({

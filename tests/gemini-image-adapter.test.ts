@@ -84,6 +84,34 @@ function makeImageResponse(): Response {
   );
 }
 
+function makeImageAndSummaryResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: '{"scene":"hotel room corner","otherPeopleVisible":"none","notableDetails":["desk lamp","rainy window"]}',
+              },
+              {
+                inlineData: {
+                  data: tinyPngBase64,
+                  mimeType: "image/png",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    },
+  );
+}
+
 function findIntent(kind: "selfie" | "snapshot", fixture: ReturnType<typeof makeFixture>) {
   for (let index = 0; index < 200; index += 1) {
     const intent = deriveImageIntent({
@@ -167,5 +195,33 @@ describe("Gemini image adapter", () => {
       ?.parts as Array<Record<string, unknown>>) ?? []);
     expect(parts).toHaveLength(1);
     expect(parts[0]).toHaveProperty("text");
+  });
+
+  it("extracts image summary text when the image model returns text and image together", async () => {
+    const referenceImageAsset = await createReferenceImage();
+    const fixture = makeFixture(referenceImageAsset);
+    const adapter = new GeminiRestImageAdapter({
+      apiKey: "test-key",
+      fetchImpl: async () => makeImageAndSummaryResponse(),
+    });
+
+    const intent = findIntent("snapshot", fixture);
+
+    const result = await adapter.generateImage({
+      tripId: fixture.plan.tripId,
+      persona: fixture.persona,
+      request: fixture.request,
+      plan: fixture.plan,
+      phase: fixture.step.phase,
+      day: fixture.step.day,
+      stepContext: fixture.stepContext,
+      grounding: fixture.grounding,
+      shotKind: intent.shotKind,
+      usesReferenceImage: intent.usesReferenceImage,
+      prompt: "snapshot prompt",
+    });
+
+    expect(result.imageSummary).toContain('"scene":"hotel room corner"');
+    expect(result.imageSummary).toContain('"otherPeopleVisible":"none"');
   });
 });

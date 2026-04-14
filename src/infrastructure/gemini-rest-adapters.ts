@@ -77,6 +77,30 @@ function extractText(response: GenerateContentResponse): string {
   return part.text;
 }
 
+function extractOptionalText(
+  response: GenerateContentResponse,
+): string | undefined {
+  const text = response.candidates?.[0]?.content?.parts?.find(
+    (candidatePart) => typeof candidatePart.text === "string",
+  )?.text;
+  return text?.trim() ? text.trim() : undefined;
+}
+
+function extractOptionalImageSummary(
+  response: GenerateContentResponse,
+): string | undefined {
+  const text = extractOptionalText(response);
+  if (!text) {
+    return undefined;
+  }
+
+  try {
+    return extractLikelyJson(text);
+  } catch {
+    return text;
+  }
+}
+
 function extractImage(response: GenerateContentResponse): ImageGenerationResult {
   const imagePart = response.candidates?.[0]?.content?.parts?.find(
     (part) => Boolean(part.inlineData?.data || part.inline_data?.data),
@@ -191,6 +215,92 @@ function buildCurrentStateGrounding(
       arrivalContext: resolvedState.state.arrivalContext ?? null,
       route: resolvedState.state.route ?? null,
       note: resolvedState.state.note ?? null,
+    },
+    null,
+    2,
+  );
+}
+
+function buildCurrentTransportDetails(input: {
+  activeTrip: TripRecord | null;
+  resolvedState: ResolvedAgentState;
+}): string {
+  if (!input.activeTrip) {
+    return JSON.stringify({ relevant: false }, null, 2);
+  }
+
+  const stage = input.resolvedState.stage;
+  const state = input.resolvedState.state;
+  const departureLeg = input.activeTrip.plan.transportation.departure;
+  const returnLeg = input.activeTrip.plan.transportation.return;
+
+  const isReturnLeg =
+    stage.group === "return" || state.phaseLabel === "returning";
+  const isMainLegStage =
+    stage.substate === "before_departure" ||
+    stage.substate === "departing" ||
+    stage.substate === "arrive";
+
+  if (isMainLegStage) {
+    const leg = isReturnLeg ? returnLeg : departureLeg;
+    return JSON.stringify(
+      {
+        relevant: true,
+        leg: isReturnLeg ? "return" : "departure",
+        type: leg.type,
+        transportMode: leg.transport_mode,
+        identifier: leg.identifier,
+        operator: leg.operator,
+        departure: leg.departure,
+        arrival: leg.arrival,
+      },
+      null,
+      2,
+    );
+  }
+
+  const currentActivity = input.resolvedState.state.currentActivity;
+  if (stage.substate === "transport" && currentActivity?.route) {
+    return JSON.stringify(
+      {
+        relevant: true,
+        leg: "local_transport",
+        transportMode:
+          currentActivity.route.transport_mode ??
+          currentActivity.arrival_context.transport_mode,
+        route: currentActivity.route,
+        arrivalContext: currentActivity.arrival_context,
+        description: currentActivity.description,
+      },
+      null,
+      2,
+    );
+  }
+
+  return JSON.stringify({ relevant: false }, null, 2);
+}
+
+function buildRecentPhotoContext(input: {
+  latestPostcardPhoto?: {
+    tripId: string;
+    sentAt: string;
+    shotKind: string;
+    caption: string;
+    imageSummary?: string;
+  };
+}): string {
+  if (!input.latestPostcardPhoto) {
+    return JSON.stringify({ available: false }, null, 2);
+  }
+
+  return JSON.stringify(
+    {
+      available: true,
+      tripId: input.latestPostcardPhoto.tripId,
+      sentAt: input.latestPostcardPhoto.sentAt,
+      shotKind: input.latestPostcardPhoto.shotKind,
+      caption: input.latestPostcardPhoto.caption,
+      imageSummary: input.latestPostcardPhoto.imageSummary ?? null,
     },
     null,
     2,
@@ -459,6 +569,13 @@ export class GeminiRestGroundingAdapter
     persona: StoredPersonaProfile | null;
     pendingUserMessages: InboundUserMessage[];
     recentTurns: CompanionTurn[];
+    latestPostcardPhoto?: {
+      tripId: string;
+      sentAt: string;
+      shotKind: string;
+      caption: string;
+      imageSummary?: string;
+    };
     activeTrip: TripRecord | null;
     resolvedState: ResolvedAgentState;
     now: string;
@@ -467,11 +584,18 @@ export class GeminiRestGroundingAdapter
       resolvedState: input.resolvedState,
     });
     const currentStateGrounding = buildCurrentStateGrounding(input.resolvedState);
+    const currentTransportDetails = buildCurrentTransportDetails({
+      activeTrip: input.activeTrip,
+      resolvedState: input.resolvedState,
+    });
     const prompt = await renderCompanionReplyPrompt({
       persona: input.persona,
       conversationKey: input.conversationKey,
       pendingUserMessages: JSON.stringify(input.pendingUserMessages, null, 2),
       recentTurns: JSON.stringify(input.recentTurns, null, 2),
+      recentPhotoContext: buildRecentPhotoContext({
+        latestPostcardPhoto: input.latestPostcardPhoto,
+      }),
       activeTripSummary: JSON.stringify(
         input.activeTrip
           ? {
@@ -494,6 +618,7 @@ export class GeminiRestGroundingAdapter
       ),
       currentStateSummary,
       currentStateGrounding,
+      currentTransportDetails,
       now: input.now,
       latestUserMessageAt: latestPendingUserMessageAt(input.pendingUserMessages),
     });
@@ -586,6 +711,7 @@ export class GeminiRestImageAdapter
       ...extractImage(response),
       provider: this.imageModel,
       promptEcho: input.prompt,
+      imageSummary: extractOptionalImageSummary(response),
     };
   }
 }
