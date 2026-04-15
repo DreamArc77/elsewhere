@@ -128,6 +128,26 @@ function truncate(value: string, maxLength: number): string {
     : value;
 }
 
+function summarizePlanResponseText(text: string): {
+  responseTextLength: number;
+  responseTextPreviewHead: string;
+  responseTextPreviewTail: string;
+  responseTextStartsWith: string;
+  responseTextEndsWith: string;
+  responseTextLooksJsonComplete: boolean;
+} {
+  const trimmed = text.trim();
+  return {
+    responseTextLength: trimmed.length,
+    responseTextPreviewHead: truncate(trimmed.slice(0, 400), 400),
+    responseTextPreviewTail: truncate(trimmed.slice(-400), 400),
+    responseTextStartsWith: trimmed.slice(0, 40),
+    responseTextEndsWith: trimmed.slice(-40),
+    responseTextLooksJsonComplete:
+      trimmed.startsWith("{") && trimmed.endsWith("}"),
+  };
+}
+
 function latestPendingUserMessageAt(
   pendingUserMessages: InboundUserMessage[],
 ): string {
@@ -416,6 +436,16 @@ export class GeminiRestGroundingAdapter
       ].join("\n"),
     ];
 
+    prompts[1] = [
+      basePrompt,
+      "",
+      "错误提醒：上一次输出不合格。请重新生成完整 JSON，并严格遵守这些额外要求：",
+      "1. 不允许把用户写进旅行现场，用户只是远端收消息的人。",
+      "2. 不允许出现恋爱对白、病娇台词、威胁、占有欲、牵手、见面、同行叙事。",
+      "3. `description`、`arrival_context`、`route`、`live_update` 必须是客观、可执行的旅行信息。",
+      "4. 日期必须晚于或等于今天，不能回到过去年份。",
+    ].join("\n");
+
     let lastError: unknown;
     const runId = `plan:${input.tripId}`;
 
@@ -454,6 +484,7 @@ export class GeminiRestGroundingAdapter
         });
 
         const responseFinishedAt = nowIso();
+        const responseText = extractText(response);
         await this.logPlanEntry({
           tripId: input.tripId,
           runId,
@@ -465,15 +496,22 @@ export class GeminiRestGroundingAdapter
           startedAt: requestStartedAt,
           finishedAt: responseFinishedAt,
           latencyMs: elapsedMs(requestStartedAt, responseFinishedAt),
-          details: { attempt },
+          details: {
+            attempt,
+            ...summarizePlanResponseText(responseText),
+          },
         });
 
         const parseStartedAt = nowIso();
-        const parsed = parseModelJson(
-          extractText(response),
-          tripPlanSchema,
-          "Gemini trip plan",
-        );
+        let parsed: TripPlan;
+        try {
+          parsed = parseModelJson(responseText, tripPlanSchema, "Gemini trip plan");
+        } catch (error) {
+          if (error instanceof Error) {
+            Object.assign(error, { responseText });
+          }
+          throw error;
+        }
         const parseFinishedAt = nowIso();
 
         await this.logPlanEntry({
@@ -498,6 +536,13 @@ export class GeminiRestGroundingAdapter
         lastError = error;
         const failedAt = nowIso();
         const errorMessage = error instanceof Error ? error.message : String(error);
+        const responseText =
+          error instanceof Error &&
+          "responseText" in (error as object) &&
+          typeof (error as Error & { responseText?: unknown }).responseText ===
+            "string"
+            ? (error as Error & { responseText: string }).responseText
+            : undefined;
 
         await this.logPlanEntry({
           tripId: input.tripId,
@@ -518,6 +563,7 @@ export class GeminiRestGroundingAdapter
           details: {
             attempt,
             error: truncate(errorMessage, 600),
+            ...(responseText ? summarizePlanResponseText(responseText) : {}),
           },
         });
       }

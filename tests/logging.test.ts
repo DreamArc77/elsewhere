@@ -121,5 +121,21 @@ describe("structured logging", () => {
         "plan.parse.finished",
       ]),
     );
+    const finishedEntry = entries.find(
+      (entry) => entry.event === "plan.request.finished",
+    );
+    const retryEntry = entries.find((entry) => entry.event === "plan.request.retry");
+    expect(finishedEntry?.details).toMatchObject({
+      responseTextLength: expect.any(Number),
+      responseTextPreviewHead: expect.any(String),
+      responseTextPreviewTail: expect.any(String),
+      responseTextLooksJsonComplete: expect.any(Boolean),
+    });
+    expect(retryEntry?.details).toMatchObject({
+      responseTextLength: expect.any(Number),
+      responseTextPreviewHead: expect.any(String),
+      responseTextPreviewTail: expect.any(String),
+      responseTextLooksJsonComplete: expect.any(Boolean),
+    });
   });
 });
