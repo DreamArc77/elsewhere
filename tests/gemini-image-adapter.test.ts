@@ -224,4 +224,47 @@ describe("Gemini image adapter", () => {
     expect(result.imageSummary).toContain('"scene":"hotel room corner"');
     expect(result.imageSummary).toContain('"otherPeopleVisible":"none"');
   });
+
+  it("logs the rendered image prompt when a logger is provided", async () => {
+    const referenceImageAsset = await createReferenceImage();
+    const fixture = makeFixture(referenceImageAsset);
+    const entries: Array<Record<string, unknown>> = [];
+    const adapter = new GeminiRestImageAdapter({
+      apiKey: "test-key",
+      logger: {
+        log(entry) {
+          entries.push(entry as unknown as Record<string, unknown>);
+        },
+      },
+      fetchImpl: async () => makeImageResponse(),
+    });
+
+    const intent = findIntent("snapshot", fixture);
+
+    await adapter.generateImage({
+      tripId: fixture.plan.tripId,
+      persona: fixture.persona,
+      request: fixture.request,
+      plan: fixture.plan,
+      phase: fixture.step.phase,
+      day: fixture.step.day,
+      stepContext: fixture.stepContext,
+      grounding: fixture.grounding,
+      shotKind: intent.shotKind,
+      usesReferenceImage: intent.usesReferenceImage,
+      prompt: "snapshot prompt",
+    });
+
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "image.prompt.rendered",
+          details: expect.objectContaining({
+            renderedPrompt: "snapshot prompt",
+            promptLength: "snapshot prompt".length,
+          }),
+        }),
+      ]),
+    );
+  });
 });

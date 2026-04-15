@@ -98,6 +98,7 @@ export async function createRuntimeBundle(input: {
     imageGeneration: new GeminiRestImageAdapter({
       apiKey,
       imageModel: input.pluginConfig.imageModel,
+      logger,
     }),
     clock: new SystemClockPort(),
     logger,
