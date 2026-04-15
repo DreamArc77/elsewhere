@@ -115,16 +115,24 @@ describe("structured logging", () => {
     expect(result.metadata.destination).toContain("Ho Chi Minh City");
     expect(entries.map((entry) => entry.event)).toEqual(
       expect.arrayContaining([
+        "plan.prompt.rendered",
         "plan.request.started",
         "plan.request.retry",
         "plan.request.finished",
         "plan.parse.finished",
       ]),
     );
+    const promptEntry = entries.find(
+      (entry) => entry.event === "plan.prompt.rendered",
+    );
     const finishedEntry = entries.find(
       (entry) => entry.event === "plan.request.finished",
     );
     const retryEntry = entries.find((entry) => entry.event === "plan.request.retry");
+    expect(promptEntry?.details).toMatchObject({
+      promptLength: expect.any(Number),
+      renderedPrompt: expect.any(String),
+    });
     expect(finishedEntry?.details).toMatchObject({
       responseTextLength: expect.any(Number),
       responseTextPreviewHead: expect.any(String),

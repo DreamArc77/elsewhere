@@ -417,6 +417,10 @@ export class GeminiRestGroundingAdapter
     await this.logger?.log(entry);
   }
 
+  private async logPromptEntry(entry: LogEntry): Promise<void> {
+    await this.logger?.log(entry);
+  }
+
   async planTrip(input: {
     tripId: string;
     persona: StoredPersonaProfile;
@@ -452,6 +456,24 @@ export class GeminiRestGroundingAdapter
     for (const [index, prompt] of prompts.entries()) {
       const attempt = index + 1;
       const requestStartedAt = nowIso();
+
+      await this.logPromptEntry({
+        tripId: input.tripId,
+        runId,
+        phase: "planning",
+        event: "plan.prompt.rendered",
+        decision: "Rendered the final planning prompt before sending it to Gemini.",
+        provider: this.planningModel,
+        status: "success",
+        startedAt: requestStartedAt,
+        finishedAt: requestStartedAt,
+        latencyMs: 0,
+        details: {
+          attempt,
+          promptLength: prompt.length,
+          renderedPrompt: prompt,
+        },
+      });
 
       await this.logPlanEntry({
         tripId: input.tripId,
@@ -586,6 +608,7 @@ export class GeminiRestGroundingAdapter
     resolvedState: ResolvedAgentState;
     imagePrompt: string;
   }): Promise<{ caption: string; provider: string }> {
+    const startedAt = nowIso();
     const currentStateSummary = buildCurrentStateSummary({
       resolvedState: input.resolvedState,
     });
@@ -601,6 +624,25 @@ export class GeminiRestGroundingAdapter
       currentStateSummary,
       currentStateGrounding,
       imagePrompt: input.imagePrompt,
+    });
+
+    await this.logPromptEntry({
+      tripId: input.tripId,
+      runId: `caption:${input.tripId}:${input.phase}:${input.day}:${input.stepContext.activityIndex}:${input.stepContext.sendMoment}`,
+      phase: input.phase,
+      event: "caption.prompt.rendered",
+      decision: "Rendered the final postcard caption prompt before sending it to Gemini.",
+      provider: this.textModel,
+      status: "success",
+      startedAt,
+      finishedAt: startedAt,
+      latencyMs: 0,
+      details: {
+        day: input.day,
+        substate: input.resolvedState.stage.substate,
+        promptLength: prompt.length,
+        renderedPrompt: prompt,
+      },
     });
 
     const response = await this.generateContent(this.textModel, {
@@ -634,6 +676,7 @@ export class GeminiRestGroundingAdapter
     resolvedState: ResolvedAgentState;
     now: string;
   }): Promise<CompanionReplyPlan> {
+    const startedAt = nowIso();
     const currentStateSummary = buildCurrentStateSummary({
       resolvedState: input.resolvedState,
     });
@@ -677,6 +720,25 @@ export class GeminiRestGroundingAdapter
       latestUserMessageAt: latestPendingUserMessageAt(input.pendingUserMessages),
     });
 
+    await this.logPromptEntry({
+      tripId: input.activeTrip?.tripId ?? `conversation:${input.conversationKey}`,
+      runId: `reply:${input.conversationKey}:${startedAt}`,
+      phase: input.activeTrip?.state.currentPhase ?? "system",
+      event: "reply.prompt.rendered",
+      decision: "Rendered the final reply prompt before sending it to Gemini.",
+      provider: this.textModel,
+      status: "success",
+      startedAt,
+      finishedAt: startedAt,
+      latencyMs: 0,
+      details: {
+        conversationKey: input.conversationKey,
+        substate: input.resolvedState.stage.substate,
+        promptLength: prompt.length,
+        renderedPrompt: prompt,
+      },
+    });
+
     const response = await this.generateContent(this.textModel, {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
@@ -708,6 +770,10 @@ export class GeminiRestImageAdapter
     this.imageModel = options.imageModel ?? "gemini-3.1-flash-image-preview";
   }
 
+  private async logPromptEntry(entry: LogEntry): Promise<void> {
+    await this.logger?.log(entry);
+  }
+
   async generateImage(input: {
     tripId: string;
     persona: StoredPersonaProfile;
@@ -721,7 +787,28 @@ export class GeminiRestImageAdapter
     usesReferenceImage: boolean;
     prompt: string;
   }): Promise<ImageGenerationResult> {
+    const startedAt = nowIso();
     const parts: Array<Record<string, unknown>> = [{ text: input.prompt }];
+
+    await this.logPromptEntry({
+      tripId: input.tripId,
+      runId: `image:${input.tripId}:${input.phase}:${input.day}:${input.stepContext.activityIndex}:${input.stepContext.sendMoment}`,
+      phase: input.phase,
+      event: "image.prompt.rendered",
+      decision: "Rendered the final image-generation prompt before sending it to Gemini.",
+      provider: this.imageModel,
+      status: "success",
+      startedAt,
+      finishedAt: startedAt,
+      latencyMs: 0,
+      details: {
+        day: input.day,
+        shotKind: input.shotKind,
+        usesReferenceImage: input.usesReferenceImage,
+        promptLength: input.prompt.length,
+        renderedPrompt: input.prompt,
+      },
+    });
 
     if (input.usesReferenceImage) {
       const imageBytes = await readFile(input.persona.referenceImageAsset);
