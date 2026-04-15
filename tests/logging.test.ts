@@ -12,6 +12,7 @@ describe("structured logging", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Aki",
+      homeCity: "Hong Kong",
       traits: ["observant"],
       relationship: "travel soulmate",
       toneStyle: "soft",
@@ -100,6 +101,7 @@ describe("structured logging", () => {
         personaId: "persona-1",
         createdAt: "2026-04-09T00:00:00.000Z",
         name: "Mori",
+        homeCity: "Hong Kong",
         traits: ["gentle"],
         relationship: "travel soulmate",
         toneStyle: "warm",

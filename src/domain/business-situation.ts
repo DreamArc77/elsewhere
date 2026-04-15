@@ -541,12 +541,13 @@ function buildResolvedIdentity(input: {
 }): ResolvedAgentIdentity {
   return {
     personaId: input.persona?.personaId ?? input.activeTrip?.personaId ?? null,
-    personaSummary: input.persona
-      ? [
-          `Name: ${input.persona.name}`,
-          `Traits: ${input.persona.traits.join(", ")}`,
-          `Relationship to user: ${input.persona.relationship}`,
-          `Tone style: ${input.persona.toneStyle}`,
+      personaSummary: input.persona
+        ? [
+            `Name: ${input.persona.name}`,
+            `Home city: ${input.persona.homeCity}`,
+            `Traits: ${input.persona.traits.join(", ")}`,
+            `Relationship to user: ${input.persona.relationship}`,
+            `Tone style: ${input.persona.toneStyle}`,
         ].join("\n")
       : undefined,
     relationshipSummary: input.persona?.relationship,

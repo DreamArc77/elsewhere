@@ -19,6 +19,7 @@ describe("companion business situation", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -45,6 +46,7 @@ describe("companion business situation", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -71,6 +73,7 @@ describe("companion business situation", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -97,6 +100,7 @@ describe("companion business situation", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -123,6 +127,7 @@ describe("companion business situation", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -149,6 +154,7 @@ describe("companion business situation", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -176,6 +182,7 @@ describe("companion business situation", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -206,6 +213,7 @@ describe("companion business situation", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",

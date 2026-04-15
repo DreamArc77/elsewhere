@@ -8,6 +8,7 @@ import { RuntimeHooks } from "../../src/domain/types.js";
 import {
   JsonArtifactStore,
   JsonConversationStateRepository,
+  JsonGlobalConfigRepository,
   JsonPersonaRepository,
   JsonTripRepository,
   ensureRuntimeDataPaths,
@@ -46,6 +47,7 @@ export async function createTestRuntime(options?: {
   const conversationStateRepository = new JsonConversationStateRepository(
     paths.conversationsDir,
   );
+  const globalConfigRepository = new JsonGlobalConfigRepository(paths.configPath);
   const artifactStore = new JsonArtifactStore(paths.artifactsDir);
   const bindings = new BindingRegistryStore(rootDir);
   const service = new OpenClawTravelCompanionService({
@@ -85,6 +87,7 @@ export async function createTestRuntime(options?: {
     personaRepository,
     tripRepository,
     conversationStateRepository,
+    globalConfigRepository,
     artifactStore,
     service,
     conversationService,

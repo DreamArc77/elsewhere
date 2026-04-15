@@ -5,8 +5,10 @@ import {
   ArtifactStorePort,
   ConversationCompanionState,
   ConversationStateRepository,
+  GlobalConfigRepository,
   PersonaRepository,
   StoredPersonaProfile,
+  TravelCompanionGlobalConfig,
   TripRecord,
   TripRepository,
 } from "../domain/types.js";
@@ -46,6 +48,7 @@ export interface RuntimeDataPaths {
   conversationsDir: string;
   artifactsDir: string;
   logsDir: string;
+  configPath: string;
 }
 
 export async function ensureRuntimeDataPaths(
@@ -58,6 +61,7 @@ export async function ensureRuntimeDataPaths(
     conversationsDir: join(rootDir, "conversations"),
     artifactsDir: join(rootDir, "artifacts"),
     logsDir: join(rootDir, "logs"),
+    configPath: join(rootDir, "global-config.json"),
   };
 
   await Promise.all([
@@ -69,6 +73,22 @@ export async function ensureRuntimeDataPaths(
   ]);
 
   return paths;
+}
+
+export class JsonGlobalConfigRepository implements GlobalConfigRepository {
+  constructor(private readonly configPath: string) {}
+
+  async get(): Promise<TravelCompanionGlobalConfig> {
+    return (
+      (await readJsonFile<TravelCompanionGlobalConfig>(this.configPath)) ?? {
+        updatedAt: new Date(0).toISOString(),
+      }
+    );
+  }
+
+  async save(config: TravelCompanionGlobalConfig): Promise<void> {
+    await atomicWriteText(this.configPath, JSON.stringify(config, null, 2));
+  }
 }
 
 export class JsonPersonaRepository implements PersonaRepository {

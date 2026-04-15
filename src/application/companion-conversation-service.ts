@@ -67,12 +67,15 @@ function emptyConversationState(
   return {
     conversationKey,
     mode,
+    setupSession: undefined,
     pendingUserMessages: [],
     pendingReplyDispatch: null,
     instantReplyWindow: null,
     recentHandledCommandMessageIds: [],
     recentTurns: [],
     latestPostcardPhoto: undefined,
+    idleGuideSentAt: null,
+    awaitingDestination: false,
     lastUserMessageAt: null,
     lastCompanionReplyAt: null,
     memorySummary: undefined,
@@ -143,10 +146,12 @@ export class CompanionConversationService {
     const nextState: ConversationCompanionState = {
       ...state,
       mode: "default",
+      setupSession: undefined,
       pendingUserMessages: [],
       pendingReplyDispatch: null,
       instantReplyWindow: null,
-      latestPostcardPhoto: state.latestPostcardPhoto,
+      latestPostcardPhoto: undefined,
+      awaitingDestination: false,
       updatedAt,
     };
     await this.dependencies.conversationStates.save(nextState);
@@ -167,6 +172,46 @@ export class CompanionConversationService {
       },
     });
     return nextState;
+  }
+
+  async clearRuntimeState(input: {
+    conversationKey: string;
+    preserveMode?: ConversationCompanionState["mode"];
+  }): Promise<ConversationCompanionState> {
+    const updatedAt = nowIso(this.dependencies.clock);
+    const state =
+      (await this.dependencies.conversationStates.getByKey(input.conversationKey)) ??
+      emptyConversationState(
+        input.conversationKey,
+        input.preserveMode ?? "companion-exclusive",
+        updatedAt,
+      );
+
+    const nextState: ConversationCompanionState = {
+      ...state,
+      mode: input.preserveMode ?? state.mode,
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      latestPostcardPhoto: undefined,
+      awaitingDestination: false,
+      updatedAt,
+    };
+    await this.dependencies.conversationStates.save(nextState);
+    this.inFlightConversationKeys.delete(input.conversationKey);
+    return nextState;
+  }
+
+  async getConversationState(
+    conversationKey: string,
+  ): Promise<ConversationCompanionState | null> {
+    return await this.dependencies.conversationStates.getByKey(conversationKey);
+  }
+
+  async saveConversationState(
+    state: ConversationCompanionState,
+  ): Promise<void> {
+    await this.dependencies.conversationStates.save(state);
   }
 
   async claimInboundMessage(input: {

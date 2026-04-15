@@ -9,14 +9,25 @@ import { CompanionConversationService } from "../application/companion-conversat
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
 import {
   ConversationBindingStore,
+  ConversationStateRepository,
+  GlobalConfigRepository,
   HostMessengerPort,
   LoggerPort,
+  PersonaRepository,
   TripRepository,
 } from "../domain/types.js";
 import { bindingKey } from "./binding-state.js";
 import { handleTravelCompanionCommand } from "./command.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
+import {
+  advanceSetupSessionWithPhoto,
+  advanceSetupSessionWithText,
+  buildIdleGuideMessage,
+  evaluateOnboardingReadiness,
+  renderSetupStepPrompt,
+} from "./onboarding.js";
+import { materializeReferenceImage } from "./reference-image.js";
 
 interface InboundClaimEvent {
   content: string;
@@ -34,6 +45,16 @@ interface InboundClaimEvent {
   messageId?: string;
   isGroup?: boolean;
   commandAuthorized?: boolean;
+  mediaUrl?: string;
+  mediaUrls?: string[];
+  attachments?: Array<{
+    path?: string;
+    url?: string;
+    mediaUrl?: string;
+    contentType?: string;
+    mimeType?: string;
+    kind?: string;
+  }>;
 }
 
 interface InboundClaimContext {
@@ -53,6 +74,9 @@ interface InboundClaimDependencies {
   conversationService: CompanionConversationService;
   service: OpenClawTravelCompanionService;
   tripRepository: TripRepository;
+  personaRepository: PersonaRepository;
+  conversationStates: ConversationStateRepository;
+  globalConfigRepository: GlobalConfigRepository;
   messenger: HostMessengerPort;
   pluginConfig: TravelCompanionPluginConfig;
   runtimeDataPaths: RuntimeDataPaths;
@@ -113,6 +137,24 @@ export async function handleTravelCompanionInboundClaim(
   }
 
   const trimmed = rawText.trim();
+  const state = await deps.conversationStates.getByKey(binding.key);
+
+  if (state?.setupSession) {
+    const handled = await handleSetupSessionInbound(
+      {
+        event,
+        ctx,
+        binding,
+        state,
+        trimmed,
+      },
+      deps,
+    );
+    if (handled) {
+      return { handled: true };
+    }
+  }
+
   if (trimmed.startsWith("/travel-companion")) {
     const messageId = String(event.messageId ?? "");
     const duplicateByMessageId =
@@ -171,6 +213,10 @@ export async function handleTravelCompanionInboundClaim(
           service: deps.service,
           conversationService: deps.conversationService,
           tripRepository: deps.tripRepository,
+          personaRepository: deps.personaRepository,
+          conversationStates: deps.conversationStates,
+          globalConfigRepository: deps.globalConfigRepository,
+          messenger: deps.messenger,
           bindings: deps.bindings,
           pluginConfig: deps.pluginConfig,
           runtimeDataPaths: deps.runtimeDataPaths,
@@ -245,6 +291,40 @@ export async function handleTravelCompanionInboundClaim(
     return;
   }
 
+  if (state?.awaitingDestination && trimmed) {
+    const globalConfig = await deps.globalConfigRepository.get();
+    const readiness = evaluateOnboardingReadiness({
+      binding,
+      config: globalConfig,
+      fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    });
+    if (readiness.isComplete && binding.defaultPersonaId) {
+      const synthetic = `/travel-companion start --to "${trimmed.replace(/"/g, '\\"')}"`;
+      const reply = await handleTravelCompanionCommand(
+        buildSyntheticCommandContext(event, ctx, synthetic),
+        {
+          service: deps.service,
+          conversationService: deps.conversationService,
+          tripRepository: deps.tripRepository,
+          personaRepository: deps.personaRepository,
+          conversationStates: deps.conversationStates,
+          globalConfigRepository: deps.globalConfigRepository,
+          messenger: deps.messenger,
+          bindings: deps.bindings,
+          pluginConfig: deps.pluginConfig,
+          runtimeDataPaths: deps.runtimeDataPaths,
+          logger: deps.logger,
+        },
+      );
+      await deps.messenger.sendTextReply({
+        binding,
+        text: reply.text,
+        dedupeKey: `idle-destination:${binding.key}:${String(event.messageId ?? randomUUID())}`,
+      });
+      return { handled: true };
+    }
+  }
+
   await deps.conversationService.claimInboundMessage({
     binding,
     messageId: String(event.messageId ?? randomUUID()),
@@ -255,6 +335,248 @@ export async function handleTravelCompanionInboundClaim(
   });
 
   return { handled: true };
+}
+
+async function handleSetupSessionInbound(
+  input: {
+    event: InboundClaimEvent;
+    ctx: InboundClaimContext;
+    binding: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>>;
+    state: NonNullable<Awaited<ReturnType<ConversationStateRepository["getByKey"]>>>;
+    trimmed: string;
+  },
+  deps: InboundClaimDependencies,
+): Promise<boolean> {
+  const session = input.state.setupSession;
+  if (!session) {
+    return false;
+  }
+
+  const runId = `setup:${String(input.event.messageId ?? randomUUID())}`;
+  if (session.awaitingReferencePhoto) {
+    const imageSource = extractInboundImageSource(input.event);
+    if (!imageSource) {
+      if (input.trimmed) {
+        await deps.messenger.sendTextReply({
+          binding: input.binding,
+          text: "我现在在等你的参考照片。接下来发一张图片就行。",
+          dedupeKey: `setup-photo-reminder:${input.binding.key}:${runId}`,
+        });
+        return true;
+      }
+      return false;
+    }
+
+    await logCommandBridgeEvent(deps.logger, {
+      binding: input.binding,
+      runId,
+      event: "setup.photo.received",
+      decision: "Received the next inbound image as the setup reference photo.",
+      provider: "setup-session",
+      status: "success",
+      details: { source: imageSource },
+    });
+    const referenceImageAsset = await materializeReferenceImage({
+      source: imageSource,
+      personasDir: deps.runtimeDataPaths.personasDir,
+    });
+    const nextSession = advanceSetupSessionWithPhoto({
+      session,
+      referenceImageAsset,
+    });
+    await deps.conversationStates.save({
+      ...input.state,
+      setupSession: nextSession,
+      updatedAt: new Date().toISOString(),
+    });
+    await deps.messenger.sendTextReply({
+      binding: input.binding,
+      text: renderSetupStepPrompt(nextSession),
+      dedupeKey: `setup-step:${input.binding.key}:${runId}`,
+    });
+    return true;
+  }
+
+  if (!input.trimmed) {
+    return false;
+  }
+
+  const globalConfig = await deps.globalConfigRepository.get();
+    const advanced = advanceSetupSessionWithText({
+      session,
+      text: input.trimmed,
+      globalConfig,
+      fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    });
+  const mergedConfig = advanced.configPatch
+    ? {
+        ...globalConfig,
+        ...advanced.configPatch,
+        updatedAt: new Date().toISOString(),
+      }
+    : globalConfig;
+  if (advanced.configPatch) {
+    await deps.globalConfigRepository.save(mergedConfig);
+  }
+
+    if (!advanced.completed) {
+    await logCommandBridgeEvent(deps.logger, {
+      binding: input.binding,
+      runId,
+      event: "setup.step.completed",
+      decision: "Accepted setup input and advanced to the next step.",
+      provider: "setup-session",
+      status: "success",
+      details: {
+        previousStep: session.step,
+        nextStep: advanced.session.step,
+      },
+    });
+    if (advanced.session.awaitingReferencePhoto) {
+      await logCommandBridgeEvent(deps.logger, {
+        binding: input.binding,
+        runId,
+        event: "setup.photo.awaiting",
+        decision: "Setup wizard is now waiting for the next inbound photo.",
+        provider: "setup-session",
+        status: "success",
+        details: { nextStep: advanced.session.step },
+      });
+    }
+    if (advanced.configPatch?.textProvider) {
+      await logCommandBridgeEvent(deps.logger, {
+        binding: input.binding,
+        runId,
+        event: "config.text_provider.updated",
+        decision: "Updated the configured text provider during setup.",
+        provider: "setup-session",
+        status: "success",
+        details: { kind: advanced.configPatch.textProvider.kind },
+      });
+    }
+    if (advanced.configPatch?.geminiApiKey) {
+      await logCommandBridgeEvent(deps.logger, {
+        binding: input.binding,
+        runId,
+        event: "config.gemini_key.updated",
+        decision: "Stored Gemini API key during setup.",
+        provider: "setup-session",
+        status: "success",
+        details: { hasGeminiKey: true },
+      });
+    }
+      await deps.conversationStates.save({
+        ...input.state,
+        setupSession: advanced.session,
+      updatedAt: new Date().toISOString(),
+    });
+    await deps.messenger.sendTextReply({
+      binding: input.binding,
+      text: renderSetupStepPrompt(advanced.session),
+      dedupeKey: `setup-step:${input.binding.key}:${runId}`,
+    });
+    return true;
+  }
+
+  const persona = await deps.service.createPersona({
+    name: advanced.session.draft.name!,
+    homeCity: advanced.session.draft.homeCity!,
+    traits: advanced.session.draft.traits!,
+    relationship: advanced.session.draft.relationship!,
+    toneStyle: advanced.session.draft.toneStyle!,
+    referenceImageAsset: advanced.session.draft.referenceImageAsset!,
+  });
+  await deps.bindings.upsert({
+    ...input.binding,
+    defaultPersonaId: persona.personaId,
+  });
+  const nextState = {
+    ...input.state,
+    setupSession: undefined,
+    idleGuideSentAt: new Date().toISOString(),
+    awaitingDestination: true,
+    updatedAt: new Date().toISOString(),
+  };
+  await deps.conversationStates.save(nextState);
+  await logCommandBridgeEvent(deps.logger, {
+    binding: input.binding,
+    runId,
+    event: "setup.step.completed",
+    decision: "Accepted the final setup input and completed onboarding.",
+    provider: "setup-session",
+    status: "success",
+    details: {
+      previousStep: session.step,
+      nextStep: advanced.session.step,
+    },
+  });
+  if (advanced.configPatch?.textProvider) {
+    await logCommandBridgeEvent(deps.logger, {
+      binding: input.binding,
+      runId,
+      event: "config.text_provider.updated",
+      decision: "Updated the configured text provider during setup.",
+      provider: "setup-session",
+      status: "success",
+      details: { kind: advanced.configPatch.textProvider.kind },
+    });
+  }
+  if (advanced.configPatch?.geminiApiKey) {
+    await logCommandBridgeEvent(deps.logger, {
+      binding: input.binding,
+      runId,
+      event: "config.gemini_key.updated",
+      decision: "Stored Gemini API key during setup.",
+      provider: "setup-session",
+      status: "success",
+      details: { hasGeminiKey: true },
+    });
+  }
+  await logCommandBridgeEvent(deps.logger, {
+    binding: input.binding,
+    runId,
+    event: "setup.completed",
+    decision: "Completed setup wizard, created persona, and entered idle mode.",
+    provider: "setup-session",
+    status: "success",
+    details: {
+      personaId: persona.personaId,
+      textProvider: mergedConfig.textProvider?.kind ?? "none",
+      hasGeminiKey: Boolean(mergedConfig.geminiApiKey?.trim()),
+    },
+  });
+  await deps.messenger.sendTextReply({
+    binding: input.binding,
+    text: [
+      `Ta 鍒涘缓瀹屾垚锛?{persona.name}`,
+      buildIdleGuideMessage(persona),
+    ].join("\n"),
+    dedupeKey: `setup-complete:${input.binding.key}:${persona.personaId}`,
+  });
+  return true;
+}
+
+function extractInboundImageSource(event: InboundClaimEvent): string | null {
+  const direct = [event.mediaUrl, ...(event.mediaUrls ?? [])].filter(Boolean);
+  for (const candidate of direct) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  for (const attachment of event.attachments ?? []) {
+    for (const candidate of [
+      attachment.path,
+      attachment.url,
+      attachment.mediaUrl,
+    ]) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+
+  return null;
 }
 
 function buildSyntheticCommandContext(

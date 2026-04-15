@@ -5,11 +5,19 @@ import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
-import { ClockPort, HostMessengerPort, LoggerPort, TripRepository } from "../domain/types.js";
+import {
+  ClockPort,
+  GlobalConfigRepository,
+  HostMessengerPort,
+  LoggerPort,
+  PersonaRepository,
+  TripRepository,
+} from "../domain/types.js";
 import { GeminiRestGroundingAdapter, GeminiRestImageAdapter } from "../infrastructure/gemini-rest-adapters.js";
 import {
   JsonArtifactStore,
   JsonConversationStateRepository,
+  JsonGlobalConfigRepository,
   JsonPersonaRepository,
   JsonTripRepository,
   RuntimeDataPaths,
@@ -24,6 +32,9 @@ export interface RuntimeBundle {
   service: OpenClawTravelCompanionService;
   conversationService: CompanionConversationService;
   tripRepository: TripRepository;
+  personaRepository: PersonaRepository;
+  globalConfigRepository: GlobalConfigRepository;
+  conversationStateRepository: JsonConversationStateRepository;
   messenger: HostMessengerPort;
   runtimeDataPaths: RuntimeDataPaths;
   logger: LoggerPort;
@@ -48,16 +59,12 @@ export async function createRuntimeBundle(input: {
   const conversationStateRepository = new JsonConversationStateRepository(
     runtimeDataPaths.conversationsDir,
   );
+  const globalConfigRepository = new JsonGlobalConfigRepository(
+    runtimeDataPaths.configPath,
+  );
   const artifactStore = new JsonArtifactStore(runtimeDataPaths.artifactsDir);
   const logger = new JsonlFileLogger(runtimeDataPaths.logsDir);
   const bindings = new BindingRegistryStore(runtimeRoot);
-
-  const apiKey = input.pluginConfig.geminiApiKey;
-  if (!apiKey) {
-    throw new Error(
-      "Gemini API key is required. Set plugins.entries.openclaw-travel-companion.config.geminiApiKey or GEMINI_API_KEY.",
-    );
-  }
 
   const commandRunner: MessageCommandRunner = {
     run: async (argv) => {
@@ -90,13 +97,20 @@ export async function createRuntimeBundle(input: {
     scheduler: new NoopSchedulerPort(),
     messenger,
     grounding: new GeminiRestGroundingAdapter({
-      apiKey,
+      apiKeyResolver: async () =>
+        (await globalConfigRepository.get()).geminiApiKey ??
+        input.pluginConfig.geminiApiKey,
+      textProviderResolver: async () =>
+        (await globalConfigRepository.get()).textProvider,
+      runtime: input.runtime,
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
       logger,
     }),
     imageGeneration: new GeminiRestImageAdapter({
-      apiKey,
+      apiKeyResolver: async () =>
+        (await globalConfigRepository.get()).geminiApiKey ??
+        input.pluginConfig.geminiApiKey,
       imageModel: input.pluginConfig.imageModel,
       logger,
     }),
@@ -141,7 +155,12 @@ export async function createRuntimeBundle(input: {
     tripRepository,
     personaRepository,
     grounding: new GeminiRestGroundingAdapter({
-      apiKey,
+      apiKeyResolver: async () =>
+        (await globalConfigRepository.get()).geminiApiKey ??
+        input.pluginConfig.geminiApiKey,
+      textProviderResolver: async () =>
+        (await globalConfigRepository.get()).textProvider,
+      runtime: input.runtime,
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
       logger,
@@ -157,6 +176,9 @@ export async function createRuntimeBundle(input: {
     service,
     conversationService,
     tripRepository,
+    personaRepository,
+    globalConfigRepository,
+    conversationStateRepository,
     messenger,
     runtimeDataPaths,
     logger,

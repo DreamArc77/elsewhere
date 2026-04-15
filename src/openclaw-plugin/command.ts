@@ -3,8 +3,13 @@ import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
 import {
+  ConversationBindingRecord,
   ConversationBindingStore,
+  ConversationStateRepository,
+  GlobalConfigRepository,
+  HostMessengerPort,
   LoggerPort,
+  PersonaRepository,
   TripRecord,
   TripRepository,
 } from "../domain/types.js";
@@ -15,6 +20,14 @@ import {
   materializeReferenceImage,
 } from "./reference-image.js";
 import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
+import {
+  advanceSetupSessionWithText,
+  buildIdleGuideMessage,
+  buildOnboardingGateMessage,
+  createSetupSession,
+  evaluateOnboardingReadiness,
+  renderSetupStepPrompt,
+} from "./onboarding.js";
 
 type CommandReply = { text: string; isError?: boolean };
 
@@ -22,6 +35,10 @@ interface CommandDependencies {
   service: OpenClawTravelCompanionService;
   conversationService: CompanionConversationService;
   tripRepository: TripRepository;
+  personaRepository: PersonaRepository;
+  conversationStates: ConversationStateRepository;
+  globalConfigRepository: GlobalConfigRepository;
+  messenger: HostMessengerPort;
   bindings: ConversationBindingStore;
   pluginConfig: TravelCompanionPluginConfig;
   runtimeDataPaths: RuntimeDataPaths;
@@ -47,6 +64,7 @@ export async function handleTravelCompanionCommand(
     case "deactivate":
       return deactivateConversation(ctx, deps);
     case "setup":
+    case "create":
       return requireActivatedThen(ctx, deps, () => setupPersona(ctx, parsed.options, deps));
     case "start":
       return requireActivatedThen(ctx, deps, () => startTrip(ctx, parsed.options, deps));
@@ -105,14 +123,72 @@ async function activateConversation(
   };
   await deps.bindings.upsert(activatedBinding);
   await deps.conversationService.activateConversation(activatedBinding);
+  const state =
+    (await deps.conversationStates.getByKey(activatedBinding.key)) ??
+    null;
+  const globalConfig = await deps.globalConfigRepository.get();
+  const readiness = evaluateOnboardingReadiness({
+    binding: activatedBinding,
+    config: globalConfig,
+    fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+  });
+  await deps.logger?.log({
+    tripId: `conversation:${activatedBinding.key}`,
+    runId: `onboarding-check:${Date.now()}`,
+    phase: "system",
+    event: "onboarding.check",
+    decision: "Checked whether onboarding is complete during activate.",
+    provider: "command",
+    status: "success",
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    latencyMs: 0,
+    details: {
+      conversationKey: activatedBinding.key,
+      hasPersona: readiness.hasPersona,
+      hasTextProvider: readiness.hasTextProvider,
+      hasGeminiKey: readiness.hasGeminiKey,
+    },
+  });
 
-  return {
-    text: [
+  if (!readiness.isComplete) {
+    await deps.logger?.log({
+      tripId: `conversation:${activatedBinding.key}`,
+      runId: `config-gate:${Date.now()}`,
+      phase: "system",
+      event: "config.missing_gate_triggered",
+      decision: "Blocked companion activation from entering idle because onboarding/config is incomplete.",
+      provider: "command",
+      status: "success",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: {
+        conversationKey: activatedBinding.key,
+        hasPersona: readiness.hasPersona,
+        hasTextProvider: readiness.hasTextProvider,
+        hasGeminiKey: readiness.hasGeminiKey,
+      },
+    });
+    return {
+      text: [
+        "Travel companion takeover is now active.",
+        "This chat is in companion-exclusive mode.",
+        buildOnboardingGateMessage({
+          binding: activatedBinding,
+          readiness,
+          hasSetupSession: Boolean(state?.setupSession),
+        }),
+      ].join("\n"),
+    };
+  }
+
+  return await sendIdleGuideIfNeeded(activatedBinding, deps, {
+    prefixLines: [
       "Travel companion takeover is now active.",
       "This chat is in companion-exclusive mode.",
-      "You can now run setup/start/status/tick/stop here.",
-    ].join("\n"),
-  };
+    ],
+  });
 }
 
 async function deactivateConversation(
@@ -156,42 +232,85 @@ async function setupPersona(
     return binding.reply;
   }
 
-  const referenceImageInput = extractReferenceImageInput(
-    options.image,
-    ctx.commandBody,
-  );
-  if (!referenceImageInput) {
-    throw new Error(
-      "Missing reference image. Pass --image <absolute-path-or-image-url>, or paste an image URL in the setup command.",
+  const state =
+    (await deps.conversationStates.getByKey(binding.record.key)) ??
+    null;
+
+  if (hasLegacySetupOptions(options, ctx.commandBody)) {
+    const referenceImageInput = extractReferenceImageInput(
+      options.image,
+      ctx.commandBody,
     );
+    if (!referenceImageInput) {
+      throw new Error(
+        "Missing reference image. Pass --image <absolute-path-or-image-url>, or paste an image URL in the setup command.",
+      );
+    }
+    const referenceImageAsset = await materializeReferenceImage({
+      source: referenceImageInput,
+      personasDir: deps.runtimeDataPaths.personasDir,
+    });
+
+    const persona = await deps.service.createPersona({
+      name: requiredOption(options, "name"),
+      homeCity: requiredOption(options, "home-city"),
+      traits: requiredOption(options, "traits")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      relationship: requiredOption(options, "relationship"),
+      toneStyle: requiredOption(options, "tone"),
+      referenceImageAsset,
+    });
+
+    await deps.bindings.upsert({
+      ...binding.record,
+      defaultPersonaId: persona.personaId,
+    });
+
+    return {
+      text: [
+        `Ta 创建完成：${persona.name}`,
+        `personaId: ${persona.personaId}`,
+        "这条会话现在默认使用 Ta。",
+      ].join("\n"),
+    };
   }
-  const referenceImageAsset = await materializeReferenceImage({
-    source: referenceImageInput,
-    personasDir: deps.runtimeDataPaths.personasDir,
-  });
 
-  const persona = await deps.service.createPersona({
-    name: requiredOption(options, "name"),
-    traits: requiredOption(options, "traits")
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean),
-    relationship: requiredOption(options, "relationship"),
-    toneStyle: requiredOption(options, "tone"),
-    referenceImageAsset,
+  const nextState = {
+    ...(state ?? await deps.conversationService.activateConversation(binding.record)),
+    setupSession: createSetupSession(state?.setupSession?.draft),
+    updatedAt: new Date().toISOString(),
+  };
+  await deps.conversationStates.save(nextState);
+  await deps.logger?.log({
+    tripId: `conversation:${binding.record.key}`,
+    runId: `setup-start:${Date.now()}`,
+    phase: "system",
+    event: "setup.session.started",
+    decision: "Started interactive setup wizard.",
+    provider: "command",
+    status: "success",
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    latencyMs: 0,
+    details: { conversationKey: binding.record.key, step: nextState.setupSession?.step },
   });
-
-  await deps.bindings.upsert({
-    ...binding.record,
-    defaultPersonaId: persona.personaId,
+  await deps.logger?.log({
+    tripId: `conversation:${binding.record.key}`,
+    runId: `setup-prompt:${Date.now()}`,
+    phase: "system",
+    event: "setup.step.prompted",
+    decision: "Prompted the next setup step.",
+    provider: "command",
+    status: "success",
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    latencyMs: 0,
+    details: { conversationKey: binding.record.key, step: nextState.setupSession?.step },
   });
-
   return {
-    text: [
-      `Persona created: ${persona.name}`,
-      `personaId: ${persona.personaId}`,
-      "This conversation now uses that persona by default.",
-    ].join("\n"),
+    text: renderSetupStepPrompt(nextState.setupSession),
   };
 }
 
@@ -203,6 +322,61 @@ async function startTrip(
   const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
+  }
+
+  const globalConfig = await deps.globalConfigRepository.get();
+  const readiness = evaluateOnboardingReadiness({
+    binding: binding.record,
+    config: globalConfig,
+    fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+  });
+  await deps.logger?.log({
+    tripId: `conversation:${binding.record.key}`,
+    runId: `onboarding-check:${Date.now()}`,
+    phase: "system",
+    event: "onboarding.check",
+    decision: "Checked whether onboarding is complete during start.",
+    provider: "command",
+    status: "success",
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    latencyMs: 0,
+    details: {
+      conversationKey: binding.record.key,
+      hasPersona: readiness.hasPersona,
+      hasTextProvider: readiness.hasTextProvider,
+      hasGeminiKey: readiness.hasGeminiKey,
+    },
+  });
+  if (!readiness.isComplete) {
+    await deps.logger?.log({
+      tripId: `conversation:${binding.record.key}`,
+      runId: `config-gate:${Date.now()}`,
+      phase: "system",
+      event: "config.missing_gate_triggered",
+      decision: "Blocked trip start because onboarding/config is incomplete.",
+      provider: "command",
+      status: "success",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: {
+        conversationKey: binding.record.key,
+        hasPersona: readiness.hasPersona,
+        hasTextProvider: readiness.hasTextProvider,
+        hasGeminiKey: readiness.hasGeminiKey,
+      },
+    });
+    return {
+      text: buildOnboardingGateMessage({
+        binding: binding.record,
+        readiness,
+        hasSetupSession: Boolean(
+          (await deps.conversationStates.getByKey(binding.record.key))?.setupSession,
+        ),
+      }),
+      isError: true,
+    };
   }
 
   const personaId = options.persona ?? binding.record.defaultPersonaId;
@@ -238,6 +412,14 @@ async function startTrip(
     lastTripId: patchedTrip.tripId,
     defaultPersonaId: personaId,
   });
+  const conversationState = await deps.conversationStates.getByKey(binding.record.key);
+  if (conversationState) {
+    await deps.conversationStates.save({
+      ...conversationState,
+      awaitingDestination: false,
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   return {
     text: [
@@ -275,6 +457,12 @@ async function statusTrip(
   const inspection = await deps.conversationService.inspectConversation({
     binding: binding.record,
   });
+  const globalConfig = await deps.globalConfigRepository.get();
+  const readiness = evaluateOnboardingReadiness({
+    binding: binding.record,
+    config: globalConfig,
+    fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+  });
   const pendingReplyCount = inspection.state?.pendingUserMessages.length ?? 0;
   const replyDueAt = inspection.state?.pendingReplyDispatch?.dueAt ?? "none";
   const hotWindow = inspection.state?.instantReplyWindow
@@ -290,6 +478,10 @@ async function statusTrip(
       `nextRunAt: ${trip.state.nextRunAt ?? "none"}`,
       `artifacts: ${trip.state.artifacts.length}`,
       `conversationMode: ${binding.record.mode}`,
+      `onboardingComplete: ${readiness.isComplete}`,
+      `setupStep: ${inspection.state?.setupSession?.step ?? "none"}`,
+      `textProvider: ${globalConfig.textProvider?.kind ?? "none"}`,
+      `geminiKeyConfigured: ${Boolean(globalConfig.geminiApiKey?.trim() || deps.pluginConfig.geminiApiKey)}`,
       `state: ${inspection.resolvedState.stage.group ?? inspection.businessSituation.state}`,
       `substate: ${inspection.resolvedState.stage.substate}`,
       `stateLocation: ${inspection.resolvedState.state.location ?? "none"}`,
@@ -402,11 +594,20 @@ async function stopTrip(
   }
 
   const trip = await deps.service.stopTrip(tripId);
+  await deps.conversationService.clearRuntimeState({
+    conversationKey: binding.record.key,
+    preserveMode: "companion-exclusive",
+  });
+  await deps.bindings.upsert({
+    ...binding.record,
+    lastTripId: undefined,
+  });
   return {
     text: [
       `Stopped: ${trip.tripId}`,
       `status: ${trip.state.status}`,
       "This trip will not schedule more messages.",
+      "Conversation runtime state was cleared, but companion-exclusive mode stays active.",
     ].join("\n"),
   };
 }
@@ -803,6 +1004,106 @@ function normalizeBindingTarget(
   return normalized;
 }
 
+function hasLegacySetupOptions(
+  options: Record<string, string>,
+  commandBody: string,
+): boolean {
+  return Boolean(
+    options.name ||
+      options.traits ||
+      options.relationship ||
+      options.tone ||
+      options.image ||
+      extractReferenceImageInput(options.image, commandBody),
+  );
+}
+
+async function sendIdleGuideIfNeeded(
+  binding: ConversationBindingRecord,
+  deps: CommandDependencies,
+  options?: { prefixLines?: string[] },
+): Promise<CommandReply> {
+  const state =
+    (await deps.conversationStates.getByKey(binding.key)) ??
+    (await deps.conversationService.activateConversation(binding));
+  const persona = binding.defaultPersonaId
+    ? await deps.personaRepository.getById(binding.defaultPersonaId)
+    : null;
+  if (!persona) {
+    return {
+      text: [
+        ...(options?.prefixLines ?? []),
+        "当前还没有默认的 Ta。先运行 /travel-companion setup。",
+      ].join("\n"),
+    };
+  }
+
+  if (!state.idleGuideSentAt) {
+    const text = buildIdleGuideMessage(persona);
+    await deps.logger?.log({
+      tripId: `conversation:${binding.key}`,
+      runId: `idle-prompt:${Date.now()}`,
+      phase: "system",
+      event: "idle.prompt.rendered",
+      decision: "Rendered the first idle guide message after onboarding completed.",
+      provider: "command",
+      status: "success",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: {
+        conversationKey: binding.key,
+        personaId: persona.personaId,
+        renderedPrompt: text,
+      },
+    });
+    await deps.logger?.log({
+      tripId: `conversation:${binding.key}`,
+      runId: `idle-entry:${Date.now()}`,
+      phase: "system",
+      event: "idle.entry",
+      decision: "Entered idle mode after onboarding completed.",
+      provider: "command",
+      status: "success",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: { conversationKey: binding.key },
+    });
+    await deps.messenger.sendTextReply({
+      binding,
+      text,
+      dedupeKey: `idle-guide:${binding.key}:${persona.personaId}`,
+    });
+    await deps.logger?.log({
+      tripId: `conversation:${binding.key}`,
+      runId: `idle-message:${Date.now()}`,
+      phase: "system",
+      event: "idle.message.sent",
+      decision: "Sent the first idle guide message to collect destination.",
+      provider: "command",
+      status: "success",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: { conversationKey: binding.key, personaId: persona.personaId },
+    });
+    await deps.conversationStates.save({
+      ...state,
+      idleGuideSentAt: new Date().toISOString(),
+      awaitingDestination: true,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    text: [
+      ...(options?.prefixLines ?? []),
+      "Ta 已经进入 idle 状态，第一条引导消息已发出。",
+    ].join("\n"),
+  };
+}
+
 function requiredOption(options: Record<string, string>, key: string): string {
   const value = options[key];
   if (!value) {
@@ -840,8 +1141,8 @@ function helpText(): string {
     "/travel-companion bind",
     "/travel-companion activate",
     "/travel-companion deactivate",
-    "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image /abs/path/ref.png",
-    "/travel-companion setup --name Mori --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp",
+    "/travel-companion setup --name Mori --home-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm --image /abs/path/ref.png",
+    "/travel-companion setup --name Mori --home-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp",
     "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
     "/travel-companion status [--trip <id>]",
     "/travel-companion tick [--trip <id>]  # force delayed replies + the next trip step immediately",

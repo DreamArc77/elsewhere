@@ -22,10 +22,29 @@ export const publicPostcardPhases = new Set<TripPhase>([
 
 export interface PersonaProfile {
   name: string;
+  homeCity: string;
   traits: string[];
   relationship: string;
   toneStyle: string;
   referenceImageAsset: string;
+}
+
+export type TravelCompanionTextProviderKind =
+  | "host-default"
+  | "gemini"
+  | "openai-compatible";
+
+export interface TravelCompanionTextProviderConfig {
+  kind: TravelCompanionTextProviderKind;
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+}
+
+export interface TravelCompanionGlobalConfig {
+  geminiApiKey?: string;
+  textProvider?: TravelCompanionTextProviderConfig;
+  updatedAt: string;
 }
 
 export interface StoredPersonaProfile extends PersonaProfile {
@@ -282,6 +301,41 @@ export interface RecentPostcardPhotoContext {
   imageSummary?: string;
 }
 
+export type SetupStep =
+  | "name"
+  | "home_city"
+  | "traits"
+  | "relationship"
+  | "tone"
+  | "reference_photo"
+  | "text_provider"
+  | "openai_base_url"
+  | "openai_api_key"
+  | "openai_model"
+  | "gemini_api_key"
+  | "complete";
+
+export interface SetupSessionDraft {
+  name?: string;
+  homeCity?: string;
+  traits?: string[];
+  relationship?: string;
+  toneStyle?: string;
+  referenceImageAsset?: string;
+  textProviderKind?: TravelCompanionTextProviderKind;
+  openaiBaseUrl?: string;
+  openaiApiKey?: string;
+  openaiModel?: string;
+}
+
+export interface SetupSession {
+  step: SetupStep;
+  awaitingReferencePhoto: boolean;
+  draft: SetupSessionDraft;
+  startedAt: string;
+  updatedAt: string;
+}
+
 export interface PendingReplyDispatch {
   conversationKey: string;
   dedupeKey: string;
@@ -472,12 +526,15 @@ export interface InstantReplyWindow {
 export interface ConversationCompanionState {
   conversationKey: string;
   mode: ConversationMode;
+  setupSession?: SetupSession;
   pendingUserMessages: InboundUserMessage[];
   pendingReplyDispatch: PendingReplyDispatch | null;
   instantReplyWindow: InstantReplyWindow | null;
   recentHandledCommandMessageIds: string[];
   recentTurns: CompanionTurn[];
   latestPostcardPhoto?: RecentPostcardPhotoContext;
+  idleGuideSentAt?: string | null;
+  awaitingDestination?: boolean;
   lastUserMessageAt: string | null;
   lastCompanionReplyAt: string | null;
   memorySummary?: string;
@@ -613,6 +670,11 @@ export interface ConversationStateRepository {
   save(record: ConversationCompanionState): Promise<void>;
   getByKey(conversationKey: string): Promise<ConversationCompanionState | null>;
   listDueConversations(now: Date): Promise<ConversationCompanionState[]>;
+}
+
+export interface GlobalConfigRepository {
+  get(): Promise<TravelCompanionGlobalConfig>;
+  save(config: TravelCompanionGlobalConfig): Promise<void>;
 }
 
 export interface ArtifactStorePort {

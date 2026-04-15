@@ -23,6 +23,7 @@ describe("service scheduling and crash recovery", () => {
     });
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -45,10 +46,66 @@ describe("service scheduling and crash recovery", () => {
     expect(runtime.messenger.sentMessages).toHaveLength(1);
   });
 
+  it("does not send duplicate postcards across separate service instances", async () => {
+    let releasePending: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releasePending = resolve;
+    });
+
+    const runtime = await createTestRuntime({
+      hooks: {
+        async afterPendingSaved() {
+          await gate;
+        },
+      },
+    });
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      homeCity: "Hong Kong",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    const siblingService = new OpenClawTravelCompanionService({
+      personaRepository: new JsonPersonaRepository(runtime.paths.personasDir),
+      tripRepository: new JsonTripRepository(runtime.paths.tripsDir),
+      artifactStore: new JsonArtifactStore(runtime.paths.artifactsDir),
+      scheduler: runtime.scheduler,
+      messenger: runtime.messenger,
+      grounding: runtime.grounding,
+      imageGeneration: runtime.imageGeneration,
+      clock: runtime.clock,
+      logger: new JsonlFileLogger(runtime.paths.logsDir),
+      hooks: {
+        async afterPendingSaved() {
+          await gate;
+        },
+      },
+    });
+
+    const firstRun = runtime.service.runTrip(trip.tripId);
+    const secondRun = siblingService.runTrip(trip.tripId);
+
+    await Promise.resolve();
+    releasePending?.();
+
+    await Promise.all([firstRun, secondRun]);
+    expect(runtime.messenger.sentMessages).toHaveLength(1);
+  });
+
   it("does not run again before the next scheduled time", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -75,6 +132,7 @@ describe("service scheduling and crash recovery", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -101,6 +159,7 @@ describe("service scheduling and crash recovery", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -131,6 +190,7 @@ describe("service scheduling and crash recovery", () => {
     });
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -173,6 +233,7 @@ describe("service scheduling and crash recovery", () => {
     });
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -210,6 +271,7 @@ describe("service scheduling and crash recovery", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle"],
       relationship: "travel soulmate",
       toneStyle: "warm",
@@ -261,6 +323,7 @@ describe("service scheduling and crash recovery", () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle"],
       relationship: "travel soulmate",
       toneStyle: "warm",

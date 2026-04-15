@@ -46,6 +46,7 @@ function makeFixture(referenceImageAsset: string) {
       personaId: "persona-1",
       createdAt: "2026-04-09T00:00:00.000Z",
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle", "curious"],
       relationship: "soulmate",
       toneStyle: "warm",

@@ -35,6 +35,7 @@ describe.skipIf(!liveEnabled)("live Gemini smoke", () => {
       personaId: "persona-live",
       createdAt: new Date().toISOString(),
       name: "Aki",
+      homeCity: "Hong Kong",
       traits: ["gentle", "observant"],
       relationship: "travel soulmate",
       toneStyle: "soft",

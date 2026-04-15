@@ -67,6 +67,9 @@ function sanitizeImagePromptForCaption(imagePrompt: string): string {
   return imagePrompt.trim();
 }
 
+const inFlightPostcardPreparationKeys = new Set<string>();
+const inFlightPostcardDeliveryKeys = new Set<string>();
+
 export class OpenClawTravelCompanionService {
   private readonly inFlightTripIds = new Set<string>();
 
@@ -311,181 +314,229 @@ export class OpenClawTravelCompanionService {
     if (!step?.context) {
       return record;
     }
-
-    const persona = await this.requirePersona(record.personaId);
-    const resolvedState = resolveAgentStateForTimelineStep({
-      record,
-      step,
-      persona,
-    });
-    const grounding = buildDerivedGrounding({
-      plan: record.plan,
-      phase: step.phase,
-      day: step.day,
-      stepContext: step.context,
-    });
-    const imageIntent = deriveImageIntent({
-      tripId: record.tripId,
-      stepId: step.stepId,
-      plan: record.plan,
-      stepContext: step.context,
-      resolvedState,
-    });
+    const dedupeKey = `${record.tripId}:${step.stepId}`;
+    const lockAt = nowIso(this.dependencies.clock);
+    if (inFlightPostcardPreparationKeys.has(dedupeKey)) {
+      await this.log({
+        tripId: record.tripId,
+        runId,
+        phase: step.phase,
+        event: "postcard.lock.skipped_duplicate",
+        decision:
+          "Skipped postcard preparation because this step is already being generated.",
+        provider: "service",
+        status: "skipped",
+        startedAt: lockAt,
+        finishedAt: lockAt,
+        details: { dedupeKey, scope: "prepare" },
+      });
+      return await this.requireTrip(record.tripId);
+    }
+    inFlightPostcardPreparationKeys.add(dedupeKey);
     await this.log({
       tripId: record.tripId,
       runId,
       phase: step.phase,
-      event: "grounding.derived",
-      decision: "Derived postcard context from the current itinerary step.",
+      event: "postcard.lock.acquired",
+      decision: "Acquired postcard preparation lock for the current step.",
       provider: "service",
       status: "success",
-      startedAt,
-      finishedAt: nowIso(this.dependencies.clock),
-      details: {
-        day: step.day,
-        locality: grounding.locality,
-        shotKind: imageIntent.shotKind,
-      },
+      startedAt: lockAt,
+      finishedAt: lockAt,
+      details: { dedupeKey, scope: "prepare" },
     });
 
-    const groundingArtifactId = randomUUID();
-    const groundingPath = await this.dependencies.artifactStore.writeJsonArtifact({
-      tripId: record.tripId,
-      artifactId: groundingArtifactId,
-      fileName: `${step.stepId}-grounding.json`,
-      value: grounding,
-    });
-
-    const imagePrompt = await renderImageGenerationPrompt({
-      persona,
-      request: record.request,
-      plan: record.plan,
-      stepContext: step.context,
-      grounding,
-      imageIntent,
-    });
-    const image = await this.dependencies.imageGeneration.generateImage({
-      tripId: record.tripId,
-      persona,
-      request: record.request,
-      plan: record.plan,
-      phase: step.phase,
-      day: step.day,
-      stepContext: step.context,
-      grounding,
-      shotKind: imageIntent.shotKind,
-      usesReferenceImage: imageIntent.usesReferenceImage,
-      prompt: imagePrompt,
-    });
-    await this.log({
-      tripId: record.tripId,
-      runId,
-      phase: step.phase,
-      event: "image.generated",
-      decision: "Generated postcard image.",
-      provider: image.provider,
-      status: "success",
-      startedAt,
-      finishedAt: nowIso(this.dependencies.clock),
-      details: {
-        mimeType: image.mimeType,
-        day: step.day,
-        shotKind: imageIntent.shotKind,
-      },
-    });
-
-    const imageArtifactId = randomUUID();
-    const imagePath = await this.dependencies.artifactStore.writeBinaryArtifact({
-      tripId: record.tripId,
-      artifactId: imageArtifactId,
-      fileName: `${step.stepId}-${imageIntent.shotKind}.${detectImageExtension(
-        image.mimeType,
-      )}`,
-      bytesBase64: image.bytesBase64,
-    });
-
-    const captionImagePrompt = sanitizeImagePromptForCaption(imagePrompt);
-    const captionResult = await this.dependencies.grounding.composeCaption({
-      tripId: record.tripId,
-      persona,
-      request: record.request,
-      plan: record.plan,
-      phase: step.phase,
-      day: step.day,
-      stepContext: step.context,
-      grounding,
-      resolvedState,
-      imagePrompt: captionImagePrompt,
-    });
-
-    const pendingPostcard: Postcard = {
-      tripId: record.tripId,
-      phase: step.phase,
-      caption: captionResult.caption,
-      imageAsset: imagePath,
-      sentAt: "",
-    };
-
-    const updatedRecord: TripRecord = {
-      ...record,
-      state: {
-        ...record.state,
-        pendingPostcard,
-        artifacts: [
-          ...record.state.artifacts,
-          {
-            artifactId: groundingArtifactId,
-            kind: "grounding",
-            phase: step.phase,
-            path: groundingPath,
-            day: step.day,
-            createdAt: nowIso(this.dependencies.clock),
-          },
-          {
-            artifactId: imageArtifactId,
-            kind: "image",
-            phase: step.phase,
-            path: imagePath,
-            day: step.day,
-            createdAt: nowIso(this.dependencies.clock),
-          },
-        ],
-      },
-      pendingDispatch: {
-        stepId: step.stepId,
+    try {
+      const persona = await this.requirePersona(record.personaId);
+      const resolvedState = resolveAgentStateForTimelineStep({
+        record,
+        step,
+        persona,
+      });
+      const grounding = buildDerivedGrounding({
+        plan: record.plan,
         phase: step.phase,
         day: step.day,
-        shotKind: imageIntent.shotKind,
-        postcard: pendingPostcard,
-        dedupeKey: `${record.tripId}:${step.stepId}`,
+        stepContext: step.context,
+      });
+      const imageIntent = deriveImageIntent({
+        tripId: record.tripId,
+        stepId: step.stepId,
+        plan: record.plan,
+        stepContext: step.context,
+        resolvedState,
+      });
+      await this.log({
+        tripId: record.tripId,
+        runId,
+        phase: step.phase,
+        event: "grounding.derived",
+        decision: "Derived postcard context from the current itinerary step.",
+        provider: "service",
+        status: "success",
+        startedAt,
+        finishedAt: nowIso(this.dependencies.clock),
+        details: {
+          day: step.day,
+          locality: grounding.locality,
+          shotKind: imageIntent.shotKind,
+        },
+      });
+
+      const groundingArtifactId = randomUUID();
+      const groundingPath = await this.dependencies.artifactStore.writeJsonArtifact({
+        tripId: record.tripId,
+        artifactId: groundingArtifactId,
+        fileName: `${step.stepId}-grounding.json`,
+        value: grounding,
+      });
+
+      const imagePrompt = await renderImageGenerationPrompt({
+        persona,
+        request: record.request,
+        plan: record.plan,
+        stepContext: step.context,
         grounding,
-        imagePrompt,
-        imageSummary: image.imageSummary,
-        artifactIds: [groundingArtifactId, imageArtifactId],
-      },
-      updatedAt: nowIso(this.dependencies.clock),
-      lastRunId: runId,
-    };
-
-    await this.dependencies.tripRepository.save(updatedRecord);
-    await this.log({
-      tripId: record.tripId,
-      runId,
-      phase: step.phase,
-      event: "postcard.pending",
-      decision: "Persisted postcard before delivery for idempotency.",
-      provider: captionResult.provider,
-      status: "success",
-      startedAt,
-      finishedAt: nowIso(this.dependencies.clock),
-      details: {
-        dedupeKey: `${record.tripId}:${step.stepId}`,
+        imageIntent,
+      });
+      const image = await this.dependencies.imageGeneration.generateImage({
+        tripId: record.tripId,
+        persona,
+        request: record.request,
+        plan: record.plan,
+        phase: step.phase,
+        day: step.day,
+        stepContext: step.context,
+        grounding,
         shotKind: imageIntent.shotKind,
-      },
-    });
+        usesReferenceImage: imageIntent.usesReferenceImage,
+        prompt: imagePrompt,
+      });
+      await this.log({
+        tripId: record.tripId,
+        runId,
+        phase: step.phase,
+        event: "image.generated",
+        decision: "Generated postcard image.",
+        provider: image.provider,
+        status: "success",
+        startedAt,
+        finishedAt: nowIso(this.dependencies.clock),
+        details: {
+          mimeType: image.mimeType,
+          day: step.day,
+          shotKind: imageIntent.shotKind,
+        },
+      });
 
-    await this.dependencies.hooks?.afterPendingSaved?.(updatedRecord);
-    return this.dispatchPending(updatedRecord, runId, startedAt);
+      const imageArtifactId = randomUUID();
+      const imagePath = await this.dependencies.artifactStore.writeBinaryArtifact({
+        tripId: record.tripId,
+        artifactId: imageArtifactId,
+        fileName: `${step.stepId}-${imageIntent.shotKind}.${detectImageExtension(
+          image.mimeType,
+        )}`,
+        bytesBase64: image.bytesBase64,
+      });
+
+      const captionImagePrompt = sanitizeImagePromptForCaption(imagePrompt);
+      const captionResult = await this.dependencies.grounding.composeCaption({
+        tripId: record.tripId,
+        persona,
+        request: record.request,
+        plan: record.plan,
+        phase: step.phase,
+        day: step.day,
+        stepContext: step.context,
+        grounding,
+        resolvedState,
+        imagePrompt: captionImagePrompt,
+      });
+
+      const pendingPostcard: Postcard = {
+        tripId: record.tripId,
+        phase: step.phase,
+        caption: captionResult.caption,
+        imageAsset: imagePath,
+        sentAt: "",
+      };
+
+      const updatedRecord: TripRecord = {
+        ...record,
+        state: {
+          ...record.state,
+          pendingPostcard,
+          artifacts: [
+            ...record.state.artifacts,
+            {
+              artifactId: groundingArtifactId,
+              kind: "grounding",
+              phase: step.phase,
+              path: groundingPath,
+              day: step.day,
+              createdAt: nowIso(this.dependencies.clock),
+            },
+            {
+              artifactId: imageArtifactId,
+              kind: "image",
+              phase: step.phase,
+              path: imagePath,
+              day: step.day,
+              createdAt: nowIso(this.dependencies.clock),
+            },
+          ],
+        },
+        pendingDispatch: {
+          stepId: step.stepId,
+          phase: step.phase,
+          day: step.day,
+          shotKind: imageIntent.shotKind,
+          postcard: pendingPostcard,
+          dedupeKey,
+          grounding,
+          imagePrompt,
+          imageSummary: image.imageSummary,
+          artifactIds: [groundingArtifactId, imageArtifactId],
+        },
+        updatedAt: nowIso(this.dependencies.clock),
+        lastRunId: runId,
+      };
+
+      await this.dependencies.tripRepository.save(updatedRecord);
+      await this.log({
+        tripId: record.tripId,
+        runId,
+        phase: step.phase,
+        event: "postcard.pending",
+        decision: "Persisted postcard before delivery for idempotency.",
+        provider: captionResult.provider,
+        status: "success",
+        startedAt,
+        finishedAt: nowIso(this.dependencies.clock),
+        details: {
+          dedupeKey,
+          shotKind: imageIntent.shotKind,
+        },
+      });
+
+      await this.dependencies.hooks?.afterPendingSaved?.(updatedRecord);
+      return this.dispatchPending(updatedRecord, runId, startedAt);
+    } finally {
+      inFlightPostcardPreparationKeys.delete(dedupeKey);
+      const releasedAt = nowIso(this.dependencies.clock);
+      await this.log({
+        tripId: record.tripId,
+        runId,
+        phase: step.phase,
+        event: "postcard.lock.released",
+        decision: "Released postcard preparation lock for the current step.",
+        provider: "service",
+        status: "success",
+        startedAt: releasedAt,
+        finishedAt: releasedAt,
+        details: { dedupeKey, scope: "prepare" },
+      });
+    }
   }
 
   private async dispatchPending(
@@ -497,88 +548,135 @@ export class OpenClawTravelCompanionService {
     if (!pending) {
       return record;
     }
-
-    const sentAt = nowIso(this.dependencies.clock);
-    const receipt = await this.dependencies.messenger.sendPostcard({
-      personaId: record.personaId,
-      dedupeKey: pending.dedupeKey,
-      postcard: {
-        ...pending.postcard,
-        sentAt,
-      },
-    });
-
-    await this.dependencies.hooks?.afterMessageSent?.(record, receipt);
-
-    const deliveryArtifactId = randomUUID();
-    const deliveryPath = await this.dependencies.artifactStore.writeJsonArtifact({
-      tripId: record.tripId,
-      artifactId: deliveryArtifactId,
-      fileName: `${pending.stepId}-delivery.json`,
-      value: receipt,
-    });
-
-    const advanced = advanceAfterCurrentStep(record, this.dependencies.clock.now());
-    const currentStep = getCurrentStep(record);
-    const activeStateAnchor =
-      currentStep && currentStep.context
-        ? createStateAnchorFromTimelineStep({
-            record,
-            step: currentStep,
-            sentAt,
-          })
-        : null;
-    const nextRecord: TripRecord = {
-      ...record,
-      state: {
-        ...advanced.state,
-        artifacts: [
-          ...record.state.artifacts,
-          {
-            artifactId: deliveryArtifactId,
-            kind: "delivery",
-            phase: pending.phase,
-            path: deliveryPath,
-            day: pending.day,
-            createdAt: sentAt,
-          },
-        ],
-        activeStateAnchor,
-      },
-      timelineIndex: advanced.timelineIndex,
-      pendingDispatch: null,
-      updatedAt: sentAt,
-      lastRunId: runId,
-    };
-
-    await this.dependencies.tripRepository.save(nextRecord);
+    const lockAt = nowIso(this.dependencies.clock);
+    if (inFlightPostcardDeliveryKeys.has(pending.dedupeKey)) {
+      await this.log({
+        tripId: record.tripId,
+        runId,
+        phase: pending.phase,
+        event: "postcard.lock.skipped_duplicate",
+        decision:
+          "Skipped postcard delivery because this step is already being delivered.",
+        provider: "service",
+        status: "skipped",
+        startedAt: lockAt,
+        finishedAt: lockAt,
+        details: { dedupeKey: pending.dedupeKey, scope: "deliver" },
+      });
+      return await this.requireTrip(record.tripId);
+    }
+    inFlightPostcardDeliveryKeys.add(pending.dedupeKey);
     await this.log({
       tripId: record.tripId,
       runId,
       phase: pending.phase,
-      event: "postcard.sent",
-      decision: receipt.deduped
-        ? "Delivery was deduplicated by host messenger."
-        : "Delivered postcard to host messenger.",
-      provider: receipt.provider,
+      event: "postcard.lock.acquired",
+      decision: "Acquired postcard delivery lock for the current step.",
+      provider: "service",
       status: "success",
-      startedAt,
-      finishedAt: sentAt,
-      details: {
-        dedupeKey: pending.dedupeKey,
-        messageId: receipt.messageId,
-        shotKind: pending.shotKind,
-      },
+      startedAt: lockAt,
+      finishedAt: lockAt,
+      details: { dedupeKey: pending.dedupeKey, scope: "deliver" },
     });
 
-    if (nextRecord.state.nextRunAt) {
-      await this.dependencies.scheduler.scheduleTripTick({
-        tripId: nextRecord.tripId,
-        runAt: nextRecord.state.nextRunAt,
+    try {
+      const sentAt = nowIso(this.dependencies.clock);
+      const receipt = await this.dependencies.messenger.sendPostcard({
+        personaId: record.personaId,
+        dedupeKey: pending.dedupeKey,
+        postcard: {
+          ...pending.postcard,
+          sentAt,
+        },
+      });
+
+      await this.dependencies.hooks?.afterMessageSent?.(record, receipt);
+
+      const deliveryArtifactId = randomUUID();
+      const deliveryPath = await this.dependencies.artifactStore.writeJsonArtifact({
+        tripId: record.tripId,
+        artifactId: deliveryArtifactId,
+        fileName: `${pending.stepId}-delivery.json`,
+        value: receipt,
+      });
+
+      const advanced = advanceAfterCurrentStep(record, this.dependencies.clock.now());
+      const currentStep = getCurrentStep(record);
+      const activeStateAnchor =
+        currentStep && currentStep.context
+          ? createStateAnchorFromTimelineStep({
+              record,
+              step: currentStep,
+              sentAt,
+            })
+          : null;
+      const nextRecord: TripRecord = {
+        ...record,
+        state: {
+          ...advanced.state,
+          artifacts: [
+            ...record.state.artifacts,
+            {
+              artifactId: deliveryArtifactId,
+              kind: "delivery",
+              phase: pending.phase,
+              path: deliveryPath,
+              day: pending.day,
+              createdAt: sentAt,
+            },
+          ],
+          activeStateAnchor,
+        },
+        timelineIndex: advanced.timelineIndex,
+        pendingDispatch: null,
+        updatedAt: sentAt,
+        lastRunId: runId,
+      };
+
+      await this.dependencies.tripRepository.save(nextRecord);
+      await this.log({
+        tripId: record.tripId,
+        runId,
+        phase: pending.phase,
+        event: "postcard.sent",
+        decision: receipt.deduped
+          ? "Delivery was deduplicated by host messenger."
+          : "Delivered postcard to host messenger.",
+        provider: receipt.provider,
+        status: "success",
+        startedAt,
+        finishedAt: sentAt,
+        details: {
+          dedupeKey: pending.dedupeKey,
+          messageId: receipt.messageId,
+          shotKind: pending.shotKind,
+        },
+      });
+
+      if (nextRecord.state.nextRunAt) {
+        await this.dependencies.scheduler.scheduleTripTick({
+          tripId: nextRecord.tripId,
+          runAt: nextRecord.state.nextRunAt,
+        });
+      }
+
+      return nextRecord;
+    } finally {
+      inFlightPostcardDeliveryKeys.delete(pending.dedupeKey);
+      const releasedAt = nowIso(this.dependencies.clock);
+      await this.log({
+        tripId: record.tripId,
+        runId,
+        phase: pending.phase,
+        event: "postcard.lock.released",
+        decision: "Released postcard delivery lock for the current step.",
+        provider: "service",
+        status: "success",
+        startedAt: releasedAt,
+        finishedAt: releasedAt,
+        details: { dedupeKey: pending.dedupeKey, scope: "deliver" },
       });
     }
-
-    return nextRecord;
   }
 
   private async advanceSilently(

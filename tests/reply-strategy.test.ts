@@ -106,6 +106,7 @@ describe("reply seen strategy", () => {
     });
     const persona = await runtime.service.createPersona({
       name: "Mori",
+      homeCity: "Hong Kong",
       traits: ["gentle"],
       relationship: "travel soulmate",
       toneStyle: "warm",

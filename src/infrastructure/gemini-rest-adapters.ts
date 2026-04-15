@@ -1,5 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
+import {
+  completeWithPreparedSimpleCompletionModel,
+  extractAssistantText,
+  prepareSimpleCompletionModel,
+} from "openclaw/plugin-sdk/simple-completion-runtime";
+import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
 import {
   companionReplyPlanJsonSchema,
@@ -26,6 +32,7 @@ import {
   ResolvedAgentState,
   RuntimeStepContext,
   StoredPersonaProfile,
+  TravelCompanionTextProviderConfig,
   TripPhase,
   TripPlan,
   TripRecord,
@@ -38,7 +45,15 @@ import {
 } from "../prompting/travel-companion-prompts.js";
 
 interface GeminiOptions {
-  apiKey: string;
+  apiKey?: string;
+  apiKeyResolver?: () => Promise<string | undefined> | string | undefined;
+  textProviderResolver?:
+    | (() =>
+        | Promise<TravelCompanionTextProviderConfig | undefined>
+        | TravelCompanionTextProviderConfig
+        | undefined)
+    | undefined;
+  runtime?: PluginRuntime;
   baseUrl?: string;
   planningModel?: string;
   textModel?: string;
@@ -359,29 +374,51 @@ function elapsedMs(startedAt: string, finishedAt: string): number {
 }
 
 abstract class BaseGeminiAdapter {
-  protected readonly apiKey: string;
+  protected readonly apiKey?: string;
+  protected readonly apiKeyResolver?: () => Promise<string | undefined> | string | undefined;
+  protected readonly textProviderResolver?:
+    | (() =>
+        | Promise<TravelCompanionTextProviderConfig | undefined>
+        | TravelCompanionTextProviderConfig
+        | undefined)
+    | undefined;
+  protected readonly runtime?: PluginRuntime;
   protected readonly baseUrl: string;
   protected readonly fetchImpl: typeof fetch;
   protected readonly logger?: LoggerPort;
 
   constructor(options: GeminiOptions) {
     this.apiKey = options.apiKey;
+    this.apiKeyResolver = options.apiKeyResolver;
+    this.textProviderResolver = options.textProviderResolver;
+    this.runtime = options.runtime;
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.logger = options.logger;
+  }
+
+  protected async resolveApiKey(): Promise<string> {
+    const resolved = (await this.apiKeyResolver?.()) ?? this.apiKey;
+    if (!resolved?.trim()) {
+      throw new Error(
+        "Gemini API key is not configured. Complete onboarding and provide a Gemini key first.",
+      );
+    }
+    return resolved.trim();
   }
 
   protected async generateContent(
     model: string,
     body: Record<string, unknown>,
   ): Promise<GenerateContentResponse> {
+    const apiKey = await this.resolveApiKey();
     const response = await this.fetchImpl(
       `${this.baseUrl}/models/${model}:generateContent`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": this.apiKey,
+          "x-goog-api-key": apiKey,
         },
         body: JSON.stringify(body),
       },
@@ -399,6 +436,22 @@ abstract class BaseGeminiAdapter {
     return (await response.json()) as GenerateContentResponse;
   }
 }
+
+type TextCompletionMode =
+  | {
+      kind: "text";
+      temperature?: number;
+    }
+  | {
+      kind: "json";
+      temperature?: number;
+      jsonSchema?: Record<string, unknown>;
+    };
+
+type TextCompletionResult = {
+  text: string;
+  provider: string;
+};
 
 export class GeminiRestGroundingAdapter
   extends BaseGeminiAdapter
@@ -419,6 +472,208 @@ export class GeminiRestGroundingAdapter
 
   private async logPromptEntry(entry: LogEntry): Promise<void> {
     await this.logger?.log(entry);
+  }
+
+  private async resolveTextProviderConfig(): Promise<TravelCompanionTextProviderConfig> {
+    return (await this.textProviderResolver?.()) ?? { kind: "host-default" };
+  }
+
+  private async completeWithGemini(
+    prompt: string,
+    mode: TextCompletionMode,
+  ): Promise<TextCompletionResult> {
+    const response = await this.generateContent(this.textModel, {
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig:
+        mode.kind === "json"
+          ? {
+              responseMimeType: "application/json",
+              responseJsonSchema: mode.jsonSchema,
+              temperature: mode.temperature ?? 0.8,
+            }
+          : {
+              temperature: mode.temperature ?? 0.8,
+            },
+    });
+
+    return {
+      text: extractText(response),
+      provider: this.textModel,
+    };
+  }
+
+  private async completeWithHostDefault(
+    prompt: string,
+  ): Promise<TextCompletionResult> {
+    if (!this.runtime) {
+      throw new Error(
+        "Host-default text provider is unavailable because plugin runtime was not injected.",
+      );
+    }
+
+    const cfg = this.runtime.config.loadConfig();
+    const defaultModel = this.runtime.agent.defaults.model as {
+      id?: string;
+      provider?: string;
+    };
+    const provider =
+      this.runtime.agent.defaults.provider ?? defaultModel?.provider;
+    const modelId = defaultModel?.id;
+
+    if (!provider || !modelId) {
+      throw new Error(
+        "Could not resolve OpenClaw default provider/model for host-default text generation.",
+      );
+    }
+
+    const prepared = await prepareSimpleCompletionModel({
+      cfg,
+      provider,
+      modelId,
+    });
+    if ("error" in prepared) {
+      throw new Error(prepared.error);
+    }
+
+    const assistantMessage = await completeWithPreparedSimpleCompletionModel({
+      model: prepared.model,
+      auth: prepared.auth,
+      context: {
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      options: {
+        maxTokens: 1200,
+      },
+    });
+    const text = extractAssistantText(assistantMessage)?.trim();
+    if (!text) {
+      throw new Error(
+        "Host-default text provider returned an empty assistant message.",
+      );
+    }
+
+    return {
+      text,
+      provider: `${provider}:${modelId}`,
+    };
+  }
+
+  private async completeWithOpenAICompatible(
+    prompt: string,
+    mode: TextCompletionMode,
+    config: TravelCompanionTextProviderConfig,
+  ): Promise<TextCompletionResult> {
+    const baseUrl = config.baseUrl?.trim();
+    const apiKey = config.apiKey?.trim();
+    const model = config.model?.trim();
+
+    if (!baseUrl || !apiKey || !model) {
+      throw new Error(
+        "OpenAI-compatible text provider is missing baseUrl, apiKey, or model.",
+      );
+    }
+
+    const response = await this.fetchImpl(
+      `${baseUrl.replace(/\/$/, "")}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: mode.temperature ?? 0.8,
+          messages: [{ role: "user", content: prompt }],
+          ...(mode.kind === "json"
+            ? { response_format: { type: "json_object" } }
+            : {}),
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `OpenAI-compatible request failed: ${response.status} ${response.statusText}${
+          errorText ? ` - ${truncate(errorText, 600)}` : ""
+        }`,
+      );
+    }
+
+    const payload = (await response.json()) as {
+      choices?: Array<{
+        message?: {
+          content?:
+            | string
+            | Array<{
+                type?: string;
+                text?: string;
+              }>;
+        };
+      }>;
+    };
+    const rawContent = payload.choices?.[0]?.message?.content;
+    const text =
+      typeof rawContent === "string"
+        ? rawContent.trim()
+        : Array.isArray(rawContent)
+          ? rawContent
+              .map((part) => (typeof part?.text === "string" ? part.text : ""))
+              .join("")
+              .trim()
+          : "";
+
+    if (!text) {
+      throw new Error(
+        "OpenAI-compatible text provider did not return message content.",
+      );
+    }
+
+    return {
+      text,
+      provider: `openai-compatible:${model}`,
+    };
+  }
+
+  private async completeTextPrompt(
+    prompt: string,
+    mode: TextCompletionMode,
+  ): Promise<TextCompletionResult> {
+    const textProvider = await this.resolveTextProviderConfig();
+
+    switch (textProvider.kind) {
+      case "gemini":
+        return await this.completeWithGemini(prompt, mode);
+      case "openai-compatible":
+        return await this.completeWithOpenAICompatible(
+          prompt,
+          mode,
+          textProvider,
+        );
+      case "host-default":
+      default:
+        return await this.completeWithHostDefault(prompt);
+    }
+  }
+
+  private async describeTextProvider(): Promise<string> {
+    const textProvider = await this.resolveTextProviderConfig();
+    switch (textProvider.kind) {
+      case "gemini":
+        return this.textModel;
+      case "openai-compatible":
+        return `openai-compatible:${textProvider.model ?? "unknown"}`;
+      case "host-default":
+      default:
+        return "host-default";
+    }
   }
 
   async planTrip(input: {
@@ -609,6 +864,7 @@ export class GeminiRestGroundingAdapter
     imagePrompt: string;
   }): Promise<{ caption: string; provider: string }> {
     const startedAt = nowIso();
+    const promptProvider = await this.describeTextProvider();
     const currentStateSummary = buildCurrentStateSummary({
       resolvedState: input.resolvedState,
     });
@@ -631,8 +887,8 @@ export class GeminiRestGroundingAdapter
       runId: `caption:${input.tripId}:${input.phase}:${input.day}:${input.stepContext.activityIndex}:${input.stepContext.sendMoment}`,
       phase: input.phase,
       event: "caption.prompt.rendered",
-      decision: "Rendered the final postcard caption prompt before sending it to Gemini.",
-      provider: this.textModel,
+      decision: "Rendered the final postcard caption prompt before sending it to the selected text provider.",
+      provider: promptProvider,
       status: "success",
       startedAt,
       finishedAt: startedAt,
@@ -645,18 +901,16 @@ export class GeminiRestGroundingAdapter
       },
     });
 
-    const response = await this.generateContent(this.textModel, {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.8,
-      },
+    const response = await this.completeTextPrompt(prompt, {
+      kind: "text",
+      temperature: 0.8,
     });
 
     return {
-      caption: extractLikelyJson(extractText(response))
+      caption: extractLikelyJson(response.text)
         .replace(/^"|"$/g, "")
         .trim(),
-      provider: this.textModel,
+      provider: response.provider,
     };
   }
 
@@ -677,6 +931,7 @@ export class GeminiRestGroundingAdapter
     now: string;
   }): Promise<CompanionReplyPlan> {
     const startedAt = nowIso();
+    const promptProvider = await this.describeTextProvider();
     const currentStateSummary = buildCurrentStateSummary({
       resolvedState: input.resolvedState,
     });
@@ -725,8 +980,8 @@ export class GeminiRestGroundingAdapter
       runId: `reply:${input.conversationKey}:${startedAt}`,
       phase: input.activeTrip?.state.currentPhase ?? "system",
       event: "reply.prompt.rendered",
-      decision: "Rendered the final reply prompt before sending it to Gemini.",
-      provider: this.textModel,
+      decision: "Rendered the final reply prompt before sending it to the selected text provider.",
+      provider: promptProvider,
       status: "success",
       startedAt,
       finishedAt: startedAt,
@@ -739,22 +994,19 @@ export class GeminiRestGroundingAdapter
       },
     });
 
-    const response = await this.generateContent(this.textModel, {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseJsonSchema: companionReplyPlanJsonSchema,
-        temperature: 0.8,
-      },
+    const response = await this.completeTextPrompt(prompt, {
+      kind: "json",
+      temperature: 0.8,
+      jsonSchema: companionReplyPlanJsonSchema,
     });
 
     return {
       ...parseModelJson(
-        extractText(response),
+        response.text,
         companionReplyPlanSchema,
         "Gemini companion reply",
       ),
-      provider: this.textModel,
+      provider: response.provider,
     };
   }
 }

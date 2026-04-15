@@ -7,6 +7,7 @@ describe("end-to-end fixture trip", () => {
     const runtime = await createTestRuntime({ days: 3 });
     const persona = await runtime.service.createPersona({
       name: "Haru",
+      homeCity: "Hong Kong",
       traits: ["playful", "steady"],
       relationship: "travel soulmate",
       toneStyle: "gentle",
