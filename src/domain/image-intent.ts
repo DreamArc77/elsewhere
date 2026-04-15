@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { ImageIntent, RuntimeStepContext, TripPlan } from "./types.js";
+import {
+  ImageIntent,
+  ResolvedAgentState,
+  RuntimeStepContext,
+  TripPlan,
+} from "./types.js";
 
 function stableBucket(seed: string): number {
   const digest = createHash("sha256").update(seed).digest();
@@ -19,22 +24,48 @@ function pickStable<T>(seed: string, values: T[]): T {
 function resolveWeatherSummary(input: {
   plan: TripPlan;
   stepContext: RuntimeStepContext;
+  resolvedState?: ResolvedAgentState;
 }): string {
   const fallback =
-    input.plan.daily_itinerary[0]?.weather_forecast?.trim() || "晴，18°C - 28°C";
-  if (input.stepContext.phase === "planning") {
+    input.resolvedState?.state.weatherForecast?.trim() ||
+    input.plan.daily_itinerary[0]?.weather_forecast?.trim() ||
+    "晴，18°C - 28°C";
+
+  if (
+    input.resolvedState?.stage.substate === "planning" ||
+    input.resolvedState?.stage.substate === "packing" ||
+    input.stepContext.phase === "planning"
+  ) {
     return fallback;
   }
 
   return (
+    input.resolvedState?.state.weatherForecast?.trim() ||
     input.plan.daily_itinerary.find((entry) => entry.day === input.stepContext.day)
-      ?.weather_forecast?.trim() || fallback
+      ?.weather_forecast?.trim() ||
+    fallback
   );
 }
 
 function resolvePromptLocation(input: {
   stepContext: RuntimeStepContext;
+  resolvedState?: ResolvedAgentState;
 }): string {
+  switch (input.resolvedState?.stage.substate) {
+    case "idle":
+      return "自己的家中";
+    case "planning":
+    case "packing":
+      return "自己的房间中";
+    case "before_departure":
+      return "去机场/车站的路上";
+    case "arrive":
+      return (
+        input.resolvedState.state.location?.trim() ||
+        input.stepContext.activity.location.trim()
+      );
+  }
+
   if (input.stepContext.phase === "planning") {
     return "自己的房间中";
   }
@@ -68,7 +99,26 @@ function resolvePromptBehavior(input: {
   stepId: string;
   plan: TripPlan;
   stepContext: RuntimeStepContext;
+  resolvedState?: ResolvedAgentState;
 }): string {
+  switch (input.resolvedState?.stage.substate) {
+    case "planning":
+      return `查看行程安排，确认去${input.plan.metadata.destination}旅行的计划`;
+    case "packing":
+      return `打包行李，准备去${input.plan.metadata.destination}旅行`;
+    case "before_departure":
+      return "正在去机场/车站";
+    case "arrive":
+      return input.resolvedState.stage.group === "return"
+        ? "刚回到出发地"
+        : "刚到达目的地";
+    case "departing":
+      if (input.resolvedState.stage.group === "return") {
+        return "正在返程途中";
+      }
+      break;
+  }
+
   if (input.stepContext.phase === "planning") {
     return `打包行李，准备去${input.plan.metadata.destination}旅行`;
   }
@@ -107,6 +157,7 @@ export function deriveImageIntent(input: {
   stepId: string;
   plan: TripPlan;
   stepContext: RuntimeStepContext;
+  resolvedState?: ResolvedAgentState;
 }): ImageIntent {
   const bucket = stableBucket(`${input.tripId}:${input.stepId}`);
   const shotKind = bucket < 70 ? "selfie" : "snapshot";

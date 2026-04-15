@@ -198,8 +198,8 @@ describe("companion business situation", () => {
     );
 
     expect(record?.state.activeStateAnchor?.source).toBe("postcard");
-    expect(situation.state).toBe("activities");
-    expect(situation.substate).toBe("transport");
+    expect(situation.state).toBe("plan");
+    expect(situation.substate).toBe("packing");
   });
 
   it("does not carry synthetic airport activity into planning anchors", async () => {
@@ -228,7 +228,7 @@ describe("companion business situation", () => {
       sentAt: planningStep!.scheduledAt,
     });
 
-    expect(anchor?.snapshot?.situation.substate).toBe("packing");
+    expect(anchor?.snapshot?.situation.substate).toBe("planning");
     expect(anchor?.snapshot?.currentActivity).toBeUndefined();
     expect(anchor?.snapshot?.nextActivity?.location).toBeTruthy();
   });

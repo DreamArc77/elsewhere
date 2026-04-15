@@ -68,7 +68,7 @@ describe("service scheduling and crash recovery", () => {
     expect(runtime.messenger.sentMessages).toHaveLength(1);
 
     const updatedTrip = await runtime.tripRepository.getById(trip.tripId);
-    expect(updatedTrip?.state.currentPhase).toBe("departing");
+    expect(updatedTrip?.state.currentPhase).toBe("planning");
   });
 
   it("can force the next step immediately for manual testing", async () => {
@@ -94,7 +94,7 @@ describe("service scheduling and crash recovery", () => {
     expect(runtime.messenger.sentMessages).toHaveLength(2);
 
     const updatedTrip = await runtime.tripRepository.getById(trip.tripId);
-    expect(updatedTrip?.state.currentPhase).not.toBe("departing");
+    expect(updatedTrip?.state.currentPhase).toBe("departing");
   });
 
   it("can stop an old trip so it no longer schedules messages", async () => {

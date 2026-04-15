@@ -707,6 +707,41 @@ function deriveSnapshotFromTimelineStep(
     record.plan.daily_itinerary.find((entry) => entry.day === step.day)
       ?.weather_forecast;
 
+  if (step.stateOverride) {
+    const timing = {
+      startedAt: context.timing.startUtc,
+      endsAt: context.timing.endUtc,
+    };
+    const isPlanState = step.stateOverride.group === "plan";
+    return makeSnapshot({
+      situation: makeSituation({
+        mode:
+          step.stateOverride.group === "idle"
+            ? "idle"
+            : step.stateOverride.group === "return" &&
+                step.stateOverride.substate === "arrive"
+              ? "trip-finished"
+              : "traveling",
+        state: step.stateOverride.group,
+        substate: step.stateOverride.substate,
+        scene: step.stateOverride.scene,
+        presence: step.stateOverride.presence,
+        currentPhase: step.stateOverride.currentPhase,
+        currentDay: step.day,
+        contextKind: context.kind,
+        sendMoment: context.sendMoment,
+        isExtraMessage: context.isExtraMessage,
+        postcardEligible: step.emitsPostcard,
+        timing,
+      }),
+      timing,
+      currentActivity: isPlanState ? undefined : context.activity,
+      previousActivity: isPlanState ? undefined : context.previousActivity,
+      nextActivity: context.nextActivity,
+      weatherForecast,
+    });
+  }
+
   if (context.kind === "planning") {
     const timing = {
       startedAt: context.timing.startUtc,
@@ -897,22 +932,6 @@ export function resolveAgentStateForTimelineStep(input: {
       conversationState: input.conversationState,
       persona: input.persona,
     });
-
-    if (resolved.stage.substate === "planning") {
-      const shifted = deriveCompanionState(
-        input.record,
-        new Date(new Date(input.step.scheduledAt).getTime() + 2 * 60 * 1000),
-      );
-      if (shifted.situation.substate === "packing") {
-        return buildResolvedStateFromDerived({
-          activeTrip: input.record,
-          derived: shifted,
-          conversationState: input.conversationState,
-          persona: input.persona,
-        });
-      }
-    }
-
     return resolved;
   }
 

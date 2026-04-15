@@ -313,6 +313,11 @@ export class OpenClawTravelCompanionService {
     }
 
     const persona = await this.requirePersona(record.personaId);
+    const resolvedState = resolveAgentStateForTimelineStep({
+      record,
+      step,
+      persona,
+    });
     const grounding = buildDerivedGrounding({
       plan: record.plan,
       phase: step.phase,
@@ -324,6 +329,7 @@ export class OpenClawTravelCompanionService {
       stepId: step.stepId,
       plan: record.plan,
       stepContext: step.context,
+      resolvedState,
     });
     await this.log({
       tripId: record.tripId,
@@ -408,11 +414,7 @@ export class OpenClawTravelCompanionService {
       day: step.day,
       stepContext: step.context,
       grounding,
-      resolvedState: resolveAgentStateForTimelineStep({
-        record,
-        step,
-        persona,
-      }),
+      resolvedState,
       imagePrompt: captionImagePrompt,
     });
 

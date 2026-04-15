@@ -157,6 +157,13 @@ export interface TimelineStep {
   emitsPostcard: boolean;
   scheduledAt: string;
   context?: RuntimeStepContext;
+  stateOverride?: {
+    group: CompanionStateGroup;
+    substate: CompanionStateSubstate;
+    scene: CompanionBusinessScene;
+    presence: CompanionBusinessPresence;
+    currentPhase: TripPhase | "system";
+  };
 }
 
 export interface ActivityTiming {

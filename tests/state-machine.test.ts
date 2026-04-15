@@ -32,7 +32,7 @@ describe("state machine", () => {
     expect(timeline[0]?.context?.activity.location).toBe(
       "Final packing in Hong Kong",
     );
-    expect(timeline.at(-1)?.phase).toBe("home_reflection");
+    expect(timeline.at(-1)?.phase).toBe("returning");
     expect(
       timeline.filter((step) => step.context?.isExtraMessage).length,
     ).toBeGreaterThanOrEqual(3);
@@ -77,7 +77,10 @@ describe("state machine", () => {
       new Date("2026-04-09T00:00:00.000Z"),
     );
     const firstActivityStep = timeline.find(
-      (candidate) => candidate.context?.kind === "activity",
+      (candidate) =>
+        candidate.context?.kind === "activity" &&
+        candidate.context.activityIndex === 0 &&
+        candidate.day === 1,
     );
 
     expect(firstActivityStep?.context?.timing.timeZone).toBe("Asia/Shanghai");
@@ -98,7 +101,7 @@ describe("state machine", () => {
     ).toBe(activityCount);
   });
 
-  it("advances through steps and completes after the final reflection", () => {
+  it("advances through steps and completes after the final postcard", () => {
     const plan = buildPlan(3);
     const timeline = buildTimeline(plan, new Date("2026-04-09T00:00:00.000Z"));
     let record: TripRecord = {

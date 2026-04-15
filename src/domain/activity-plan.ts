@@ -1,5 +1,9 @@
 import {
   ActivityTiming,
+  CompanionBusinessPresence,
+  CompanionBusinessScene,
+  CompanionStateGroup,
+  CompanionStateSubstate,
   DailyItinerary,
   ItineraryActivity,
   RuntimeStepContext,
@@ -10,8 +14,6 @@ import {
 
 const EXTRA_MESSAGE_THRESHOLD_MINUTES = 150;
 const DEFAULT_SINGLE_SLOT_MINUTES = 30;
-const SYNTHETIC_REFLECTION_DELAY_MINUTES = 120;
-
 const DESTINATION_TIME_ZONE_MAP: Array<[RegExp, string]> = [
   [/tokyo|東京/u, "Asia/Tokyo"],
   [/osaka|kyoto|京都|大阪/u, "Asia/Tokyo"],
@@ -267,6 +269,16 @@ export function inferDestinationTimeZone(plan: TripPlan): string {
   return "UTC";
 }
 
+function inferTimeZoneFromText(text: string): string {
+  const normalized = text.trim().toLowerCase();
+  for (const [pattern, timeZone] of DESTINATION_TIME_ZONE_MAP) {
+    if (pattern.test(normalized)) {
+      return timeZone;
+    }
+  }
+  return "UTC";
+}
+
 export function getDayItinerary(
   plan: TripPlan,
   day: number,
@@ -326,6 +338,59 @@ function looksLikeTerminalContext(activity: ItineraryActivity): boolean {
   return /airport|terminal|候机|候機|航站楼|航站樓|station|车站|車站/u.test(
     haystack,
   );
+}
+
+function transportScene(mode: string, labelSource: string): CompanionBusinessScene {
+  if (
+    mode === "airplane" ||
+    /airport|terminal|gate|boarding|姗熷牬|鏈哄満|鑸珯/u.test(
+      labelSource.toLowerCase(),
+    )
+  ) {
+    return "airport";
+  }
+  return "transport";
+}
+
+function sceneForActivity(activity: ItineraryActivity): CompanionBusinessScene {
+  if (activity.type === "transport") {
+    return transportScene(
+      activity.route?.transport_mode ?? activity.arrival_context.transport_mode,
+      activity.location,
+    );
+  }
+  if (activity.type === "accommodation") {
+    return "hotel";
+  }
+  return activity.type as Exclude<
+    CompanionBusinessScene,
+    "idle" | "planning" | "airport" | "transport" | "hotel" | "reflection"
+  >;
+}
+
+function presenceForActivity(
+  activity: ItineraryActivity,
+): CompanionBusinessPresence {
+  if (activity.type === "transport") {
+    return "moving";
+  }
+  if (activity.type === "accommodation") {
+    return "resting";
+  }
+  return "available";
+}
+
+function buildActivityStateOverride(input: {
+  activity: ItineraryActivity;
+  phase: TripPhase;
+}): TimelineStep["stateOverride"] {
+  return {
+    group: "activities",
+    substate: input.activity.type,
+    scene: sceneForActivity(input.activity),
+    presence: presenceForActivity(input.activity),
+    currentPhase: input.phase,
+  };
 }
 
 function canSendExtraMessage(
@@ -432,6 +497,242 @@ function buildPlanningActivity(plan: TripPlan): ItineraryActivity {
   };
 }
 
+function buildPackingActivity(plan: TripPlan): ItineraryActivity {
+  const origin = plan.metadata.origin;
+  const firstDayWeather = plan.daily_itinerary[0]?.weather_forecast ?? "";
+  return {
+    time_slot: "00:00 - 00:30",
+    location: `Final packing in ${origin}`,
+    address: origin,
+    type: "accommodation",
+    description: `Pack the essentials, check the weather, and get ready to leave ${origin} for ${plan.metadata.destination}.`,
+    arrival_context: {
+      from_location: origin,
+      transport_mode: "walk",
+      duration_minutes: 0,
+    },
+    real_time_info: {
+      live_update: firstDayWeather,
+    },
+  };
+}
+
+function buildBeforeDepartureActivity(plan: TripPlan): ItineraryActivity {
+  const origin = plan.metadata.origin;
+  const departureStation = plan.transportation.departure.departure.station;
+  return {
+    time_slot: "00:00 - 00:30",
+    location: `On the way to ${departureStation}`,
+    address: departureStation,
+    type: "transport",
+    description: `Head from ${origin} toward ${departureStation} and get ready for departure.`,
+    arrival_context: {
+      from_location: origin,
+      transport_mode: "car",
+      duration_minutes: 30,
+    },
+    route: {
+      from_location: origin,
+      to_location: departureStation,
+      transport_mode: "car",
+    },
+    real_time_info: {
+      live_update: `Leave enough time to reach ${departureStation}.`,
+    },
+  };
+}
+
+function buildMainDepartureActivity(plan: TripPlan): ItineraryActivity {
+  const leg = plan.transportation.departure;
+  return {
+    time_slot: `${leg.departure.time} - ${leg.arrival.time}`,
+    location: `${leg.departure.station} -> ${leg.arrival.station}`,
+    address: leg.departure.station,
+    type: "transport",
+    description: `Take ${leg.operator} ${leg.identifier} from ${leg.departure.station} to ${leg.arrival.station}.`,
+    arrival_context: {
+      from_location: leg.departure.station,
+      transport_mode: leg.transport_mode,
+      duration_minutes: 0,
+    },
+    route: {
+      from_location: leg.departure.station,
+      to_location: leg.arrival.station,
+      transport_mode: leg.transport_mode,
+    },
+    real_time_info: {
+      live_update: `Main departure leg: ${leg.identifier}.`,
+    },
+  };
+}
+
+function buildArrivalActivity(plan: TripPlan): ItineraryActivity {
+  const leg = plan.transportation.departure;
+  const arrivalStation = leg.arrival.station;
+  return {
+    time_slot: leg.arrival.time,
+    location: arrivalStation,
+    address: arrivalStation,
+    type: "transport",
+    description: `Just arrived at ${arrivalStation} and stepped into ${plan.metadata.destination}.`,
+    arrival_context: {
+      from_location: leg.departure.station,
+      transport_mode: leg.transport_mode,
+      duration_minutes: 0,
+    },
+    route: {
+      from_location: leg.departure.station,
+      to_location: arrivalStation,
+      transport_mode: leg.transport_mode,
+    },
+    real_time_info: {
+      live_update: `Arrival complete at ${arrivalStation}.`,
+    },
+  };
+}
+
+function buildMainReturnActivity(plan: TripPlan): ItineraryActivity {
+  const leg = plan.transportation.return;
+  return {
+    time_slot: `${leg.departure.time} - ${leg.arrival.time}`,
+    location: `${leg.departure.station} -> ${leg.arrival.station}`,
+    address: leg.departure.station,
+    type: "transport",
+    description: `Take ${leg.operator} ${leg.identifier} from ${leg.departure.station} back to ${leg.arrival.station}.`,
+    arrival_context: {
+      from_location: leg.departure.station,
+      transport_mode: leg.transport_mode,
+      duration_minutes: 0,
+    },
+    route: {
+      from_location: leg.departure.station,
+      to_location: leg.arrival.station,
+      transport_mode: leg.transport_mode,
+    },
+    real_time_info: {
+      live_update: `Main return leg: ${leg.identifier}.`,
+    },
+  };
+}
+
+function buildReturnArrivalActivity(plan: TripPlan): ItineraryActivity {
+  const leg = plan.transportation.return;
+  return {
+    time_slot: leg.arrival.time,
+    location: leg.arrival.station,
+    address: leg.arrival.station,
+    type: "transport",
+    description: `Back at ${leg.arrival.station} after the trip.`,
+    arrival_context: {
+      from_location: leg.departure.station,
+      transport_mode: leg.transport_mode,
+      duration_minutes: 0,
+    },
+    route: {
+      from_location: leg.departure.station,
+      to_location: leg.arrival.station,
+      transport_mode: leg.transport_mode,
+    },
+    real_time_info: {
+      live_update: `Return arrival complete at ${leg.arrival.station}.`,
+    },
+  };
+}
+
+function createSyntheticStep(input: {
+  stepId: string;
+  phase: TripPhase;
+  day: number;
+  scheduledAt: string;
+  context: RuntimeStepContext;
+  stateOverride: TimelineStep["stateOverride"];
+}): TimelineStep {
+  return {
+    stepId: input.stepId,
+    phase: input.phase,
+    day: input.day,
+    emitsPostcard: true,
+    scheduledAt: input.scheduledAt,
+    context: input.context,
+    stateOverride: input.stateOverride,
+  };
+}
+
+function scheduleInWindow(start: Date, end: Date, fraction: number): string {
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  if (endMs <= startMs) {
+    return start.toISOString();
+  }
+  return new Date(startMs + Math.floor((endMs - startMs) * fraction)).toISOString();
+}
+
+function resolveTransportWindow(input: {
+  date: string;
+  departureTime: string;
+  arrivalTime: string;
+  departureTimeZone: string;
+  arrivalTimeZone: string;
+  departureLeadHours?: number;
+  arrivalTailMinutes?: number;
+  referenceDirection: "departure" | "return";
+}): {
+  beforeStart: Date;
+  departStart: Date;
+  departAt: Date;
+  arriveAt: Date;
+  arriveEnd: Date;
+} {
+  const baseDate = parseDateParts(input.date);
+  const arrivalToken = parseTimeToken(input.arrivalTime);
+  const arrivalDate = addDaysToDateParts({
+    ...baseDate,
+    dayOffset: arrivalToken.dayOffset,
+  });
+  const arriveAt = toUtcDate({
+    ...arrivalDate,
+    hour: arrivalToken.hour,
+    minute: arrivalToken.minute,
+    timeZone: input.arrivalTimeZone,
+  });
+
+  const departureToken = parseTimeToken(input.departureTime);
+  let departAt = arriveAt;
+  const offsets =
+    input.referenceDirection === "departure" ? [-2, -1, 0, 1] : [0, 1, 2];
+  for (const offset of offsets) {
+    const candidateDate = addDaysToDateParts({
+      ...baseDate,
+      dayOffset: offset + departureToken.dayOffset,
+    });
+    const candidate = toUtcDate({
+      ...candidateDate,
+      hour: departureToken.hour,
+      minute: departureToken.minute,
+      timeZone: input.departureTimeZone,
+    });
+    const valid =
+      input.referenceDirection === "departure"
+        ? candidate.getTime() <= arriveAt.getTime()
+        : candidate.getTime() <= arriveAt.getTime();
+    if (valid) {
+      departAt = candidate;
+      if (input.referenceDirection === "return" && candidate.getTime() <= arriveAt.getTime()) {
+        break;
+      }
+    }
+  }
+
+  const beforeStart = new Date(
+    departAt.getTime() - (input.departureLeadHours ?? 3) * 60 * 60 * 1000,
+  );
+  const departStart = new Date(departAt.getTime() - 15 * 60 * 1000);
+  const arriveEnd = new Date(
+    arriveAt.getTime() + (input.arrivalTailMinutes ?? 10) * 60 * 1000,
+  );
+  return { beforeStart, departStart, departAt, arriveAt, arriveEnd };
+}
+
 export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
   const timeZone = inferDestinationTimeZone(plan);
   const itinerary = [...plan.daily_itinerary].sort((a, b) => a.day - b.day);
@@ -465,6 +766,10 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
           isExtraMessage: false,
           sendMoment: "start",
         }),
+        stateOverride: buildActivityStateOverride({
+          activity,
+          phase,
+        }),
       });
 
       if (canSendExtraMessage(activity, timing)) {
@@ -489,6 +794,10 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
             isExtraMessage: true,
             sendMoment: "mid",
           }),
+          stateOverride: buildActivityStateOverride({
+            activity,
+            phase,
+          }),
         });
       }
     }
@@ -501,25 +810,48 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
   });
 
   const firstActivityStep = activitySteps[0];
-  const lastActivityStep = activitySteps[activitySteps.length - 1];
-  if (!firstActivityStep?.context || !lastActivityStep?.context) {
+  if (!firstActivityStep?.context) {
     throw new Error("Trip plan must contain at least one activity.");
   }
 
-  const reflectionAt = new Date(
-    new Date(lastActivityStep.context.timing.endUtc).getTime() +
-      SYNTHETIC_REFLECTION_DELAY_MINUTES * 60 * 1000,
-  ).toISOString();
-  const planningTiming = buildSyntheticTiming(now, timeZone);
-  const planningActivity = buildPlanningActivity(plan);
   const firstDay = getDayItinerary(plan, firstActivityStep.day)!;
-
-  return [
-    {
-      stepId: toId("planning", 0, "synthetic"),
+  const lastDay = itinerary[itinerary.length - 1]!;
+  const departureWindow = resolveTransportWindow({
+    date: firstDay.date,
+    departureTime: plan.transportation.departure.departure.time,
+    arrivalTime: plan.transportation.departure.arrival.time,
+    departureTimeZone: inferTimeZoneFromText(plan.metadata.origin),
+    arrivalTimeZone: inferTimeZoneFromText(plan.metadata.destination),
+    referenceDirection: "departure",
+  });
+  const returnWindow = resolveTransportWindow({
+    date: lastDay.date,
+    departureTime: plan.transportation.return.departure.time,
+    arrivalTime: plan.transportation.return.arrival.time,
+    departureTimeZone: inferTimeZoneFromText(plan.metadata.destination),
+    arrivalTimeZone: inferTimeZoneFromText(plan.metadata.origin),
+    departureLeadHours: 0.25,
+    referenceDirection: "return",
+  });
+  const planningTiming = buildSyntheticTiming(now, inferTimeZoneFromText(plan.metadata.origin));
+  const planningActivity = buildPlanningActivity(plan);
+  const packingActivity = buildPackingActivity(plan);
+  const beforeDepartureActivity = buildBeforeDepartureActivity(plan);
+  const departureActivity = buildMainDepartureActivity(plan);
+  const arrivalActivity = buildArrivalActivity(plan);
+  const returnActivity = buildMainReturnActivity(plan);
+  const returnArrivalActivity = buildReturnArrivalActivity(plan);
+  const planningEndsAt = new Date(
+    Math.min(
+      now.getTime() + 60 * 1000,
+      departureWindow.beforeStart.getTime(),
+    ),
+  );
+  const syntheticSteps: TimelineStep[] = [
+    createSyntheticStep({
+      stepId: toId("planning", 0, "planning"),
       phase: "planning",
       day: 0,
-      emitsPostcard: true,
       scheduledAt: now.toISOString(),
       context: buildSyntheticContext({
         kind: "planning",
@@ -531,30 +863,454 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
           theme: `Preparing to leave for ${plan.metadata.destination}`,
           activities: [planningActivity],
         },
-        activityIndex: -1,
+        activityIndex: -2,
         activity: planningActivity,
         previousActivity: undefined,
         nextActivity: firstDay.activities[0],
         timing: planningTiming,
       }),
-    },
-    ...activitySteps,
-    {
-      stepId: toId("home_reflection", plan.metadata.days, "synthetic"),
-      phase: "home_reflection",
-      day: plan.metadata.days,
-      emitsPostcard: true,
-      scheduledAt: reflectionAt,
-      context: buildSyntheticContext({
-        kind: "home_reflection",
-        phase: "home_reflection",
-        itinerary: getDayItinerary(plan, lastActivityStep.day)!,
-        activityIndex: lastActivityStep.context.activityIndex,
-        activity: lastActivityStep.context.activity,
-        previousActivity: lastActivityStep.context.previousActivity,
-        nextActivity: undefined,
-        timing: lastActivityStep.context.timing,
-      }),
-    },
+      stateOverride: {
+        group: "plan",
+        substate: "planning",
+        scene: "planning",
+        presence: "busy",
+        currentPhase: "planning",
+      },
+    }),
   ];
+
+  if (planningEndsAt.getTime() < departureWindow.beforeStart.getTime()) {
+    syntheticSteps.push(
+      createSyntheticStep({
+        stepId: toId("planning", 0, "packing"),
+        phase: "planning",
+        day: 0,
+        scheduledAt: scheduleInWindow(
+          planningEndsAt,
+          departureWindow.beforeStart,
+          0.25,
+        ),
+        context: buildSyntheticContext({
+          kind: "planning",
+          phase: "planning",
+          itinerary: {
+            day: 0,
+            date: planningTiming.rawDate,
+            weather_forecast: firstDay.weather_forecast,
+            theme: `Packing for ${plan.metadata.destination}`,
+            activities: [packingActivity],
+          },
+          activityIndex: -1,
+          activity: packingActivity,
+          previousActivity: undefined,
+          nextActivity: firstDay.activities[0],
+          timing: {
+            ...planningTiming,
+            startUtc: planningEndsAt.toISOString(),
+            endUtc: departureWindow.beforeStart.toISOString(),
+            startLocal: formatLocalIso(
+              planningEndsAt,
+              inferTimeZoneFromText(plan.metadata.origin),
+            ),
+            endLocal: formatLocalIso(
+              departureWindow.beforeStart,
+              inferTimeZoneFromText(plan.metadata.origin),
+            ),
+          },
+        }),
+        stateOverride: {
+          group: "plan",
+          substate: "packing",
+          scene: "planning",
+          presence: "busy",
+          currentPhase: "planning",
+        },
+      }),
+    );
+  }
+
+  if (departureWindow.beforeStart.getTime() < departureWindow.departStart.getTime()) {
+    syntheticSteps.push(
+      createSyntheticStep({
+        stepId: toId("departing", 1, "before_departure"),
+        phase: "departing",
+        day: 1,
+        scheduledAt: scheduleInWindow(
+          departureWindow.beforeStart,
+          departureWindow.departStart,
+          0.25,
+        ),
+        context: buildActivityContext({
+          phase: "departing",
+          itinerary: firstDay,
+          activityIndex: -1,
+          activity: beforeDepartureActivity,
+          previousActivity: undefined,
+          nextActivity: firstDay.activities[0],
+          timing: {
+            rawDate: firstDay.date,
+            rawTimeSlot: `${plan.transportation.departure.departure.time}`,
+            timeZone: inferTimeZoneFromText(plan.metadata.origin),
+            startLocal: formatLocalIso(
+              departureWindow.beforeStart,
+              inferTimeZoneFromText(plan.metadata.origin),
+            ),
+            endLocal: formatLocalIso(
+              departureWindow.departStart,
+              inferTimeZoneFromText(plan.metadata.origin),
+            ),
+            startUtc: departureWindow.beforeStart.toISOString(),
+            endUtc: departureWindow.departStart.toISOString(),
+            durationMinutes: Math.max(
+              1,
+              Math.round(
+                (departureWindow.departStart.getTime() -
+                  departureWindow.beforeStart.getTime()) /
+                  60000,
+              ),
+            ),
+          },
+          isExtraMessage: false,
+          sendMoment: "summary",
+        }),
+        stateOverride: {
+          group: "departure",
+          substate: "before_departure",
+          scene: "planning",
+          presence: "busy",
+          currentPhase: "departing",
+        },
+      }),
+    );
+  }
+
+  syntheticSteps.push(
+    createSyntheticStep({
+      stepId: toId("departing", 1, "main_departing"),
+      phase: "departing",
+      day: 1,
+      scheduledAt: departureWindow.departStart.toISOString(),
+      context: buildActivityContext({
+        phase: "departing",
+        itinerary: firstDay,
+        activityIndex: -1,
+        activity: departureActivity,
+        previousActivity: undefined,
+        nextActivity: firstDay.activities[0],
+        timing: {
+          rawDate: firstDay.date,
+          rawTimeSlot: `${plan.transportation.departure.departure.time} - ${plan.transportation.departure.arrival.time}`,
+          timeZone: inferTimeZoneFromText(plan.metadata.origin),
+          startLocal: formatLocalIso(
+            departureWindow.departStart,
+            inferTimeZoneFromText(plan.metadata.origin),
+          ),
+          endLocal: formatLocalIso(
+            departureWindow.arriveAt,
+            inferTimeZoneFromText(plan.metadata.destination),
+          ),
+          startUtc: departureWindow.departStart.toISOString(),
+          endUtc: departureWindow.arriveAt.toISOString(),
+          durationMinutes: Math.max(
+            1,
+            Math.round(
+              (departureWindow.arriveAt.getTime() -
+                departureWindow.departStart.getTime()) /
+                60000,
+            ),
+          ),
+        },
+        isExtraMessage: false,
+        sendMoment: "summary",
+      }),
+      stateOverride: {
+        group: "departure",
+        substate: "departing",
+        scene: transportScene(
+          plan.transportation.departure.transport_mode,
+          plan.transportation.departure.departure.station,
+        ),
+        presence: "moving",
+        currentPhase: "departing",
+      },
+    }),
+  );
+
+  if (plan.transportation.departure.transport_mode !== "airplane") {
+    syntheticSteps.push(
+      createSyntheticStep({
+        stepId: toId("departing", 1, "main_departing_mid"),
+        phase: "departing",
+        day: 1,
+        scheduledAt: scheduleInWindow(
+          departureWindow.departStart,
+          departureWindow.arriveAt,
+          0.66,
+        ),
+        context: buildActivityContext({
+          phase: "departing",
+          itinerary: firstDay,
+          activityIndex: -1,
+          activity: departureActivity,
+          previousActivity: undefined,
+          nextActivity: firstDay.activities[0],
+          timing: {
+            rawDate: firstDay.date,
+            rawTimeSlot: `${plan.transportation.departure.departure.time} - ${plan.transportation.departure.arrival.time}`,
+            timeZone: inferTimeZoneFromText(plan.metadata.origin),
+            startLocal: formatLocalIso(
+              departureWindow.departStart,
+              inferTimeZoneFromText(plan.metadata.origin),
+            ),
+            endLocal: formatLocalIso(
+              departureWindow.arriveAt,
+              inferTimeZoneFromText(plan.metadata.destination),
+            ),
+            startUtc: departureWindow.departStart.toISOString(),
+            endUtc: departureWindow.arriveAt.toISOString(),
+            durationMinutes: Math.max(
+              1,
+              Math.round(
+                (departureWindow.arriveAt.getTime() -
+                  departureWindow.departStart.getTime()) /
+                  60000,
+              ),
+            ),
+          },
+          isExtraMessage: true,
+          sendMoment: "mid",
+        }),
+        stateOverride: {
+          group: "departure",
+          substate: "departing",
+          scene: transportScene(
+            plan.transportation.departure.transport_mode,
+            plan.transportation.departure.departure.station,
+          ),
+          presence: "moving",
+          currentPhase: "departing",
+        },
+      }),
+    );
+  }
+
+  syntheticSteps.push(
+    createSyntheticStep({
+      stepId: toId("arrival_checkin", 1, "arrival"),
+      phase: "arrival_checkin",
+      day: 1,
+      scheduledAt: departureWindow.arriveAt.toISOString(),
+      context: buildActivityContext({
+        phase: "arrival_checkin",
+        itinerary: firstDay,
+        activityIndex: -1,
+        activity: arrivalActivity,
+        previousActivity: undefined,
+        nextActivity: firstDay.activities[0],
+        timing: {
+          rawDate: firstDay.date,
+          rawTimeSlot: `${plan.transportation.departure.arrival.time}`,
+          timeZone: inferTimeZoneFromText(plan.metadata.destination),
+          startLocal: formatLocalIso(
+            departureWindow.arriveAt,
+            inferTimeZoneFromText(plan.metadata.destination),
+          ),
+          endLocal: formatLocalIso(
+            departureWindow.arriveEnd,
+            inferTimeZoneFromText(plan.metadata.destination),
+          ),
+          startUtc: departureWindow.arriveAt.toISOString(),
+          endUtc: departureWindow.arriveEnd.toISOString(),
+          durationMinutes: Math.max(
+            1,
+            Math.round(
+              (departureWindow.arriveEnd.getTime() -
+                departureWindow.arriveAt.getTime()) /
+                60000,
+            ),
+          ),
+        },
+        isExtraMessage: false,
+        sendMoment: "summary",
+      }),
+      stateOverride: {
+        group: "departure",
+        substate: "arrive",
+        scene: transportScene(
+          plan.transportation.departure.transport_mode,
+          plan.transportation.departure.arrival.station,
+        ),
+        presence: "available",
+        currentPhase: "arrival_checkin",
+      },
+    }),
+  );
+
+  syntheticSteps.push(
+    createSyntheticStep({
+      stepId: toId("returning", plan.metadata.days, "main_return"),
+      phase: "returning",
+      day: plan.metadata.days,
+      scheduledAt: returnWindow.departStart.toISOString(),
+      context: buildActivityContext({
+        phase: "returning",
+        itinerary: lastDay,
+        activityIndex: -1,
+        activity: returnActivity,
+        previousActivity: lastDay.activities[lastDay.activities.length - 1],
+        nextActivity: undefined,
+        timing: {
+          rawDate: lastDay.date,
+          rawTimeSlot: `${plan.transportation.return.departure.time} - ${plan.transportation.return.arrival.time}`,
+          timeZone: inferTimeZoneFromText(plan.metadata.destination),
+          startLocal: formatLocalIso(
+            returnWindow.departStart,
+            inferTimeZoneFromText(plan.metadata.destination),
+          ),
+          endLocal: formatLocalIso(
+            returnWindow.arriveAt,
+            inferTimeZoneFromText(plan.metadata.origin),
+          ),
+          startUtc: returnWindow.departStart.toISOString(),
+          endUtc: returnWindow.arriveAt.toISOString(),
+          durationMinutes: Math.max(
+            1,
+            Math.round(
+              (returnWindow.arriveAt.getTime() -
+                returnWindow.departStart.getTime()) /
+                60000,
+            ),
+          ),
+        },
+        isExtraMessage: false,
+        sendMoment: "summary",
+      }),
+      stateOverride: {
+        group: "return",
+        substate: "departing",
+        scene: transportScene(
+          plan.transportation.return.transport_mode,
+          plan.transportation.return.departure.station,
+        ),
+        presence: "moving",
+        currentPhase: "returning",
+      },
+    }),
+  );
+
+  if (plan.transportation.return.transport_mode !== "airplane") {
+    syntheticSteps.push(
+      createSyntheticStep({
+        stepId: toId("returning", plan.metadata.days, "main_return_mid"),
+        phase: "returning",
+        day: plan.metadata.days,
+        scheduledAt: scheduleInWindow(
+          returnWindow.departStart,
+          returnWindow.arriveAt,
+          0.66,
+        ),
+        context: buildActivityContext({
+          phase: "returning",
+          itinerary: lastDay,
+          activityIndex: -1,
+          activity: returnActivity,
+          previousActivity: lastDay.activities[lastDay.activities.length - 1],
+          nextActivity: undefined,
+          timing: {
+            rawDate: lastDay.date,
+            rawTimeSlot: `${plan.transportation.return.departure.time} - ${plan.transportation.return.arrival.time}`,
+            timeZone: inferTimeZoneFromText(plan.metadata.destination),
+            startLocal: formatLocalIso(
+              returnWindow.departStart,
+              inferTimeZoneFromText(plan.metadata.destination),
+            ),
+            endLocal: formatLocalIso(
+              returnWindow.arriveAt,
+              inferTimeZoneFromText(plan.metadata.origin),
+            ),
+            startUtc: returnWindow.departStart.toISOString(),
+            endUtc: returnWindow.arriveAt.toISOString(),
+            durationMinutes: Math.max(
+              1,
+              Math.round(
+                (returnWindow.arriveAt.getTime() -
+                  returnWindow.departStart.getTime()) /
+                  60000,
+              ),
+            ),
+          },
+          isExtraMessage: true,
+          sendMoment: "mid",
+        }),
+        stateOverride: {
+          group: "return",
+          substate: "departing",
+          scene: transportScene(
+            plan.transportation.return.transport_mode,
+            plan.transportation.return.departure.station,
+          ),
+          presence: "moving",
+          currentPhase: "returning",
+        },
+      }),
+    );
+  }
+
+  syntheticSteps.push(
+    createSyntheticStep({
+      stepId: toId("returning", plan.metadata.days, "return_arrive"),
+      phase: "returning",
+      day: plan.metadata.days,
+      scheduledAt: returnWindow.arriveAt.toISOString(),
+      context: buildActivityContext({
+        phase: "returning",
+        itinerary: lastDay,
+        activityIndex: -1,
+        activity: returnArrivalActivity,
+        previousActivity: lastDay.activities[lastDay.activities.length - 1],
+        nextActivity: undefined,
+        timing: {
+          rawDate: lastDay.date,
+          rawTimeSlot: `${plan.transportation.return.arrival.time}`,
+          timeZone: inferTimeZoneFromText(plan.metadata.origin),
+          startLocal: formatLocalIso(
+            returnWindow.arriveAt,
+            inferTimeZoneFromText(plan.metadata.origin),
+          ),
+          endLocal: formatLocalIso(
+            returnWindow.arriveEnd,
+            inferTimeZoneFromText(plan.metadata.origin),
+          ),
+          startUtc: returnWindow.arriveAt.toISOString(),
+          endUtc: returnWindow.arriveEnd.toISOString(),
+          durationMinutes: Math.max(
+            1,
+            Math.round(
+              (returnWindow.arriveEnd.getTime() -
+                returnWindow.arriveAt.getTime()) /
+                60000,
+            ),
+          ),
+        },
+        isExtraMessage: false,
+        sendMoment: "summary",
+      }),
+      stateOverride: {
+        group: "return",
+        substate: "arrive",
+        scene: transportScene(
+          plan.transportation.return.transport_mode,
+          plan.transportation.return.arrival.station,
+        ),
+        presence: "available",
+        currentPhase: "returning",
+      },
+    }),
+  );
+
+  return [...syntheticSteps, ...activitySteps].sort((left, right) => {
+    const delta =
+      new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime();
+    return delta !== 0 ? delta : left.stepId.localeCompare(right.stepId);
+  });
 }
