@@ -22,7 +22,6 @@ import {
 import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 import {
   buildModelSetupDraft,
-  buildIdleGuideMessage,
   buildOnboardingGateMessage,
   buildPersonaSetupDraft,
   createCompletedPersonaProfile,
@@ -196,9 +195,19 @@ async function activateConversation(
     };
   }
 
-  return await sendIdleGuideIfNeeded(activatedBinding, deps, {
-    prefixLines: ["Ta 模式已开启。"],
-  });
+  if (!binding.record.lastTripId && !state?.awaitingDestination) {
+    await deps.conversationService.enterIdleAwaitingDestination({
+      binding: activatedBinding,
+      sendGuideNow: false,
+      reason: "activate",
+    });
+  }
+
+  return {
+    text: ["Ta 模式已开启。", "直接告诉 Ta 一个想去的目的地就行。"].join(
+      "\n",
+    ),
+  };
 }
 
 async function deactivateConversation(
@@ -516,7 +525,10 @@ async function startTrip(
   if (conversationState) {
     await deps.conversationStates.save({
       ...conversationState,
+      idleEnteredAt: null,
+      idleGuideSentAt: null,
       awaitingDestination: false,
+      pendingDestinationCandidate: null,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -605,6 +617,10 @@ async function statusTrip(
       `statePresence: ${inspection.resolvedState.state.presence}`,
       `stateWindow: ${inspection.resolvedState.stage.startedAtUtc} -> ${inspection.resolvedState.stage.endsAtUtc ?? "open"}`,
       `anchorSource: ${inspection.resolvedState.state.source}`,
+      `idleEnteredAt: ${inspection.state?.idleEnteredAt ?? "none"}`,
+      `idleGuideSentAt: ${inspection.state?.idleGuideSentAt ?? "none"}`,
+      `awaitingDestination: ${inspection.state?.awaitingDestination ?? false}`,
+      `pendingDestinationCandidate: ${inspection.state?.pendingDestinationCandidate ?? "none"}`,
       `pendingReplyCount: ${pendingReplyCount}`,
       `replyDueAt: ${replyDueAt}`,
       `instantReplyWindow: ${hotWindow}`,
@@ -711,20 +727,23 @@ async function stopTrip(
   }
 
   const trip = await deps.service.stopTrip(tripId);
-  await deps.conversationService.clearRuntimeState({
-    conversationKey: binding.record.key,
-    preserveMode: "companion-exclusive",
-  });
-  await deps.bindings.upsert({
+  const updatedBinding = {
     ...binding.record,
     lastTripId: undefined,
+  };
+  await deps.bindings.upsert(updatedBinding);
+  await deps.conversationService.enterIdleAwaitingDestination({
+    binding: updatedBinding,
+    sendGuideNow: false,
+    clearConversationContext: true,
+    reason: "trip_stopped",
   });
   return {
     text: [
       `Stopped: ${trip.tripId}`,
       `status: ${trip.state.status}`,
       "This trip will not schedule more messages.",
-      "Conversation runtime state was cleared, but companion-exclusive mode stays active.",
+      "Conversation runtime state was cleared, companion-exclusive mode stays active, and Ta is back in idle.",
     ].join("\n"),
   };
 }
@@ -1135,97 +1154,6 @@ function hasLegacySetupOptions(
       options.image ||
       extractReferenceImageInput(options.image, commandBody),
   );
-}
-
-async function sendIdleGuideIfNeeded(
-  binding: ConversationBindingRecord,
-  deps: CommandDependencies,
-  options?: { prefixLines?: string[] },
-): Promise<CommandReply> {
-  const state =
-    (await deps.conversationStates.getByKey(binding.key)) ??
-    (await deps.conversationService.activateConversation(binding));
-  const persona = binding.defaultPersonaId
-    ? await deps.personaRepository.getById(binding.defaultPersonaId)
-    : null;
-  if (!persona) {
-    return {
-      text: [
-        ...(options?.prefixLines ?? []),
-        "当前还没有 Ta 的设定。",
-        "先运行 /travel-companion setup。",
-      ].join("\n"),
-    };
-  }
-
-  let idleGuideJustSent = false;
-  if (!state.idleGuideSentAt) {
-    const text = buildIdleGuideMessage(persona);
-    await deps.logger?.log({
-      tripId: `conversation:${binding.key}`,
-      runId: `idle-prompt:${Date.now()}`,
-      phase: "system",
-      event: "idle.prompt.rendered",
-      decision: "Rendered the first idle guide message after onboarding completed.",
-      provider: "command",
-      status: "success",
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
-      latencyMs: 0,
-      details: {
-        conversationKey: binding.key,
-        personaId: persona.personaId,
-        renderedPrompt: text,
-      },
-    });
-    await deps.logger?.log({
-      tripId: `conversation:${binding.key}`,
-      runId: `idle-entry:${Date.now()}`,
-      phase: "system",
-      event: "idle.entry",
-      decision: "Entered idle mode after onboarding completed.",
-      provider: "command",
-      status: "success",
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
-      latencyMs: 0,
-      details: { conversationKey: binding.key },
-    });
-    await deps.messenger.sendTextReply({
-      binding,
-      text,
-      dedupeKey: `idle-guide:${binding.key}:${persona.personaId}`,
-    });
-    await deps.logger?.log({
-      tripId: `conversation:${binding.key}`,
-      runId: `idle-message:${Date.now()}`,
-      phase: "system",
-      event: "idle.message.sent",
-      decision: "Sent the first idle guide message to collect destination.",
-      provider: "command",
-      status: "success",
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
-      latencyMs: 0,
-      details: { conversationKey: binding.key, personaId: persona.personaId },
-    });
-    await deps.conversationStates.save({
-      ...state,
-      idleGuideSentAt: new Date().toISOString(),
-      awaitingDestination: true,
-      updatedAt: new Date().toISOString(),
-    });
-    idleGuideJustSent = true;
-  }
-
-  return {
-    text: [
-      ...(options?.prefixLines ?? []),
-      idleGuideJustSent
-        ? "Ta 已经准备好了，第一条引导消息已发出。"
-        : "Ta 已经准备好了，直接告诉 Ta 一个想去的目的地就行。",
-    ].join("\n"),
-  };
 }
 
 function requiredOption(options: Record<string, string>, key: string): string {

@@ -41,6 +41,7 @@ import {
 import {
   renderCaptionPrompt,
   renderCompanionReplyPrompt,
+  renderIdleDestinationGuidePrompt,
   renderTripPlanPrompt,
 } from "../prompting/travel-companion-prompts.js";
 
@@ -429,6 +430,24 @@ function buildRecentPhotoContext(input: {
       shotKind: input.latestPostcardPhoto.shotKind,
       caption: input.latestPostcardPhoto.caption,
       imageSummary: parsedSummary,
+    },
+    null,
+    2,
+  );
+}
+
+function buildDestinationLoopContext(input: {
+  awaitingDestination: boolean;
+  idleEnteredAt?: string | null;
+  idleGuideSentAt?: string | null;
+  pendingDestinationCandidate?: string | null;
+}): string {
+  return JSON.stringify(
+    {
+      awaitingDestination: input.awaitingDestination,
+      idleEnteredAt: input.idleEnteredAt ?? null,
+      idleGuideSentAt: input.idleGuideSentAt ?? null,
+      pendingDestinationCandidate: input.pendingDestinationCandidate ?? null,
     },
     null,
     2,
@@ -1055,6 +1074,12 @@ export class GeminiRestGroundingAdapter
     };
     activeTrip: TripRecord | null;
     resolvedState: ResolvedAgentState;
+    destinationLoopContext: {
+      awaitingDestination: boolean;
+      idleEnteredAt?: string | null;
+      idleGuideSentAt?: string | null;
+      pendingDestinationCandidate?: string | null;
+    };
     now: string;
   }): Promise<CompanionReplyPlan> {
     const startedAt = nowIso();
@@ -1097,6 +1122,9 @@ export class GeminiRestGroundingAdapter
       ),
       currentStateSummary,
       currentStateGrounding,
+      destinationLoopContext: buildDestinationLoopContext(
+        input.destinationLoopContext,
+      ),
       currentTransportDetails,
       now: input.now,
       latestUserMessageAt: latestPendingUserMessageAt(input.pendingUserMessages),
@@ -1133,6 +1161,61 @@ export class GeminiRestGroundingAdapter
         companionReplyPlanSchema,
         "Gemini companion reply",
       ),
+      provider: response.provider,
+    };
+  }
+
+  async composeIdleDestinationGuide(input: {
+    conversationKey: string;
+    persona: StoredPersonaProfile;
+    recentTurns: CompanionTurn[];
+    resolvedState: ResolvedAgentState;
+    now: string;
+  }): Promise<{ segments: string[]; provider: string }> {
+    const startedAt = nowIso();
+    const promptProvider = await this.describeTextProvider();
+    const prompt = await renderIdleDestinationGuidePrompt({
+      persona: input.persona,
+      conversationKey: input.conversationKey,
+      recentTurns: JSON.stringify(input.recentTurns, null, 2),
+      currentStateSummary: buildCurrentStateSummary({
+        resolvedState: input.resolvedState,
+      }),
+      now: input.now,
+    });
+
+    await this.logPromptEntry({
+      tripId: `conversation:${input.conversationKey}`,
+      runId: `idle-guide:${input.conversationKey}:${startedAt}`,
+      phase: "system",
+      event: "idle.guide.prompt.rendered",
+      decision: "Rendered the final idle destination guide prompt before sending it to the selected text provider.",
+      provider: promptProvider,
+      status: "success",
+      startedAt,
+      finishedAt: startedAt,
+      latencyMs: 0,
+      details: {
+        conversationKey: input.conversationKey,
+        promptLength: prompt.length,
+        renderedPrompt: prompt,
+      },
+    });
+
+    const response = await this.completeTextPrompt(prompt, {
+      kind: "json",
+      temperature: 0.8,
+      jsonSchema: companionReplyPlanJsonSchema,
+    });
+
+    const parsed = parseModelJson(
+      response.text,
+      companionReplyPlanSchema,
+      "Gemini idle destination guide",
+    );
+
+    return {
+      segments: parsed.segments,
       provider: response.provider,
     };
   }

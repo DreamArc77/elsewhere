@@ -288,6 +288,7 @@ export class OpenClawTravelCompanionService {
           lastRunId: runId,
         };
         await this.dependencies.tripRepository.save(completed);
+        await this.dependencies.hooks?.afterTripCompleted?.(completed);
         return completed;
       }
 

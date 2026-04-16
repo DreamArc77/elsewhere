@@ -90,7 +90,68 @@ export async function createRuntimeBundle(input: {
     logger,
   );
 
-  const service = new OpenClawTravelCompanionService({
+  let service!: OpenClawTravelCompanionService;
+  let conversationService!: CompanionConversationService;
+
+  const startTripFromIdleDestination = async (input2: {
+    binding: {
+      key: string;
+      bindingId?: string;
+      channel: string;
+      accountId?: string;
+      target: string;
+      parentConversationId?: string;
+      threadId?: string | number;
+      boundAt?: number;
+      defaultPersonaId?: string;
+      mode: "default" | "companion-exclusive";
+      lastTripId?: string;
+    };
+    destination: string;
+  }) => {
+    const personaId = input2.binding.defaultPersonaId;
+    if (!personaId) {
+      throw new Error("No default persona is configured for idle destination start.");
+    }
+
+    const persona = await personaRepository.getById(personaId);
+    if (!persona) {
+      throw new Error(`Persona not found: ${personaId}`);
+    }
+
+    const trip = await service.startTrip({
+      personaId,
+      originCity:
+        persona.originCity ??
+        persona.homeCity ??
+        input.pluginConfig.defaultOriginCity ??
+        "Hong Kong",
+      destinationCity: input2.destination,
+    });
+
+    const patchedTrip = {
+      ...trip,
+      deliveryBinding: {
+        bindingId: input2.binding.bindingId,
+        channel: input2.binding.channel,
+        accountId: input2.binding.accountId,
+        target: input2.binding.target,
+        parentConversationId: input2.binding.parentConversationId,
+        threadId: input2.binding.threadId,
+        boundAt: input2.binding.boundAt,
+      },
+    };
+    await tripRepository.save(patchedTrip);
+    await bindings.upsert({
+      ...input2.binding,
+      mode: "companion-exclusive",
+      defaultPersonaId: personaId,
+      lastTripId: patchedTrip.tripId,
+    });
+    return patchedTrip;
+  };
+
+  service = new OpenClawTravelCompanionService({
     personaRepository,
     tripRepository,
     artifactStore,
@@ -149,9 +210,29 @@ export async function createRuntimeBundle(input: {
           });
         }
       },
+      afterTripCompleted: async (record) => {
+        const allBindings = await bindings.list();
+        const targetBindings = allBindings.filter(
+          (binding) => binding.lastTripId === record.tripId,
+        );
+
+        for (const binding of targetBindings) {
+          const nextBinding = {
+            ...binding,
+            lastTripId: undefined,
+          };
+          await bindings.upsert(nextBinding);
+          await conversationService.enterIdleAwaitingDestination({
+            binding: nextBinding,
+            sendGuideNow: false,
+            clearConversationContext: true,
+            reason: "trip_completed",
+          });
+        }
+      },
     },
   });
-  const conversationService = new CompanionConversationService({
+  conversationService = new CompanionConversationService({
     bindings,
     conversationStates: conversationStateRepository,
     tripRepository,
@@ -171,6 +252,8 @@ export async function createRuntimeBundle(input: {
     messenger,
     clock: new SystemClockPort(),
     logger,
+    idleDestinationStarter: async ({ binding, destination }) =>
+      await startTripFromIdleDestination({ binding, destination }),
   });
 
   input.logger.info("OpenClaw Travel Companion runtime ready.");
@@ -212,6 +295,7 @@ export function startPollingService(input: {
         try {
           await bundle.service.runDueTrips();
           await bundle.conversationService.runDueConversations();
+          await bundle.conversationService.runDueIdleGuides();
         } catch (error) {
           input.logger.error(
             `Travel companion background tick failed: ${

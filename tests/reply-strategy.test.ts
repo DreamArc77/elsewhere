@@ -181,4 +181,127 @@ describe("reply seen strategy", () => {
 
     expect(capturedTurns.map((turn) => turn.text)).not.toContain("old polluted turn");
   });
+
+  it("starts a trip from a high-confidence idle destination intent", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      originCity: "Hong Kong",
+      traits: ["gentle"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+    });
+    await runtime.conversationService.activateConversation({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+    });
+    await runtime.conversationService.enterIdleAwaitingDestination({
+      binding: {
+        key,
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+        boundAt: Date.now(),
+        mode: "companion-exclusive",
+        defaultPersonaId: persona.personaId,
+      },
+      sendGuideNow: false,
+      reason: "activate",
+    });
+
+    runtime.grounding.composeCompanionReply = async () => ({
+      segments: ["那这次去东京。"],
+      destinationIntent: {
+        outcome: "start_trip",
+        destination: "Tokyo",
+        confidence: "high",
+      },
+      provider: "fake-grounding",
+    });
+
+    await runtime.conversationService.enqueueInboundMessage({
+      binding: {
+        key,
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+        boundAt: Date.now(),
+        mode: "companion-exclusive",
+        defaultPersonaId: persona.personaId,
+      },
+      messageId: "msg-idle-start",
+      content: "那就东京吧",
+    });
+
+    await runtime.conversationService.runConversation(key, { ignoreSchedule: true });
+
+    const binding = await runtime.bindings.get(key);
+    expect(binding?.lastTripId).toBeTruthy();
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.awaitingDestination).toBe(false);
+    expect(state?.pendingDestinationCandidate).toBeNull();
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("东京");
+  });
+
+  it("sends the idle destination guide after the 12-hour cooldown", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      originCity: "Hong Kong",
+      traits: ["gentle"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const binding = {
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive" as const,
+      defaultPersonaId: persona.personaId,
+    };
+    await runtime.bindings.upsert(binding);
+    await runtime.conversationService.activateConversation(binding);
+    await runtime.conversationService.enterIdleAwaitingDestination({
+      binding,
+      sendGuideNow: false,
+      reason: "activate",
+    });
+
+    runtime.clock.advanceHours(12);
+    await runtime.conversationService.runDueIdleGuides();
+
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.idleGuideSentAt).toBeTruthy();
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+  });
 });

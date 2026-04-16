@@ -82,8 +82,15 @@ describe("text provider routing", () => {
         },
       ],
       recentTurns: [],
+      latestPostcardPhoto: undefined,
       activeTrip: trip,
       resolvedState,
+      destinationLoopContext: {
+        awaitingDestination: false,
+        idleEnteredAt: null,
+        idleGuideSentAt: null,
+        pendingDestinationCandidate: null,
+      },
       now: new Date().toISOString(),
     });
 

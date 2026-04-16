@@ -140,6 +140,7 @@ export async function renderCompanionReplyPrompt(input: {
   currentStateSummary: string;
   currentStateGrounding: string;
   currentTransportDetails: string;
+  destinationLoopContext: string;
   now: string;
   latestUserMessageAt: string;
 }): Promise<string> {
@@ -155,9 +156,27 @@ export async function renderCompanionReplyPrompt(input: {
       activeTripSummary: input.activeTripSummary,
       currentStateSummary: input.currentStateSummary,
       currentStateGrounding: input.currentStateGrounding,
+      destinationLoopContext: input.destinationLoopContext,
     currentTransportDetails: input.currentTransportDetails,
     now: input.now,
     latestUserMessageAt: input.latestUserMessageAt,
+  });
+}
+
+export async function renderIdleDestinationGuidePrompt(input: {
+  persona: StoredPersonaProfile;
+  conversationKey: string;
+  recentTurns: string;
+  currentStateSummary: string;
+  now: string;
+}): Promise<string> {
+  const template = await loadTemplate("compose-idle-guide.md");
+  return renderTemplate(template, {
+    personaSummary: buildPersonaSummary(input.persona),
+    conversationKey: input.conversationKey,
+    recentTurns: input.recentTurns,
+    currentStateSummary: input.currentStateSummary,
+    now: input.now,
   });
 }
 

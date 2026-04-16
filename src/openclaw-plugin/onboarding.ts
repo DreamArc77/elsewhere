@@ -623,9 +623,7 @@ export function buildIdleGuideMessage(persona: StoredPersonaProfile): string {
 export function buildPersonaCreatedMessage(
   persona: StoredPersonaProfile,
 ): string {
-  return [`${persona.name} 创建完成。`, "", buildIdleGuideMessage(persona)].join(
-    "\n",
-  );
+  return `${persona.name} 创建完成。`;
 }
 
 export function buildPersonaUpdatedMessage(persona: StoredPersonaProfile): string {

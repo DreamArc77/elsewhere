@@ -493,6 +493,12 @@ export class FakeGroundingPort implements GroundingPort {
     };
     activeTrip: unknown | null;
     resolvedState: ResolvedAgentState;
+    destinationLoopContext: {
+      awaitingDestination: boolean;
+      idleEnteredAt?: string | null;
+      idleGuideSentAt?: string | null;
+      pendingDestinationCandidate?: string | null;
+    };
     now: string;
   }): Promise<CompanionReplyPlan> {
     const latest = input.pendingUserMessages[input.pendingUserMessages.length - 1];
@@ -500,6 +506,19 @@ export class FakeGroundingPort implements GroundingPort {
       segments: [
         `${input.persona?.name ?? "Companion"} heard: ${latest?.content ?? "..."}`,
       ],
+      provider: "fake-grounding",
+    };
+  }
+
+  async composeIdleDestinationGuide(input: {
+    conversationKey: string;
+    persona: StoredPersonaProfile;
+    recentTurns: CompanionTurn[];
+    resolvedState: ResolvedAgentState;
+    now: string;
+  }): Promise<{ segments: string[]; provider: string }> {
+    return {
+      segments: [`${input.persona.name} wants to know where to go next.`],
       provider: "fake-grounding",
     };
   }

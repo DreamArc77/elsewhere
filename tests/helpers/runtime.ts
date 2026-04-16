@@ -50,6 +50,7 @@ export async function createTestRuntime(options?: {
   const globalConfigRepository = new JsonGlobalConfigRepository(paths.configPath);
   const artifactStore = new JsonArtifactStore(paths.artifactsDir);
   const bindings = new BindingRegistryStore(rootDir);
+  let conversationService!: CompanionConversationService;
   const service = new OpenClawTravelCompanionService({
     personaRepository,
     tripRepository,
@@ -60,9 +61,31 @@ export async function createTestRuntime(options?: {
     imageGeneration,
     clock,
     logger,
-    hooks: options?.hooks,
+    hooks: {
+      ...(options?.hooks ?? {}),
+      afterTripCompleted: async (record) => {
+        await options?.hooks?.afterTripCompleted?.(record);
+        const allBindings = await bindings.list();
+        const targetBindings = allBindings.filter(
+          (binding) => binding.lastTripId === record.tripId,
+        );
+        for (const binding of targetBindings) {
+          const nextBinding = {
+            ...binding,
+            lastTripId: undefined,
+          };
+          await bindings.upsert(nextBinding);
+          await conversationService.enterIdleAwaitingDestination({
+            binding: nextBinding,
+            sendGuideNow: false,
+            clearConversationContext: true,
+            reason: "trip_completed",
+          });
+        }
+      },
+    },
   });
-  const conversationService = new CompanionConversationService({
+  conversationService = new CompanionConversationService({
     bindings,
     conversationStates: conversationStateRepository,
     tripRepository,
@@ -71,6 +94,39 @@ export async function createTestRuntime(options?: {
     messenger,
     clock,
     logger,
+    idleDestinationStarter: async ({ binding, destination }) => {
+      const personaId = binding.defaultPersonaId;
+      if (!personaId) {
+        throw new Error("No default persona configured for idle destination start.");
+      }
+      const persona = await personaRepository.getById(personaId);
+      if (!persona) {
+        throw new Error(`Persona not found: ${personaId}`);
+      }
+      const trip = await service.startTrip({
+        personaId,
+        originCity: persona.originCity ?? persona.homeCity ?? "Hong Kong",
+        destinationCity: destination,
+      });
+      const patchedTrip = {
+        ...trip,
+        deliveryBinding: {
+          bindingId: binding.bindingId,
+          channel: binding.channel,
+          accountId: binding.accountId,
+          target: binding.target,
+          parentConversationId: binding.parentConversationId,
+          threadId: binding.threadId,
+          boundAt: binding.boundAt,
+        },
+      };
+      await tripRepository.save(patchedTrip);
+      await bindings.upsert({
+        ...binding,
+        lastTripId: patchedTrip.tripId,
+      });
+      return patchedTrip;
+    },
   });
 
   return {

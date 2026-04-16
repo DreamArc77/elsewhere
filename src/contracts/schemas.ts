@@ -97,6 +97,18 @@ export const imageGenerationResultSchema = z.object({
 
 export const companionReplyPlanSchema = z.object({
   segments: z.array(z.string().min(1)).min(1).max(5),
+  destinationIntent: z
+    .object({
+      outcome: z.enum([
+        "none",
+        "start_trip",
+        "confirm_candidate",
+        "reject_candidate",
+      ]),
+      destination: z.string().min(1).optional(),
+      confidence: z.enum(["high", "medium", "low"]).optional(),
+    })
+    .optional(),
 });
 
 export function parseModelJson<T>(
@@ -249,6 +261,23 @@ export const companionReplyPlanJsonSchema = {
       type: "ARRAY",
       items: {
         type: "STRING",
+      },
+    },
+    destinationIntent: {
+      type: "OBJECT",
+      required: ["outcome"],
+      properties: {
+        outcome: {
+          type: "STRING",
+          enum: ["none", "start_trip", "confirm_candidate", "reject_candidate"],
+        },
+        destination: {
+          type: "STRING",
+        },
+        confidence: {
+          type: "STRING",
+          enum: ["high", "medium", "low"],
+        },
       },
     },
   },

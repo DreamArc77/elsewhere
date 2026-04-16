@@ -59,6 +59,8 @@ function filterReplyTurnsForActiveTrip(
   );
 }
 
+const IDLE_GUIDE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
 function emptyConversationState(
   conversationKey: string,
   mode: ConversationBindingRecord["mode"],
@@ -74,8 +76,10 @@ function emptyConversationState(
     recentHandledCommandMessageIds: [],
     recentTurns: [],
     latestPostcardPhoto: undefined,
+    idleEnteredAt: null,
     idleGuideSentAt: null,
     awaitingDestination: false,
+    pendingDestinationCandidate: null,
     lastUserMessageAt: null,
     lastCompanionReplyAt: null,
     memorySummary: undefined,
@@ -96,6 +100,10 @@ export class CompanionConversationService {
       messenger: HostMessengerPort;
       clock: ClockPort;
       logger: LoggerPort;
+      idleDestinationStarter?: (input: {
+        binding: ConversationBindingRecord;
+        destination: string;
+      }) => Promise<TripRecord>;
     },
   ) {}
 
@@ -151,7 +159,10 @@ export class CompanionConversationService {
       pendingReplyDispatch: null,
       instantReplyWindow: null,
       latestPostcardPhoto: undefined,
+      idleEnteredAt: null,
+      idleGuideSentAt: null,
       awaitingDestination: false,
+      pendingDestinationCandidate: null,
       updatedAt,
     };
     await this.dependencies.conversationStates.save(nextState);
@@ -194,7 +205,10 @@ export class CompanionConversationService {
       pendingReplyDispatch: null,
       instantReplyWindow: null,
       latestPostcardPhoto: undefined,
+      idleEnteredAt: null,
+      idleGuideSentAt: null,
       awaitingDestination: false,
+      pendingDestinationCandidate: null,
       updatedAt,
     };
     await this.dependencies.conversationStates.save(nextState);
@@ -212,6 +226,105 @@ export class CompanionConversationService {
     state: ConversationCompanionState,
   ): Promise<void> {
     await this.dependencies.conversationStates.save(state);
+  }
+
+  async enterIdleAwaitingDestination(input: {
+    binding: ConversationBindingRecord;
+    sendGuideNow: boolean;
+    clearConversationContext?: boolean;
+    reason:
+      | "activate"
+      | "first_onboarding_complete"
+      | "trip_stopped"
+      | "trip_completed";
+  }): Promise<ConversationCompanionState> {
+    const updatedAt = nowIso(this.dependencies.clock);
+    const state =
+      (await this.dependencies.conversationStates.getByKey(input.binding.key)) ??
+      emptyConversationState(input.binding.key, input.binding.mode, updatedAt);
+
+    const nextState: ConversationCompanionState = {
+      ...state,
+      mode: input.binding.mode,
+      setupSession: undefined,
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentTurns: input.clearConversationContext ? [] : state.recentTurns,
+      latestPostcardPhoto: undefined,
+      idleEnteredAt: updatedAt,
+      idleGuideSentAt: null,
+      awaitingDestination: true,
+      pendingDestinationCandidate: null,
+      lastUserMessageAt: input.clearConversationContext
+        ? null
+        : state.lastUserMessageAt,
+      lastCompanionReplyAt: input.clearConversationContext
+        ? null
+        : state.lastCompanionReplyAt,
+      updatedAt,
+    };
+    await this.dependencies.conversationStates.save(nextState);
+
+    await this.log({
+      tripId: input.binding.lastTripId ?? `conversation:${input.binding.key}`,
+      runId: randomUUID(),
+      phase: "system",
+      event: "idle.entered",
+      decision: "Entered idle destination loop and armed semantic destination detection.",
+      provider: "conversation-service",
+      status: "success",
+      startedAt: updatedAt,
+      finishedAt: updatedAt,
+      details: {
+        conversationKey: input.binding.key,
+        reason: input.reason,
+        sendGuideNow: input.sendGuideNow,
+        clearConversationContext: Boolean(input.clearConversationContext),
+      },
+    });
+
+    if (!input.sendGuideNow) {
+      return nextState;
+    }
+
+    return await this.sendIdleGuide(input.binding, nextState, input.reason);
+  }
+
+  async runDueIdleGuides(): Promise<ConversationCompanionState[]> {
+    const bindings = await this.dependencies.bindings.list();
+    const dueStates: ConversationCompanionState[] = [];
+
+    for (const binding of bindings) {
+      if (binding.mode !== "companion-exclusive") {
+        continue;
+      }
+
+      const activeTrip = await this.getActiveTrip(binding);
+      if (activeTrip) {
+        continue;
+      }
+
+      const state = await this.dependencies.conversationStates.getByKey(binding.key);
+      if (!state?.awaitingDestination || state.idleGuideSentAt) {
+        continue;
+      }
+
+      const idleEnteredAt = state.idleEnteredAt
+        ? new Date(state.idleEnteredAt).getTime()
+        : NaN;
+      if (
+        Number.isNaN(idleEnteredAt) ||
+        idleEnteredAt + IDLE_GUIDE_COOLDOWN_MS >
+          this.dependencies.clock.now().getTime()
+      ) {
+        continue;
+      }
+
+      dueStates.push(await this.sendIdleGuide(binding, state, "trip_completed"));
+    }
+
+    return dueStates;
   }
 
   async claimInboundMessage(input: {
@@ -590,8 +703,24 @@ export class CompanionConversationService {
                 : undefined,
             activeTrip,
             resolvedState,
+            destinationLoopContext: {
+              awaitingDestination: Boolean(state.awaitingDestination),
+              idleEnteredAt: state.idleEnteredAt ?? null,
+              idleGuideSentAt: state.idleGuideSentAt ?? null,
+              pendingDestinationCandidate:
+                state.pendingDestinationCandidate ?? null,
+            },
             now: nowIso(this.dependencies.clock),
           });
+
+    const postProcessedState = await this.applyDestinationIntent({
+      binding,
+      state,
+      replyPlan,
+      persona,
+      runId,
+      activeTrip,
+    });
 
     const pendingReplyDispatch = {
       ...state.pendingReplyDispatch!,
@@ -599,7 +728,7 @@ export class CompanionConversationService {
     };
 
     const updatedState: ConversationCompanionState = {
-      ...state,
+      ...postProcessedState,
       pendingReplyDispatch,
       updatedAt: nowIso(this.dependencies.clock),
     };
@@ -730,6 +859,210 @@ export class CompanionConversationService {
     });
 
     return updatedState;
+  }
+
+  private async applyDestinationIntent(input: {
+    binding: ConversationBindingRecord;
+    state: ConversationCompanionState;
+    replyPlan: CompanionReplyPlan;
+    persona: StoredPersonaProfile | null;
+    runId: string;
+    activeTrip: TripRecord | null;
+  }): Promise<ConversationCompanionState> {
+    const intent = input.replyPlan.destinationIntent;
+    if (!input.state.awaitingDestination || !intent) {
+      return input.state;
+    }
+
+    if (intent.outcome === "none") {
+      return input.state;
+    }
+
+    const baseState: ConversationCompanionState = {
+      ...input.state,
+      pendingDestinationCandidate:
+        intent.outcome === "confirm_candidate"
+          ? intent.destination ?? input.state.pendingDestinationCandidate ?? null
+          : intent.outcome === "reject_candidate"
+            ? null
+            : input.state.pendingDestinationCandidate ?? null,
+    };
+
+    if (intent.outcome === "confirm_candidate") {
+      await this.log({
+        tripId: input.activeTrip?.tripId ?? `conversation:${input.binding.key}`,
+        runId: input.runId,
+        phase: input.activeTrip?.state.currentPhase ?? "system",
+        event: "idle.destination.candidate",
+        decision: "Stored a pending destination candidate and waited for user confirmation.",
+        provider: input.replyPlan.provider,
+        status: "success",
+        startedAt: nowIso(this.dependencies.clock),
+        finishedAt: nowIso(this.dependencies.clock),
+        details: {
+          conversationKey: input.binding.key,
+          destination: intent.destination ?? null,
+          confidence: intent.confidence ?? null,
+        },
+      });
+      return baseState;
+    }
+
+    if (intent.outcome === "reject_candidate") {
+      await this.log({
+        tripId: input.activeTrip?.tripId ?? `conversation:${input.binding.key}`,
+        runId: input.runId,
+        phase: input.activeTrip?.state.currentPhase ?? "system",
+        event: "idle.destination.rejected",
+        decision: "Cleared the pending destination candidate after the user rejected it.",
+        provider: input.replyPlan.provider,
+        status: "success",
+        startedAt: nowIso(this.dependencies.clock),
+        finishedAt: nowIso(this.dependencies.clock),
+        details: {
+          conversationKey: input.binding.key,
+        },
+      });
+      return baseState;
+    }
+
+    const destination = intent.destination?.trim();
+    if (!destination || !this.dependencies.idleDestinationStarter) {
+      return baseState;
+    }
+
+    try {
+      const trip = await this.dependencies.idleDestinationStarter({
+        binding: input.binding,
+        destination,
+      });
+      await this.log({
+        tripId: trip.tripId,
+        runId: input.runId,
+        phase: "planning",
+        event: "idle.destination.trip_started",
+        decision: "Started a new trip from the idle destination loop.",
+        provider: input.replyPlan.provider,
+        status: "success",
+        startedAt: nowIso(this.dependencies.clock),
+        finishedAt: nowIso(this.dependencies.clock),
+        details: {
+          conversationKey: input.binding.key,
+          destination,
+          confidence: intent.confidence ?? null,
+        },
+      });
+      return {
+        ...baseState,
+        idleEnteredAt: null,
+        idleGuideSentAt: null,
+        awaitingDestination: false,
+        pendingDestinationCandidate: null,
+      };
+    } catch (error) {
+      input.replyPlan.segments = [
+        ...input.replyPlan.segments,
+        "我刚刚想把这趟行程接起来，不过这边卡住了。你晚一点再跟我说一次目的地，我会继续试。",
+      ];
+      await this.log({
+        tripId: `conversation:${input.binding.key}`,
+        runId: input.runId,
+        phase: "system",
+        event: "idle.destination.trip_start_failed",
+        decision: "Failed to start a new trip from the idle destination loop.",
+        provider: input.replyPlan.provider,
+        status: "failure",
+        startedAt: nowIso(this.dependencies.clock),
+        finishedAt: nowIso(this.dependencies.clock),
+        errorCode: error instanceof Error ? error.name : "idle_destination_trip_start_failed",
+        details: {
+          conversationKey: input.binding.key,
+          destination,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+      return {
+        ...baseState,
+        pendingDestinationCandidate: destination,
+      };
+    }
+  }
+
+  private async sendIdleGuide(
+    binding: ConversationBindingRecord,
+    state: ConversationCompanionState,
+    reason: "activate" | "first_onboarding_complete" | "trip_stopped" | "trip_completed",
+  ): Promise<ConversationCompanionState> {
+    const persona = await this.getPersona(binding);
+    if (!persona) {
+      return state;
+    }
+
+    const resolvedState = resolveAgentState({
+      activeTrip: null,
+      conversationState: state,
+      now: this.dependencies.clock.now(),
+    });
+    const guide = await this.dependencies.grounding.composeIdleDestinationGuide({
+      conversationKey: binding.key,
+      persona,
+      recentTurns: trimTurns(state.recentTurns, 12),
+      resolvedState,
+      now: nowIso(this.dependencies.clock),
+    });
+
+    const sentAt = nowIso(this.dependencies.clock);
+    for (const [index, segment] of guide.segments.entries()) {
+      await this.dependencies.messenger.sendTextReply({
+        binding,
+        text: segment,
+        dedupeKey: `idle-guide:${binding.key}:${sentAt}:${index}`,
+      });
+    }
+
+    const nextState: ConversationCompanionState = {
+      ...state,
+      idleGuideSentAt: sentAt,
+      instantReplyWindow: createReplyHotWindow({
+        conversationKey: binding.key,
+        resolvedState,
+        triggerAt: sentAt,
+        source: "reply",
+      }),
+      recentTurns: trimTurns(
+        [
+          ...state.recentTurns,
+          {
+            role: "companion",
+            text: guide.segments.join("\n"),
+            createdAt: sentAt,
+          },
+        ],
+        12,
+      ),
+      lastCompanionReplyAt: sentAt,
+      updatedAt: sentAt,
+    };
+    await this.dependencies.conversationStates.save(nextState);
+
+    await this.log({
+      tripId: `conversation:${binding.key}`,
+      runId: randomUUID(),
+      phase: "system",
+      event: "idle.guide.sent",
+      decision: "Sent the idle destination guide message.",
+      provider: guide.provider,
+      status: "success",
+      startedAt: sentAt,
+      finishedAt: sentAt,
+      details: {
+        conversationKey: binding.key,
+        reason,
+        segmentCount: guide.segments.length,
+      },
+    });
+
+    return nextState;
   }
 
   private async getActiveTrip(

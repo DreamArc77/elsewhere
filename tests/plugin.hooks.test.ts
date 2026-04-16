@@ -91,6 +91,81 @@ describe("travel companion inbound takeover hook", () => {
     expect(state?.pendingUserMessages[0]?.content).toBe("hello");
   });
 
+  it("queues idle destination messages into the normal reply flow instead of hard-starting immediately", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      originCity: "Hong Kong",
+      traits: ["gentle"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    await runtime.globalConfigRepository.save({
+      geminiApiKey: "test-key",
+      textProvider: { kind: "gemini" },
+      updatedAt: new Date().toISOString(),
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      latestPostcardPhoto: undefined,
+      idleEnteredAt: new Date().toISOString(),
+      idleGuideSentAt: null,
+      awaitingDestination: true,
+      pendingDestinationCandidate: null,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "东京",
+        body: "东京",
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "idle-destination-queued",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "idle-destination-queued",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(runtime.messenger.sentReplies).toHaveLength(0);
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.pendingUserMessages).toHaveLength(1);
+    expect(state?.pendingUserMessages[0]?.content).toBe("东京");
+  });
+
   it("claims inbound messages even when telegram target shapes differ", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({
@@ -510,8 +585,9 @@ describe("travel companion inbound takeover hook", () => {
     await expect(
       stat(savedPersona!.referenceImageAsset),
     ).resolves.toBeTruthy();
-    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Mori 创建完成");
-    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("/travel-companion model");
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("Mori 创建完成");
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("/travel-companion model");
   });
 
   it("updates the current persona instead of creating a new one when setup completes", async () => {

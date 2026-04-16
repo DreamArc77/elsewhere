@@ -24,7 +24,6 @@ import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 import {
   advanceSetupSessionWithPhoto,
   advanceSetupSessionWithText,
-  buildIdleGuideMessage,
   buildOnboardingGateMessage,
   buildPersonaCreatedMessage,
   buildPersonaUpdatedMessage,
@@ -301,40 +300,6 @@ export async function handleTravelCompanionInboundClaim(
 
   if (trimmed.startsWith("/")) {
     return;
-  }
-
-  if (state?.awaitingDestination && trimmed) {
-    const globalConfig = await deps.globalConfigRepository.get();
-    const readiness = evaluateOnboardingReadiness({
-      binding,
-      config: globalConfig,
-      fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
-    });
-    if (readiness.isComplete && binding.defaultPersonaId) {
-      const synthetic = `/travel-companion start --to "${trimmed.replace(/"/g, '\\"')}"`;
-      const reply = await handleTravelCompanionCommand(
-        buildSyntheticCommandContext(event, ctx, synthetic),
-        {
-          service: deps.service,
-          conversationService: deps.conversationService,
-          tripRepository: deps.tripRepository,
-          personaRepository: deps.personaRepository,
-          conversationStates: deps.conversationStates,
-          globalConfigRepository: deps.globalConfigRepository,
-          messenger: deps.messenger,
-          bindings: deps.bindings,
-          pluginConfig: deps.pluginConfig,
-          runtimeDataPaths: deps.runtimeDataPaths,
-          logger: deps.logger,
-        },
-      );
-      await deps.messenger.sendTextReply({
-        binding,
-        text: reply.text,
-        dedupeKey: `idle-destination:${binding.key}:${String(event.messageId ?? randomUUID())}`,
-      });
-      return { handled: true };
-    }
   }
 
   await deps.conversationService.claimInboundMessage({
@@ -686,15 +651,27 @@ async function finalizeSetupSession(input: {
       config: globalConfig,
       fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
     });
+    const shouldSendImmediateIdleGuide =
+      readiness.isComplete &&
+      !isEditingExistingPersona &&
+      !inbound.state.awaitingDestination &&
+      !inbound.state.idleGuideSentAt;
     const nextState = {
       ...inbound.state,
       setupSession: undefined,
-      idleGuideSentAt:
+      idleEnteredAt:
         readiness.isComplete && !isEditingExistingPersona
           ? new Date().toISOString()
+          : inbound.state.idleEnteredAt ?? null,
+      idleGuideSentAt:
+        readiness.isComplete && !isEditingExistingPersona
+          ? null
           : inbound.state.idleGuideSentAt ?? null,
       awaitingDestination:
-        readiness.isComplete && !isEditingExistingPersona,
+        readiness.isComplete && !isEditingExistingPersona
+          ? true
+          : inbound.state.awaitingDestination,
+      pendingDestinationCandidate: null,
       updatedAt: new Date().toISOString(),
     };
     await deps.conversationStates.save(nextState);
@@ -732,6 +709,13 @@ async function finalizeSetupSession(input: {
           ].join("\n"),
       dedupeKey: `setup-complete:${updatedBinding.key}:${persona.personaId}`,
     });
+    if (shouldSendImmediateIdleGuide) {
+      await deps.conversationService.enterIdleAwaitingDestination({
+        binding: updatedBinding,
+        sendGuideNow: true,
+        reason: "first_onboarding_complete",
+      });
+    }
     return;
   }
 
@@ -740,15 +724,27 @@ async function finalizeSetupSession(input: {
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
   });
+  const shouldSendImmediateIdleGuide =
+    readiness.isComplete &&
+    Boolean(inbound.binding.defaultPersonaId) &&
+    !inbound.state.awaitingDestination &&
+    !inbound.state.idleGuideSentAt;
   const nextState = {
     ...inbound.state,
     setupSession: undefined,
-    idleGuideSentAt:
+    idleEnteredAt:
       readiness.isComplete && inbound.binding.defaultPersonaId
         ? new Date().toISOString()
+        : inbound.state.idleEnteredAt ?? null,
+    idleGuideSentAt:
+      readiness.isComplete && inbound.binding.defaultPersonaId
+        ? null
         : inbound.state.idleGuideSentAt ?? null,
     awaitingDestination:
-      readiness.isComplete && Boolean(inbound.binding.defaultPersonaId),
+      readiness.isComplete && Boolean(inbound.binding.defaultPersonaId)
+        ? true
+        : inbound.state.awaitingDestination,
+    pendingDestinationCandidate: null,
     updatedAt: new Date().toISOString(),
   };
   await deps.conversationStates.save(nextState);
@@ -775,7 +771,7 @@ async function finalizeSetupSession(input: {
     binding: inbound.binding,
     text:
       readiness.isComplete && persona
-        ? ["模型配置已更新。", buildIdleGuideMessage(persona)].join("\n")
+        ? "模型配置已更新。"
         : [
             "模型配置已更新。",
             buildOnboardingGateMessage({
@@ -786,6 +782,13 @@ async function finalizeSetupSession(input: {
           ].join("\n"),
     dedupeKey: `setup-complete:${inbound.binding.key}:model`,
   });
+  if (shouldSendImmediateIdleGuide && persona) {
+    await deps.conversationService.enterIdleAwaitingDestination({
+      binding: inbound.binding,
+      sendGuideNow: true,
+      reason: "first_onboarding_complete",
+    });
+  }
 }
 
 function extractInboundImageSource(event: InboundClaimEvent): string | null {

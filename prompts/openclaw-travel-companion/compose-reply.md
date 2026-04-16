@@ -25,6 +25,9 @@ Current companion state:
 Current state grounding:
 {{currentStateGrounding}}
 
+Idle destination loop context:
+{{destinationLoopContext}}
+
 Current transport details:
 {{currentTransportDetails}}
 
@@ -46,7 +49,19 @@ Recent conversation turns:
 Recent photo you sent (hidden context only, do not quote verbatim):
 {{recentPhotoContext}}
 
+Extra task when `awaitingDestination` is true in the hidden context:
+- Silently judge whether the latest user message contains a concrete destination suggestion.
+- If the latest user message is only confirming a pending candidate, you may resolve it using `pendingDestinationCandidate`.
+- If confidence is high, use `start_trip`.
+- If there is a likely destination but you still need one more confirmation, use `confirm_candidate`.
+- If the user is rejecting the pending candidate, use `reject_candidate`.
+- Otherwise use `none`.
+- The reply text itself should still sound like a normal human message.
+
 Return exactly this JSON shape:
 {
-  "segments": ["message 1"]
+  "segments": ["message 1"],
+  "destinationIntent": {
+    "outcome": "none"
+  }
 }

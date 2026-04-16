@@ -360,9 +360,28 @@ export interface PendingReplyDispatch {
   instantSeen?: boolean;
 }
 
+export interface DestinationIntent {
+  outcome: "none" | "start_trip" | "confirm_candidate" | "reject_candidate";
+  destination?: string;
+  confidence?: "high" | "medium" | "low";
+}
+
 export interface CompanionReplyPlan {
   segments: string[];
   provider: string;
+  destinationIntent?: DestinationIntent;
+}
+
+export interface IdleDestinationGuidePlan {
+  segments: string[];
+  provider: string;
+}
+
+export interface IdleDestinationLoopContext {
+  awaitingDestination: boolean;
+  idleEnteredAt?: string | null;
+  idleGuideSentAt?: string | null;
+  pendingDestinationCandidate?: string | null;
 }
 
 export type CompanionBusinessMode = "idle" | "traveling" | "trip-finished";
@@ -547,8 +566,10 @@ export interface ConversationCompanionState {
   recentHandledCommandMessageIds: string[];
   recentTurns: CompanionTurn[];
   latestPostcardPhoto?: RecentPostcardPhotoContext;
+  idleEnteredAt?: string | null;
   idleGuideSentAt?: string | null;
   awaitingDestination?: boolean;
+  pendingDestinationCandidate?: string | null;
   lastUserMessageAt: string | null;
   lastCompanionReplyAt: string | null;
   memorySummary?: string;
@@ -635,8 +656,16 @@ export interface GroundingPort {
     latestPostcardPhoto?: RecentPostcardPhotoContext;
     activeTrip: TripRecord | null;
     resolvedState: ResolvedAgentState;
+    destinationLoopContext: IdleDestinationLoopContext;
     now: string;
   }): Promise<CompanionReplyPlan>;
+  composeIdleDestinationGuide(input: {
+    conversationKey: string;
+    persona: StoredPersonaProfile;
+    recentTurns: CompanionTurn[];
+    resolvedState: ResolvedAgentState;
+    now: string;
+  }): Promise<IdleDestinationGuidePlan>;
 }
 
 export interface ImageGenerationPort {
@@ -712,6 +741,7 @@ export interface RuntimeHooks {
     record: TripRecord,
     receipt: SendReceipt,
   ): Promise<void> | void;
+  afterTripCompleted?(record: TripRecord): Promise<void> | void;
 }
 
 export interface OpenClawTravelCompanionServiceDependencies {

@@ -25,6 +25,8 @@ describe("reply prompt", () => {
       activeTripSummary: '{"tripId":"trip-1"}',
       currentStateSummary: '{"substate":"before_departure"}',
       currentStateGrounding: '{"location":"自己的房间中"}',
+      destinationLoopContext:
+        '{"awaitingDestination":false,"idleEnteredAt":null,"idleGuideSentAt":null,"pendingDestinationCandidate":null}',
       currentTransportDetails:
         '{"relevant":true,"identifier":"MU5478","departure":{"time":"09:15"}}',
       now: "2026-04-14T08:00:00.000Z",
