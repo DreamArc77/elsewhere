@@ -4,7 +4,7 @@ import {
   completeWithPreparedSimpleCompletionModel,
   extractAssistantText,
   prepareSimpleCompletionModel,
-} from "openclaw/plugin-sdk/simple-completion-runtime";
+} from "openclaw/plugin-sdk/agent-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
 import {
@@ -72,6 +72,84 @@ interface GenerateContentResponse {
       }>;
     };
   }>;
+}
+
+function resolveHostDefaultModelRef(input: {
+  configuredModel: unknown;
+  runtimeProvider: unknown;
+  runtimeModel: unknown;
+}): { provider: string; modelId: string } | null {
+  const runtimeProvider =
+    typeof input.runtimeProvider === "string" && input.runtimeProvider.trim()
+      ? input.runtimeProvider.trim()
+      : undefined;
+
+  const resolveFromUnknown = (
+    value: unknown,
+    fallbackProvider?: string,
+  ): { provider: string; modelId: string } | null => {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return null;
+      }
+
+      const slashIndex = trimmed.indexOf("/");
+      if (slashIndex > 0) {
+        return {
+          provider: trimmed.slice(0, slashIndex).trim(),
+          modelId: trimmed.slice(slashIndex + 1).trim(),
+        };
+      }
+
+      if (!fallbackProvider) {
+        return null;
+      }
+
+      return {
+        provider: fallbackProvider,
+        modelId: trimmed,
+      };
+    }
+
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+
+    const record = value as Record<string, unknown>;
+
+    if (typeof record.primary === "string") {
+      return resolveFromUnknown(record.primary, fallbackProvider);
+    }
+
+    if (typeof record.id === "string") {
+      return resolveFromUnknown(
+        typeof record.provider === "string"
+          ? `${record.provider}/${record.id}`
+          : record.id,
+        typeof record.provider === "string"
+          ? record.provider
+          : fallbackProvider,
+      );
+    }
+
+    if (
+      typeof record.provider === "string" &&
+      typeof record.model === "string"
+    ) {
+      return {
+        provider: record.provider.trim(),
+        modelId: record.model.trim(),
+      };
+    }
+
+    return null;
+  };
+
+  return (
+    resolveFromUnknown(input.configuredModel, runtimeProvider) ??
+    resolveFromUnknown(input.runtimeModel, runtimeProvider)
+  );
 }
 
 function normalizeBaseUrl(baseUrl?: string): string {
@@ -161,6 +239,13 @@ function summarizePlanResponseText(text: string): {
     responseTextLooksJsonComplete:
       trimmed.startsWith("{") && trimmed.endsWith("}"),
   };
+}
+
+function shouldRetryPlanWithoutGrounding(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("User location is not supported for the API use.") ||
+    errorMessage.includes('"status": "FAILED_PRECONDITION"')
+  );
 }
 
 function latestPendingUserMessageAt(
@@ -512,13 +597,13 @@ export class GeminiRestGroundingAdapter
     }
 
     const cfg = this.runtime.config.loadConfig();
-    const defaultModel = this.runtime.agent.defaults.model as {
-      id?: string;
-      provider?: string;
-    };
-    const provider =
-      this.runtime.agent.defaults.provider ?? defaultModel?.provider;
-    const modelId = defaultModel?.id;
+    const resolvedHostDefault = resolveHostDefaultModelRef({
+      configuredModel: cfg.agents?.defaults?.model,
+      runtimeProvider: this.runtime.agent.defaults.provider,
+      runtimeModel: this.runtime.agent.defaults.model,
+    });
+    const provider = resolvedHostDefault?.provider;
+    const modelId = resolvedHostDefault?.modelId;
 
     if (!provider || !modelId) {
       throw new Error(
@@ -710,139 +795,181 @@ export class GeminiRestGroundingAdapter
 
     for (const [index, prompt] of prompts.entries()) {
       const attempt = index + 1;
-      const requestStartedAt = nowIso();
+      let usesGoogleSearch = true;
 
-      await this.logPromptEntry({
-        tripId: input.tripId,
-        runId,
-        phase: "planning",
-        event: "plan.prompt.rendered",
-        decision: "Rendered the final planning prompt before sending it to Gemini.",
-        provider: this.planningModel,
-        status: "success",
-        startedAt: requestStartedAt,
-        finishedAt: requestStartedAt,
-        latencyMs: 0,
-        details: {
-          attempt,
-          promptLength: prompt.length,
-          renderedPrompt: prompt,
-        },
-      });
+      while (true) {
+        const requestStartedAt = nowIso();
 
-      await this.logPlanEntry({
-        tripId: input.tripId,
-        runId,
-        phase: "planning",
-        event: "plan.request.started",
-        decision: "Started Gemini trip planning request.",
-        provider: this.planningModel,
-        status: "success",
-        startedAt: requestStartedAt,
-        finishedAt: requestStartedAt,
-        latencyMs: 0,
-        details: {
-          attempt,
-          usesGoogleSearch: true,
-          promptLength: prompt.length,
-          destinationCity: input.request.destinationCity,
-        },
-      });
-
-      try {
-        const response = await this.generateContent(this.planningModel, {
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          tools: [{ google_search: {} }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseJsonSchema: tripPlanJsonSchema,
-            temperature: 0.3,
-          },
-        });
-
-        const responseFinishedAt = nowIso();
-        const responseText = extractText(response);
-        await this.logPlanEntry({
+        await this.logPromptEntry({
           tripId: input.tripId,
           runId,
           phase: "planning",
-          event: "plan.request.finished",
-          decision: "Gemini trip planning request returned a response payload.",
-          provider: this.planningModel,
-          status: "success",
-          startedAt: requestStartedAt,
-          finishedAt: responseFinishedAt,
-          latencyMs: elapsedMs(requestStartedAt, responseFinishedAt),
-          details: {
-            attempt,
-            ...summarizePlanResponseText(responseText),
-          },
-        });
-
-        const parseStartedAt = nowIso();
-        let parsed: TripPlan;
-        try {
-          parsed = parseModelJson(responseText, tripPlanSchema, "Gemini trip plan");
-        } catch (error) {
-          if (error instanceof Error) {
-            Object.assign(error, { responseText });
-          }
-          throw error;
-        }
-        const parseFinishedAt = nowIso();
-
-        await this.logPlanEntry({
-          tripId: input.tripId,
-          runId,
-          phase: "planning",
-          event: "plan.parse.finished",
-          decision: "Validated trip plan JSON against the contract schema.",
-          provider: this.planningModel,
-          status: "success",
-          startedAt: parseStartedAt,
-          finishedAt: parseFinishedAt,
-          latencyMs: elapsedMs(parseStartedAt, parseFinishedAt),
-          details: {
-            attempt,
-            days: parsed.metadata.days,
-          },
-        });
-
-        return parsed;
-      } catch (error) {
-        lastError = error;
-        const failedAt = nowIso();
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const responseText =
-          error instanceof Error &&
-          "responseText" in (error as object) &&
-          typeof (error as Error & { responseText?: unknown }).responseText ===
-            "string"
-            ? (error as Error & { responseText: string }).responseText
-            : undefined;
-
-        await this.logPlanEntry({
-          tripId: input.tripId,
-          runId,
-          phase: "planning",
-          event:
-            attempt < prompts.length ? "plan.request.retry" : "plan.request.failed",
+          event: "plan.prompt.rendered",
           decision:
-            attempt < prompts.length
-              ? "Gemini trip planning attempt failed; retrying with a stricter corrective prompt."
-              : "Gemini trip planning failed after exhausting all attempts.",
+            "Rendered the final planning prompt before sending it to Gemini.",
           provider: this.planningModel,
-          status: "failure",
+          status: "success",
           startedAt: requestStartedAt,
-          finishedAt: failedAt,
-          latencyMs: elapsedMs(requestStartedAt, failedAt),
-          errorCode: "plan_generation_failed",
+          finishedAt: requestStartedAt,
+          latencyMs: 0,
           details: {
             attempt,
-            error: truncate(errorMessage, 600),
-            ...(responseText ? summarizePlanResponseText(responseText) : {}),
+            usesGoogleSearch,
+            promptLength: prompt.length,
+            renderedPrompt: prompt,
           },
         });
+
+        await this.logPlanEntry({
+          tripId: input.tripId,
+          runId,
+          phase: "planning",
+          event: "plan.request.started",
+          decision: "Started Gemini trip planning request.",
+          provider: this.planningModel,
+          status: "success",
+          startedAt: requestStartedAt,
+          finishedAt: requestStartedAt,
+          latencyMs: 0,
+          details: {
+            attempt,
+            usesGoogleSearch,
+            promptLength: prompt.length,
+            destinationCity: input.request.destinationCity,
+          },
+        });
+
+        try {
+          const response = await this.generateContent(this.planningModel, {
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            ...(usesGoogleSearch ? { tools: [{ google_search: {} }] } : {}),
+            generationConfig: {
+              responseMimeType: "application/json",
+              responseJsonSchema: tripPlanJsonSchema,
+              temperature: 0.3,
+            },
+          });
+
+          const responseFinishedAt = nowIso();
+          const responseText = extractText(response);
+          await this.logPlanEntry({
+            tripId: input.tripId,
+            runId,
+            phase: "planning",
+            event: "plan.request.finished",
+            decision: "Gemini trip planning request returned a response payload.",
+            provider: this.planningModel,
+            status: "success",
+            startedAt: requestStartedAt,
+            finishedAt: responseFinishedAt,
+            latencyMs: elapsedMs(requestStartedAt, responseFinishedAt),
+            details: {
+              attempt,
+              usesGoogleSearch,
+              ...summarizePlanResponseText(responseText),
+            },
+          });
+
+          const parseStartedAt = nowIso();
+          let parsed: TripPlan;
+          try {
+            parsed = parseModelJson(
+              responseText,
+              tripPlanSchema,
+              "Gemini trip plan",
+            );
+          } catch (error) {
+            if (error instanceof Error) {
+              Object.assign(error, { responseText });
+            }
+            throw error;
+          }
+          const parseFinishedAt = nowIso();
+
+          await this.logPlanEntry({
+            tripId: input.tripId,
+            runId,
+            phase: "planning",
+            event: "plan.parse.finished",
+            decision: "Validated trip plan JSON against the contract schema.",
+            provider: this.planningModel,
+            status: "success",
+            startedAt: parseStartedAt,
+            finishedAt: parseFinishedAt,
+            latencyMs: elapsedMs(parseStartedAt, parseFinishedAt),
+            details: {
+              attempt,
+              usesGoogleSearch,
+              days: parsed.metadata.days,
+            },
+          });
+
+          return parsed;
+        } catch (error) {
+          lastError = error;
+          const failedAt = nowIso();
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          const responseText =
+            error instanceof Error &&
+            "responseText" in (error as object) &&
+            typeof (error as Error & { responseText?: unknown }).responseText ===
+              "string"
+              ? (error as Error & { responseText: string }).responseText
+              : undefined;
+
+          if (
+            usesGoogleSearch &&
+            shouldRetryPlanWithoutGrounding(errorMessage)
+          ) {
+            await this.logPlanEntry({
+              tripId: input.tripId,
+              runId,
+              phase: "planning",
+              event: "plan.request.retry_without_grounding",
+              decision:
+                "Gemini rejected the grounded planning request; retrying the same prompt without Google Search grounding.",
+              provider: this.planningModel,
+              status: "failure",
+              startedAt: requestStartedAt,
+              finishedAt: failedAt,
+              latencyMs: elapsedMs(requestStartedAt, failedAt),
+              errorCode: "plan_generation_failed",
+              details: {
+                attempt,
+                usesGoogleSearch,
+                error: truncate(errorMessage, 600),
+              },
+            });
+            usesGoogleSearch = false;
+            continue;
+          }
+
+          await this.logPlanEntry({
+            tripId: input.tripId,
+            runId,
+            phase: "planning",
+            event:
+              attempt < prompts.length ? "plan.request.retry" : "plan.request.failed",
+            decision:
+              attempt < prompts.length
+                ? "Gemini trip planning attempt failed; retrying with a stricter corrective prompt."
+                : "Gemini trip planning failed after exhausting all attempts.",
+            provider: this.planningModel,
+            status: "failure",
+            startedAt: requestStartedAt,
+            finishedAt: failedAt,
+            latencyMs: elapsedMs(requestStartedAt, failedAt),
+            errorCode: "plan_generation_failed",
+            details: {
+              attempt,
+              usesGoogleSearch,
+              error: truncate(errorMessage, 600),
+              ...(responseText ? summarizePlanResponseText(responseText) : {}),
+            },
+          });
+          break;
+        }
       }
     }
 

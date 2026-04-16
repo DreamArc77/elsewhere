@@ -103,6 +103,7 @@ export async function createRuntimeBundle(input: {
       textProviderResolver: async () =>
         (await globalConfigRepository.get()).textProvider,
       runtime: input.runtime,
+      baseUrl: input.pluginConfig.geminiBaseUrl,
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
       logger,
@@ -111,6 +112,7 @@ export async function createRuntimeBundle(input: {
       apiKeyResolver: async () =>
         (await globalConfigRepository.get()).geminiApiKey ??
         input.pluginConfig.geminiApiKey,
+      baseUrl: input.pluginConfig.geminiBaseUrl,
       imageModel: input.pluginConfig.imageModel,
       logger,
     }),
@@ -119,7 +121,7 @@ export async function createRuntimeBundle(input: {
     hooks: {
       afterMessageSent: async (record) => {
         const pending = record.pendingDispatch;
-        if (!pending) {
+        if (!pending?.postcard) {
           return;
         }
 
@@ -161,6 +163,7 @@ export async function createRuntimeBundle(input: {
       textProviderResolver: async () =>
         (await globalConfigRepository.get()).textProvider,
       runtime: input.runtime,
+      baseUrl: input.pluginConfig.geminiBaseUrl,
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
       logger,

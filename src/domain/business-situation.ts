@@ -19,6 +19,7 @@ import {
   StoredPersonaProfile,
 } from "./types.js";
 import { stableRange } from "./stable-random.js";
+import { parseItineraryTimeToken } from "./itinerary-time.js";
 
 type SeenPolicy =
   | { kind: "range"; minMinutes: number; maxMinutes: number }
@@ -252,25 +253,6 @@ function toUtcDate(input: {
   return guess;
 }
 
-function parseTimeToken(token: string): {
-  hour: number;
-  minute: number;
-  dayOffset: number;
-} {
-  const match = token
-    .trim()
-    .match(/^(\d{1,2}):(\d{2})(?:\s*\(\+(\d+)\))?$/u);
-  if (!match) {
-    throw new Error(`Invalid itinerary time: ${token}`);
-  }
-
-  return {
-    hour: Number(match[1]),
-    minute: Number(match[2]),
-    dayOffset: Number(match[3] ?? "0"),
-  };
-}
-
 function durationMinutesFromRange(
   start: { hour: number; minute: number; dayOffset?: number },
   end: { hour: number; minute: number; dayOffset?: number },
@@ -300,9 +282,12 @@ function resolveActivityWindow(input: {
   }
 
   const baseDate = parseDateParts(input.date);
-  const startParts = parseTimeToken((rangeMatch?.[1] ?? singleMatch?.[1])!);
+  const startParts = parseItineraryTimeToken(
+    (rangeMatch?.[1] ?? singleMatch?.[1])!,
+    { baseDate: input.date },
+  );
   const endParts = rangeMatch
-    ? parseTimeToken(rangeMatch[2]!)
+    ? parseItineraryTimeToken(rangeMatch[2]!, { baseDate: input.date })
     : {
         hour: startParts.hour,
         minute: startParts.minute + DEFAULT_SINGLE_SLOT_MINUTES,
@@ -340,7 +325,9 @@ function resolveDepartureWindow(record: TripRecord): {
   const departureTimeZone = inferTimeZoneFromText(record.request.originCity);
   const arrivalTimeZone = inferTimeZoneFromText(record.request.destinationCity);
 
-  const arrivalToken = parseTimeToken(departureLeg.arrival.time);
+  const arrivalToken = parseItineraryTimeToken(departureLeg.arrival.time, {
+    baseDate: firstDate,
+  });
   const arrivalDate = addDaysToDateParts({
     ...parseDateParts(firstDate),
     dayOffset: arrivalToken.dayOffset,
@@ -352,7 +339,9 @@ function resolveDepartureWindow(record: TripRecord): {
     timeZone: arrivalTimeZone,
   });
 
-  const departureToken = parseTimeToken(departureLeg.departure.time);
+  const departureToken = parseItineraryTimeToken(departureLeg.departure.time, {
+    baseDate: firstDate,
+  });
   let departAt = arriveAt;
   for (const offset of [-2, -1, 0, 1]) {
     const candidateDate = addDaysToDateParts({
@@ -390,7 +379,9 @@ function resolveReturnWindow(record: TripRecord): {
   const departureTimeZone = inferTimeZoneFromText(record.request.destinationCity);
   const arrivalTimeZone = inferTimeZoneFromText(record.request.originCity);
 
-  const departureToken = parseTimeToken(returnLeg.departure.time);
+  const departureToken = parseItineraryTimeToken(returnLeg.departure.time, {
+    baseDate: lastDate,
+  });
   const departureDate = addDaysToDateParts({
     ...parseDateParts(lastDate),
     dayOffset: departureToken.dayOffset,
@@ -402,7 +393,9 @@ function resolveReturnWindow(record: TripRecord): {
     timeZone: departureTimeZone,
   });
 
-  const arrivalToken = parseTimeToken(returnLeg.arrival.time);
+  const arrivalToken = parseItineraryTimeToken(returnLeg.arrival.time, {
+    baseDate: lastDate,
+  });
   let arriveAt = departAt;
   for (const offset of [0, 1, 2]) {
     const candidateDate = addDaysToDateParts({
@@ -534,6 +527,16 @@ function buildStateBlockId(input: {
   ].join("::");
 }
 
+function resolvePersonaOriginCity(
+  persona?: StoredPersonaProfile | null,
+): string | undefined {
+  if (!persona) {
+    return undefined;
+  }
+
+  return persona.originCity || persona.homeCity;
+}
+
 function buildResolvedIdentity(input: {
   activeTrip: TripRecord | null;
   conversationState?: ConversationCompanionState | null;
@@ -544,7 +547,7 @@ function buildResolvedIdentity(input: {
       personaSummary: input.persona
         ? [
             `Name: ${input.persona.name}`,
-            `Home city: ${input.persona.homeCity}`,
+            `Origin city: ${resolvePersonaOriginCity(input.persona) ?? "unknown"}`,
             `Traits: ${input.persona.traits.join(", ")}`,
             `Relationship to user: ${input.persona.relationship}`,
             `Tone style: ${input.persona.toneStyle}`,
@@ -567,27 +570,74 @@ function buildResolvedPolicy(
   };
 }
 
+function resolveStateLocation(input: {
+  activeTrip: TripRecord | null;
+  derived: DerivedStateResult;
+  persona?: StoredPersonaProfile | null;
+}): string | undefined {
+  if (input.derived.currentActivity?.location) {
+    return input.derived.currentActivity.location;
+  }
+
+  if (input.derived.previousActivity?.location) {
+    return input.derived.previousActivity.location;
+  }
+
+  switch (input.derived.situation.state) {
+    case "plan":
+      return (
+        resolvePersonaOriginCity(input.persona) ??
+        input.activeTrip?.request.originCity ??
+        undefined
+      );
+    case "departure":
+      return input.derived.situation.substate === "arrive"
+        ? input.activeTrip?.request.destinationCity ??
+            input.activeTrip?.plan.metadata.destination
+        : input.activeTrip?.request.originCity;
+    case "return":
+      return input.derived.situation.substate === "arrive"
+        ? input.activeTrip?.request.originCity
+        : input.activeTrip?.request.destinationCity ??
+            input.activeTrip?.plan.metadata.destination;
+    case "idle":
+      return (
+        resolvePersonaOriginCity(input.persona) ??
+        input.activeTrip?.request.originCity ??
+        undefined
+      );
+    default:
+      return (
+        resolvePersonaOriginCity(input.persona) ??
+        input.activeTrip?.request.originCity ??
+        undefined
+      );
+  }
+}
+
 function buildResolvedStateFromDerived(input: {
   activeTrip: TripRecord | null;
   derived: DerivedStateResult;
   conversationState?: ConversationCompanionState | null;
   persona?: StoredPersonaProfile | null;
 }): ResolvedAgentState {
+  const location = resolveStateLocation({
+    activeTrip: input.activeTrip,
+    derived: input.derived,
+    persona: input.persona,
+  });
   const timeZone =
     input.derived.currentActivity?.route?.transport_mode === "airplane" &&
     input.derived.situation.state === "return"
       ? inferTimeZoneFromText(input.activeTrip?.request.originCity ?? "UTC")
       : inferTimeZoneFromText(
           input.derived.currentActivity?.location ??
+            location ??
             input.activeTrip?.plan.metadata.destination ??
             input.activeTrip?.request.destinationCity ??
             input.activeTrip?.request.originCity ??
             "UTC",
         );
-  const location =
-    input.derived.currentActivity?.location ??
-    input.derived.previousActivity?.location ??
-    input.activeTrip?.request.originCity;
   const blockId = buildStateBlockId({
     state: input.derived.situation.state,
     substate: input.derived.situation.substate,

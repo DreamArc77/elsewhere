@@ -32,6 +32,20 @@ describe("Gemini contracts", () => {
     ).toThrow(/failed schema validation/i);
   });
 
+  it("rejects transport timestamps that include full dates", () => {
+    const plan = buildFixtureTripPlan({
+      tripId: "trip-1",
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+      days: 3,
+    });
+    plan.transportation.departure.departure.time = "2026-04-20 08:30";
+
+    expect(() =>
+      parseModelJson(JSON.stringify(plan), tripPlanSchema, "trip plan"),
+    ).toThrow(/failed schema validation/i);
+  });
+
   it("extracts JSON from fenced code blocks", () => {
     expect(extractLikelyJson("```json\n{\"ok\":true}\n```")).toBe('{"ok":true}');
   });

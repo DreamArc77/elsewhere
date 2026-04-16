@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+const transportClockPattern = /^(?:[01]?\d|2[0-3]):[0-5]\d(?:\s*\(\+\d+\))?$/u;
+const transportClockPatternText =
+  "^(?:[01]?\\\\d|2[0-3]):[0-5]\\\\d(?:\\\\s*\\\\(\\\\+\\\\d+\\\\))?$";
+
 export const groundingSourceSchema = z.object({
   title: z.string().min(1),
   uri: z.string().url(),
@@ -58,11 +62,11 @@ export const tripPlanSchema = z.object({
       operator: z.string().min(1),
       departure: z.object({
         station: z.string().min(1),
-        time: z.string().min(1),
+        time: z.string().regex(transportClockPattern),
       }),
       arrival: z.object({
         station: z.string().min(1),
-        time: z.string().min(1),
+        time: z.string().regex(transportClockPattern),
       }),
     }),
     return: z.object({
@@ -72,11 +76,11 @@ export const tripPlanSchema = z.object({
       operator: z.string().min(1),
       departure: z.object({
         station: z.string().min(1),
-        time: z.string().min(1),
+        time: z.string().regex(transportClockPattern),
       }),
       arrival: z.object({
         station: z.string().min(1),
-        time: z.string().min(1),
+        time: z.string().regex(transportClockPattern),
       }),
     }),
   }),
@@ -271,7 +275,7 @@ function transportLegJsonSchema() {
         required: ["station", "time"],
         properties: {
           station: { type: "STRING" },
-          time: { type: "STRING" },
+          time: { type: "STRING", pattern: transportClockPatternText },
         },
       },
       arrival: {
@@ -279,7 +283,7 @@ function transportLegJsonSchema() {
         required: ["station", "time"],
         properties: {
           station: { type: "STRING" },
-          time: { type: "STRING" },
+          time: { type: "STRING", pattern: transportClockPatternText },
         },
       },
     },

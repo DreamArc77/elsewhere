@@ -138,7 +138,7 @@ describe("travel companion command UX", () => {
     );
 
     expect(reply.isError).toBeUndefined();
-    expect(reply.text).toContain("Binding complete.");
+    expect(reply.text).toContain("这条会话已经和 Ta 绑定好了。");
 
     const binding = await bindings.get(
       bindingKey({
@@ -175,7 +175,7 @@ describe("travel companion command UX", () => {
     );
 
     expect(reply.isError).toBeUndefined();
-    expect(reply.text).toContain("companion-exclusive");
+    expect(reply.text).toContain("Ta 模式已开启");
 
     const binding = await bindings.get(
       bindingKey({
@@ -197,9 +197,9 @@ describe("travel companion command UX", () => {
     );
 
     expect(reply.isError).toBeUndefined();
-    expect(reply.text).toContain("onboarding");
+    expect(reply.text).toContain("Ta 模式已开启");
+    expect(reply.text).toContain("还差最后几项配置");
     expect(reply.text).toContain("/travel-companion setup");
-    expect(reply.text).toContain("Ta");
     expect(reply.text).toContain("Ta");
   });
 
@@ -606,7 +606,7 @@ describe("travel companion command UX", () => {
       deps,
     );
 
-    expect(reply.text).toContain("deactivated");
+    expect(reply.text).toContain("Ta 模式已关闭");
     const trip = await runtime.tripRepository.getById(tripId!);
     expect(trip?.state.status).toBe("completed");
 

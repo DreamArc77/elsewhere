@@ -6,6 +6,7 @@ export interface TravelCompanionPluginConfig {
   planningModel?: string;
   textModel?: string;
   imageModel?: string;
+  geminiBaseUrl?: string;
 }
 
 export function resolvePluginConfig(
@@ -22,6 +23,7 @@ export function resolvePluginConfig(
     planningModel: asString(raw?.planningModel) ?? "gemini-3-flash-preview",
     textModel: asString(raw?.textModel) ?? "gemini-3-flash-preview",
     imageModel: asString(raw?.imageModel) ?? "gemini-3.1-flash-image-preview",
+    geminiBaseUrl: asString(raw?.geminiBaseUrl) ?? env.GEMINI_BASE_URL,
   };
 }
 

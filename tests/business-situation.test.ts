@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createStateAnchorFromTimelineStep,
   deriveCompanionBusinessSituation,
+  resolveAgentState,
 } from "../src/domain/business-situation.js";
 import { createTestRuntime } from "./helpers/runtime.js";
 
@@ -67,6 +68,66 @@ describe("companion business situation", () => {
 
     expect(situation.state).toBe("plan");
     expect(situation.substate).toBe("packing");
+  });
+
+  it("keeps state resolution working when transport legs contain full datetime strings", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      homeCity: "Hong Kong",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    const record = await runtime.tripRepository.getById(trip.tripId);
+    record!.plan.transportation.departure.departure.time = "2026-04-11 08:30";
+    record!.plan.transportation.departure.arrival.time = "2026-04-11 12:30";
+    record!.plan.transportation.return.departure.time = "2026-04-13 21:30";
+    record!.plan.transportation.return.arrival.time = "2026-04-14 01:10";
+
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      new Date(record!.createdAt),
+    );
+
+    expect(situation.state).toBe("plan");
+    expect(situation.substate).toBe("planning");
+  });
+
+  it("uses persona home city as stateLocation during planning-like states", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      homeCity: "Osaka",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    const record = await runtime.tripRepository.getById(trip.tripId);
+    const resolvedState = resolveAgentState({
+      activeTrip: record!,
+      now: new Date(new Date(record!.createdAt).getTime() + 2 * 60 * 1000),
+      persona,
+    });
+
+    expect(resolvedState.stage.substate).toBe("packing");
+    expect(resolvedState.state.location).toBe("Osaka");
   });
 
   it("derives before_departure in the final three hours before outbound transport", async () => {

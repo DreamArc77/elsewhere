@@ -110,7 +110,10 @@ async function bindConversation(
   }
 
   return {
-    text: ["Binding complete.", "Run /travel-companion activate to enter companion-exclusive mode."].join("\n"),
+    text: [
+      "这条会话已经和 Ta 绑定好了。",
+      "接下来运行 /travel-companion activate，进入 Ta 模式。",
+    ].join("\n"),
   };
 }
 
@@ -183,8 +186,7 @@ async function activateConversation(
     });
     return {
       text: [
-        "Travel companion takeover is now active.",
-        "This chat is in companion-exclusive mode.",
+        "Ta 模式已开启。",
         buildOnboardingGateMessage({
           binding: activatedBinding,
           readiness,
@@ -195,10 +197,7 @@ async function activateConversation(
   }
 
   return await sendIdleGuideIfNeeded(activatedBinding, deps, {
-    prefixLines: [
-      "Travel companion takeover is now active.",
-      "This chat is in companion-exclusive mode.",
-    ],
+    prefixLines: ["Ta 模式已开启。"],
   });
 }
 
@@ -226,9 +225,9 @@ async function deactivateConversation(
 
   return {
     text: [
-      "Travel companion takeover is now deactivated.",
-      "The active trip has been stopped.",
-      "This chat is back to the default OpenClaw assistant.",
+      "Ta 模式已关闭。",
+      "当前行程已停止。",
+      "这条会话已经回到默认助手。",
     ].join("\n"),
   };
 }
@@ -1153,11 +1152,13 @@ async function sendIdleGuideIfNeeded(
     return {
       text: [
         ...(options?.prefixLines ?? []),
-        "当前还没有默认的 Ta。先运行 /travel-companion setup。",
+        "当前还没有 Ta 的设定。",
+        "先运行 /travel-companion setup。",
       ].join("\n"),
     };
   }
 
+  let idleGuideJustSent = false;
   if (!state.idleGuideSentAt) {
     const text = buildIdleGuideMessage(persona);
     await deps.logger?.log({
@@ -1214,12 +1215,15 @@ async function sendIdleGuideIfNeeded(
       awaitingDestination: true,
       updatedAt: new Date().toISOString(),
     });
+    idleGuideJustSent = true;
   }
 
   return {
     text: [
       ...(options?.prefixLines ?? []),
-      "Ta 已经进入 idle 状态，第一条引导消息已发出。",
+      idleGuideJustSent
+        ? "Ta 已经准备好了，第一条引导消息已发出。"
+        : "Ta 已经准备好了，直接告诉 Ta 一个想去的目的地就行。",
     ].join("\n"),
   };
 }

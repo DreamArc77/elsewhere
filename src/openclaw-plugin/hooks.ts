@@ -26,6 +26,7 @@ import {
   advanceSetupSessionWithText,
   buildIdleGuideMessage,
   buildOnboardingGateMessage,
+  buildPersonaCreatedMessage,
   buildPersonaUpdatedMessage,
   createCompletedPersonaProfile,
   evaluateOnboardingReadiness,
@@ -718,7 +719,7 @@ async function finalizeSetupSession(input: {
       text: readiness.isComplete
         ? isEditingExistingPersona
           ? buildPersonaUpdatedMessage(persona)
-          : buildIdleGuideMessage(persona)
+          : buildPersonaCreatedMessage(persona)
         : [
             isEditingExistingPersona
               ? buildPersonaUpdatedMessage(persona)

@@ -223,6 +223,69 @@ describe("service scheduling and crash recovery", () => {
     expect(runtime.messenger.sentMessages).toHaveLength(1);
   });
 
+  it("reuses the persisted image when caption generation fails after image creation", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      homeCity: "Hong Kong",
+      traits: ["gentle"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    let imageGenerateCount = 0;
+    let captionAttemptCount = 0;
+    const originalGenerateImage =
+      runtime.imageGeneration.generateImage.bind(runtime.imageGeneration);
+    runtime.imageGeneration.generateImage = async (input) => {
+      imageGenerateCount += 1;
+      return await originalGenerateImage(input);
+    };
+
+    const originalComposeCaption =
+      runtime.grounding.composeCaption.bind(runtime.grounding);
+    runtime.grounding.composeCaption = async (input) => {
+      captionAttemptCount += 1;
+      if (captionAttemptCount === 1) {
+        throw new Error("boom-after-image-before-caption");
+      }
+      return await originalComposeCaption(input);
+    };
+
+    await expect(runtime.service.runTrip(trip.tripId)).rejects.toThrow(
+      "boom-after-image-before-caption",
+    );
+    expect(imageGenerateCount).toBe(1);
+    expect(runtime.messenger.sentMessages).toHaveLength(0);
+
+    const persisted = await runtime.tripRepository.getById(trip.tripId);
+    expect(persisted?.pendingDispatch?.imageAsset).toBeTruthy();
+    expect(persisted?.pendingDispatch?.postcard).toBeNull();
+
+    const resumedService = new OpenClawTravelCompanionService({
+      personaRepository: new JsonPersonaRepository(runtime.paths.personasDir),
+      tripRepository: new JsonTripRepository(runtime.paths.tripsDir),
+      artifactStore: new JsonArtifactStore(runtime.paths.artifactsDir),
+      scheduler: runtime.scheduler,
+      messenger: runtime.messenger,
+      grounding: runtime.grounding,
+      imageGeneration: runtime.imageGeneration,
+      clock: runtime.clock,
+      logger: new JsonlFileLogger(runtime.paths.logsDir),
+    });
+
+    await resumedService.runTrip(trip.tripId);
+    expect(imageGenerateCount).toBe(1);
+    expect(captionAttemptCount).toBe(2);
+    expect(runtime.messenger.sentMessages).toHaveLength(1);
+  });
+
   it("deduplicates delivery after crashing after a message send", async () => {
     const runtime = await createTestRuntime({
       hooks: {

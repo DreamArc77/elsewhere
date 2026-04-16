@@ -11,6 +11,7 @@ import {
   TripPhase,
   TripPlan,
 } from "./types.js";
+import { parseItineraryTimeToken } from "./itinerary-time.js";
 
 const EXTRA_MESSAGE_THRESHOLD_MINUTES = 150;
 const DEFAULT_SINGLE_SLOT_MINUTES = 30;
@@ -48,18 +49,6 @@ function parseDateParts(date: string): {
     year: Number(match[1]),
     month: Number(match[2]),
     day: Number(match[3]),
-  };
-}
-
-function parseTimeParts(time: string): { hour: number; minute: number } {
-  const match = time.trim().match(/^(\d{1,2}):(\d{2})$/u);
-  if (!match) {
-    throw new Error(`Invalid itinerary time: ${time}`);
-  }
-
-  return {
-    hour: Number(match[1]),
-    minute: Number(match[2]),
   };
 }
 
@@ -165,25 +154,6 @@ function formatLocalIso(date: Date, timeZone: string): string {
   ).padStart(2, "0")}:00`;
 }
 
-function parseTimeToken(token: string): {
-  hour: number;
-  minute: number;
-  dayOffset: number;
-} {
-  const match = token
-    .trim()
-    .match(/^(\d{1,2}:\d{2})(?:\s*\(\+(\d+)\))?$/u);
-  if (!match) {
-    throw new Error(`Invalid itinerary time: ${token}`);
-  }
-
-  const time = parseTimeParts(match[1]!);
-  return {
-    ...time,
-    dayOffset: Number(match[2] ?? "0"),
-  };
-}
-
 function parseTimeSlot(
   date: string,
   timeSlot: string,
@@ -200,9 +170,12 @@ function parseTimeSlot(
   }
 
   const { year, month, day } = parseDateParts(date);
-  const startParts = parseTimeToken((rangeMatch?.[1] ?? singleMatch?.[1])!);
+  const startParts = parseItineraryTimeToken(
+    (rangeMatch?.[1] ?? singleMatch?.[1])!,
+    { baseDate: date },
+  );
   const endParts = rangeMatch
-    ? parseTimeToken(rangeMatch[2]!)
+    ? parseItineraryTimeToken(rangeMatch[2]!, { baseDate: date })
     : {
         hour: startParts.hour,
         minute: startParts.minute + DEFAULT_SINGLE_SLOT_MINUTES,
@@ -684,7 +657,9 @@ function resolveTransportWindow(input: {
   arriveEnd: Date;
 } {
   const baseDate = parseDateParts(input.date);
-  const arrivalToken = parseTimeToken(input.arrivalTime);
+  const arrivalToken = parseItineraryTimeToken(input.arrivalTime, {
+    baseDate: input.date,
+  });
   const arrivalDate = addDaysToDateParts({
     ...baseDate,
     dayOffset: arrivalToken.dayOffset,
@@ -696,7 +671,9 @@ function resolveTransportWindow(input: {
     timeZone: input.arrivalTimeZone,
   });
 
-  const departureToken = parseTimeToken(input.departureTime);
+  const departureToken = parseItineraryTimeToken(input.departureTime, {
+    baseDate: input.date,
+  });
   let departAt = arriveAt;
   const offsets =
     input.referenceDirection === "departure" ? [-2, -1, 0, 1] : [0, 1, 2];

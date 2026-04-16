@@ -267,9 +267,7 @@ describe("travel companion inbound takeover hook", () => {
     expect(binding?.bindingId).toBe("binding-official");
     expect(binding?.mode).toBe("companion-exclusive");
     expect(runtime.messenger.sentReplies).toHaveLength(1);
-    expect(runtime.messenger.sentReplies[0]?.text).toContain(
-      "Travel companion takeover is now active.",
-    );
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("Ta 模式已开启");
 
     const logFiles = await readdir(runtime.paths.logsDir);
     const payload = (

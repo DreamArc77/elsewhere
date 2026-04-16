@@ -614,12 +614,18 @@ export function renderSetupStepPrompt(session: SetupSession): string {
 
 export function buildIdleGuideMessage(persona: StoredPersonaProfile): string {
   return [
-    `${persona.name} 创建完成。`,
-    "",
     "接下来你可以直接告诉我一个想去的目的地，",
     "比如：东京 / 北京 / 巴黎",
     "我就会开始准备这次旅行。",
   ].join("\n");
+}
+
+export function buildPersonaCreatedMessage(
+  persona: StoredPersonaProfile,
+): string {
+  return [`${persona.name} 创建完成。`, "", buildIdleGuideMessage(persona)].join(
+    "\n",
+  );
 }
 
 export function buildPersonaUpdatedMessage(persona: StoredPersonaProfile): string {
@@ -640,7 +646,7 @@ export function buildOnboardingGateMessage(input: {
   hasSetupSession: boolean;
 }): string {
   if (input.hasSetupSession) {
-    return "Ta 的 onboarding 还没完成。继续用 /travel-companion setup，然后按提示一步步回复就行。";
+    return "Ta 的资料还没配完。继续用 /travel-companion setup，然后按提示一步步回复就行。";
   }
 
   const missing: string[] = [];
@@ -655,10 +661,9 @@ export function buildOnboardingGateMessage(input: {
   }
 
   return [
-    "这条会话已经进入 Ta 模式，但 onboarding 还没完成。",
-    `还缺：${missing.join("、")}`,
+    `还差最后几项配置：${missing.join("、")}`,
     "先运行 /travel-companion setup，我会一步步带你配完 Ta 的资料。",
-    "模型和 key 可以单独用 /travel-companion model 配。",
+    "模型和 key 也可以单独用 /travel-companion model 配。",
   ].join("\n");
 }
 

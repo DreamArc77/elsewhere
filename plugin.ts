@@ -22,6 +22,7 @@ export default definePluginEntry({
         planningModel: { type: "string" },
         textModel: { type: "string" },
         imageModel: { type: "string" },
+        geminiBaseUrl: { type: "string" },
       },
     },
     validate(value) {

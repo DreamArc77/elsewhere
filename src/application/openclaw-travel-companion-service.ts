@@ -78,10 +78,16 @@ export class OpenClawTravelCompanionService {
   ) {}
 
   async createPersona(profile: PersonaProfile): Promise<StoredPersonaProfile> {
+    const originCity = profile.originCity || profile.homeCity;
+    if (!originCity) {
+      throw new Error("Persona originCity is required.");
+    }
+
     const persona: StoredPersonaProfile = {
       personaId: randomUUID(),
       createdAt: nowIso(this.dependencies.clock),
       ...profile,
+      originCity,
     };
 
     await this.dependencies.personaRepository.save(persona);
@@ -265,7 +271,9 @@ export class OpenClawTravelCompanionService {
       }
 
       if (record.pendingDispatch) {
-        return await this.dispatchPending(record, runId, startedAt);
+        return record.pendingDispatch.postcard
+          ? await this.dispatchPending(record, runId, startedAt)
+          : await this.finalizePendingPostcard(record, runId, startedAt);
       }
 
       if (!currentStep) {
@@ -439,33 +447,10 @@ export class OpenClawTravelCompanionService {
         bytesBase64: image.bytesBase64,
       });
 
-      const captionImagePrompt = sanitizeImagePromptForCaption(imagePrompt);
-      const captionResult = await this.dependencies.grounding.composeCaption({
-        tripId: record.tripId,
-        persona,
-        request: record.request,
-        plan: record.plan,
-        phase: step.phase,
-        day: step.day,
-        stepContext: step.context,
-        grounding,
-        resolvedState,
-        imagePrompt: captionImagePrompt,
-      });
-
-      const pendingPostcard: Postcard = {
-        tripId: record.tripId,
-        phase: step.phase,
-        caption: captionResult.caption,
-        imageAsset: imagePath,
-        sentAt: "",
-      };
-
       const updatedRecord: TripRecord = {
         ...record,
         state: {
           ...record.state,
-          pendingPostcard,
           artifacts: [
             ...record.state.artifacts,
             {
@@ -491,11 +476,12 @@ export class OpenClawTravelCompanionService {
           phase: step.phase,
           day: step.day,
           shotKind: imageIntent.shotKind,
-          postcard: pendingPostcard,
+          postcard: null,
           dedupeKey,
           grounding,
           imagePrompt,
           imageSummary: image.imageSummary,
+          imageAsset: imagePath,
           artifactIds: [groundingArtifactId, imageArtifactId],
         },
         updatedAt: nowIso(this.dependencies.clock),
@@ -507,9 +493,10 @@ export class OpenClawTravelCompanionService {
         tripId: record.tripId,
         runId,
         phase: step.phase,
-        event: "postcard.pending",
-        decision: "Persisted postcard before delivery for idempotency.",
-        provider: captionResult.provider,
+        event: "postcard.image_persisted",
+        decision:
+          "Persisted the generated postcard image before caption generation so retries can reuse it.",
+        provider: image.provider,
         status: "success",
         startedAt,
         finishedAt: nowIso(this.dependencies.clock),
@@ -519,8 +506,7 @@ export class OpenClawTravelCompanionService {
         },
       });
 
-      await this.dependencies.hooks?.afterPendingSaved?.(updatedRecord);
-      return this.dispatchPending(updatedRecord, runId, startedAt);
+      return await this.finalizePendingPostcard(updatedRecord, runId, startedAt);
     } finally {
       inFlightPostcardPreparationKeys.delete(dedupeKey);
       const releasedAt = nowIso(this.dependencies.clock);
@@ -539,6 +525,93 @@ export class OpenClawTravelCompanionService {
     }
   }
 
+  private async finalizePendingPostcard(
+    record: TripRecord,
+    runId: string,
+    startedAt: string,
+  ): Promise<TripRecord> {
+    const pending = record.pendingDispatch;
+    if (!pending) {
+      return record;
+    }
+    if (pending.postcard) {
+      return await this.dispatchPending(record, runId, startedAt);
+    }
+
+    const step =
+      record.timeline.find((candidate) => candidate.stepId === pending.stepId) ??
+      getCurrentStep(record);
+    if (!step?.context) {
+      throw new Error(
+        `Pending postcard step context not found for ${record.tripId}:${pending.stepId}`,
+      );
+    }
+
+    const persona = await this.requirePersona(record.personaId);
+    const resolvedState = resolveAgentStateForTimelineStep({
+      record,
+      step,
+      persona,
+    });
+    const captionImagePrompt = sanitizeImagePromptForCaption(pending.imagePrompt);
+    const captionResult = await this.dependencies.grounding.composeCaption({
+      tripId: record.tripId,
+      persona,
+      request: record.request,
+      plan: record.plan,
+      phase: step.phase,
+      day: step.day,
+      stepContext: step.context,
+      grounding: pending.grounding,
+      resolvedState,
+      imagePrompt: captionImagePrompt,
+    });
+
+    const pendingPostcard: Postcard = {
+      tripId: record.tripId,
+      phase: pending.phase,
+      caption: captionResult.caption,
+      imageAsset: pending.imageAsset,
+      sentAt: "",
+    };
+
+    const updatedRecord: TripRecord = {
+      ...record,
+      state: {
+        ...record.state,
+        pendingPostcard,
+      },
+      pendingDispatch: {
+        ...pending,
+        postcard: pendingPostcard,
+      },
+      updatedAt: nowIso(this.dependencies.clock),
+      lastRunId: runId,
+    };
+
+    await this.dependencies.tripRepository.save(updatedRecord);
+    await this.log({
+      tripId: record.tripId,
+      runId,
+      phase: pending.phase,
+      event: "postcard.pending",
+      decision:
+        "Persisted postcard caption before delivery for idempotency and caption-only retry recovery.",
+      provider: captionResult.provider,
+      status: "success",
+      startedAt,
+      finishedAt: nowIso(this.dependencies.clock),
+      details: {
+        dedupeKey: pending.dedupeKey,
+        shotKind: pending.shotKind,
+        reusedImage: true,
+      },
+    });
+
+    await this.dependencies.hooks?.afterPendingSaved?.(updatedRecord);
+    return await this.dispatchPending(updatedRecord, runId, startedAt);
+  }
+
   private async dispatchPending(
     record: TripRecord,
     runId: string,
@@ -547,6 +620,9 @@ export class OpenClawTravelCompanionService {
     const pending = record.pendingDispatch;
     if (!pending) {
       return record;
+    }
+    if (!pending.postcard) {
+      return await this.finalizePendingPostcard(record, runId, startedAt);
     }
     const lockAt = nowIso(this.dependencies.clock);
     if (inFlightPostcardDeliveryKeys.has(pending.dedupeKey)) {

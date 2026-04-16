@@ -64,6 +64,23 @@ describe("state machine", () => {
     expect(lateStep?.context?.timing.timeZone).toBe("Asia/Tokyo");
   });
 
+  it("builds the timeline even when transport legs contain full datetime strings", () => {
+    const plan = buildPlan(3);
+    plan.transportation.departure.departure.time = "2026-04-10 08:30";
+    plan.transportation.departure.arrival.time = "2026-04-10 12:30";
+    plan.transportation.return.departure.time = "2026-04-12 21:30";
+    plan.transportation.return.arrival.time = "2026-04-13 01:10";
+
+    const timeline = buildTimeline(
+      plan,
+      new Date("2026-04-09T00:00:00.000Z"),
+    );
+
+    expect(timeline[0]?.phase).toBe("planning");
+    expect(timeline.find((step) => step.phase === "departing")).toBeTruthy();
+    expect(timeline.find((step) => step.phase === "returning")).toBeTruthy();
+  });
+
   it("uses the destination local time zone for Chinese mainland destinations", () => {
     const qingdaoPlan = buildFixtureTripPlan({
       tripId: "trip-qingdao",

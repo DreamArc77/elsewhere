@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("openclaw/plugin-sdk/simple-completion-runtime", () => ({
+vi.mock("openclaw/plugin-sdk/agent-runtime", () => ({
   prepareSimpleCompletionModel: vi.fn(),
   completeWithPreparedSimpleCompletionModel: vi.fn(),
   extractAssistantText: vi.fn(),
@@ -10,7 +10,7 @@ import {
   completeWithPreparedSimpleCompletionModel,
   extractAssistantText,
   prepareSimpleCompletionModel,
-} from "openclaw/plugin-sdk/simple-completion-runtime";
+} from "openclaw/plugin-sdk/agent-runtime";
 
 import { resolveAgentState } from "../src/domain/business-situation.js";
 import { GeminiRestGroundingAdapter } from "../src/infrastructure/gemini-rest-adapters.js";
@@ -147,10 +147,7 @@ describe("text provider routing", () => {
         agent: {
           defaults: {
             provider: "openai",
-            model: {
-              id: "gpt-5.4-mini",
-              provider: "openai",
-            },
+            model: "gpt-5.4-mini",
           },
         },
       } as never,
@@ -194,5 +191,100 @@ describe("text provider routing", () => {
       }),
     );
     expect(completeWithPreparedSimpleCompletionModel).toHaveBeenCalledOnce();
+  });
+
+  it("prefers configured host default model ref when config overrides runtime defaults", async () => {
+    vi.mocked(prepareSimpleCompletionModel).mockResolvedValue({
+      model: {} as never,
+      auth: {
+        apiKey: "host-key",
+        source: "test",
+        mode: "api-key",
+      },
+    });
+    vi.mocked(completeWithPreparedSimpleCompletionModel).mockResolvedValue(
+      {} as never,
+    );
+    vi.mocked(extractAssistantText).mockReturnValue("ok");
+
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Aki",
+      homeCity: "Hong Kong",
+      traits: ["gentle"],
+      relationship: "travel companion",
+      toneStyle: "soft",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+    const step = trip.timeline.find((item) => item.context)?.context;
+    if (!step) {
+      throw new Error("Expected trip timeline to include a postcard step context.");
+    }
+
+    const adapter = new GeminiRestGroundingAdapter({
+      apiKey: "unused-for-host-default",
+      textProviderResolver: async () => ({ kind: "host-default" }),
+      runtime: {
+        config: {
+          loadConfig: () =>
+            ({
+              agents: {
+                defaults: {
+                  model: {
+                    primary: "openai/gpt-5.4",
+                  },
+                },
+              },
+            }) as never,
+        },
+        agent: {
+          defaults: {
+            provider: "openai",
+            model: "gpt-5.4-mini",
+          },
+        },
+      } as never,
+    });
+
+    const resolvedState = resolveAgentState({
+      activeTrip: trip,
+      now: new Date(step.timing.startUtc),
+      persona,
+    });
+
+    await adapter.composeCaption({
+      tripId: trip.tripId,
+      persona,
+      request: trip.request,
+      plan: trip.plan,
+      phase: step.phase,
+      day: step.day,
+      stepContext: step,
+      grounding: {
+        phase: step.phase,
+        day: step.day,
+        locality: "鑷繁鐨勬埧闂翠腑",
+        weatherSummary: "Sunny, 10-22掳C",
+        transitSummary: "Preparing to depart from Hong Kong",
+        venueSummary: "Packing at home before departure.",
+        photoBrief: "A low-stakes packing snapshot before leaving.",
+        sensoryHighlights: ["open suitcase", "window light"],
+        groundingSources: [],
+      },
+      resolvedState,
+      imagePrompt: "鏅€氱殑鍑哄彂鍓嶉殢鎵嬫媿",
+    });
+
+    expect(prepareSimpleCompletionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        modelId: "gpt-5.4",
+      }),
+    );
   });
 });

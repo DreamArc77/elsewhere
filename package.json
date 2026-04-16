@@ -7,12 +7,12 @@
   "openclaw": {
     "extensions": ["./plugin.ts"],
     "compat": {
-      "pluginApi": ">=2026.4.9",
-      "minGatewayVersion": "2026.4.9"
+      "pluginApi": ">=2026.3.28",
+      "minGatewayVersion": "2026.3.28"
     },
     "build": {
-      "openclawVersion": "2026.4.9",
-      "pluginSdkVersion": "2026.4.9"
+      "openclawVersion": "2026.3.28",
+      "pluginSdkVersion": "2026.3.28"
     }
   },
   "scripts": {
