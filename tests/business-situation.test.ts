@@ -299,6 +299,8 @@ describe("companion business situation", () => {
 
     expect(anchor?.snapshot?.situation.substate).toBe("planning");
     expect(anchor?.snapshot?.currentActivity).toBeUndefined();
-    expect(anchor?.snapshot?.nextActivity?.location).toBeTruthy();
+    expect(anchor?.snapshot?.nextActivity?.location).toBe(
+      "Final packing in Hong Kong",
+    );
   });
 });

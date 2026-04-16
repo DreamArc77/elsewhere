@@ -824,6 +824,30 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
       departureWindow.beforeStart.getTime(),
     ),
   );
+  const hasPackingWindow =
+    planningEndsAt.getTime() < departureWindow.beforeStart.getTime();
+  const hasBeforeDepartureWindow =
+    departureWindow.beforeStart.getTime() < departureWindow.departStart.getTime();
+  const planningNextActivity = hasPackingWindow
+    ? packingActivity
+    : hasBeforeDepartureWindow
+      ? beforeDepartureActivity
+      : departureActivity;
+  const packingPreviousActivity = planningActivity;
+  const packingNextActivity = hasBeforeDepartureWindow
+    ? beforeDepartureActivity
+    : departureActivity;
+  const beforeDeparturePreviousActivity = hasPackingWindow
+    ? packingActivity
+    : planningActivity;
+  const departurePreviousActivity = hasBeforeDepartureWindow
+    ? beforeDepartureActivity
+    : hasPackingWindow
+      ? packingActivity
+      : planningActivity;
+  const departureNextActivity = arrivalActivity;
+  const arrivalPreviousActivity = departureActivity;
+  const arrivalNextActivity = firstDay.activities[0];
   const syntheticSteps: TimelineStep[] = [
     createSyntheticStep({
       stepId: toId("planning", 0, "planning"),
@@ -843,7 +867,7 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
         activityIndex: -2,
         activity: planningActivity,
         previousActivity: undefined,
-        nextActivity: firstDay.activities[0],
+        nextActivity: planningNextActivity,
         timing: planningTiming,
       }),
       stateOverride: {
@@ -879,8 +903,8 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
           },
           activityIndex: -1,
           activity: packingActivity,
-          previousActivity: undefined,
-          nextActivity: firstDay.activities[0],
+          previousActivity: packingPreviousActivity,
+          nextActivity: packingNextActivity,
           timing: {
             ...planningTiming,
             startUtc: planningEndsAt.toISOString(),
@@ -922,8 +946,8 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
           itinerary: firstDay,
           activityIndex: -1,
           activity: beforeDepartureActivity,
-          previousActivity: undefined,
-          nextActivity: firstDay.activities[0],
+          previousActivity: beforeDeparturePreviousActivity,
+          nextActivity: departureActivity,
           timing: {
             rawDate: firstDay.date,
             rawTimeSlot: `${plan.transportation.departure.departure.time}`,
@@ -972,8 +996,8 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
         itinerary: firstDay,
         activityIndex: -1,
         activity: departureActivity,
-        previousActivity: undefined,
-        nextActivity: firstDay.activities[0],
+        previousActivity: departurePreviousActivity,
+        nextActivity: departureNextActivity,
         timing: {
           rawDate: firstDay.date,
           rawTimeSlot: `${plan.transportation.departure.departure.time} - ${plan.transportation.departure.arrival.time}`,
@@ -1029,8 +1053,8 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
           itinerary: firstDay,
           activityIndex: -1,
           activity: departureActivity,
-          previousActivity: undefined,
-          nextActivity: firstDay.activities[0],
+          previousActivity: departurePreviousActivity,
+          nextActivity: departureNextActivity,
           timing: {
             rawDate: firstDay.date,
             rawTimeSlot: `${plan.transportation.departure.departure.time} - ${plan.transportation.departure.arrival.time}`,
@@ -1082,8 +1106,8 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
         itinerary: firstDay,
         activityIndex: -1,
         activity: arrivalActivity,
-        previousActivity: undefined,
-        nextActivity: firstDay.activities[0],
+        previousActivity: arrivalPreviousActivity,
+        nextActivity: arrivalNextActivity,
         timing: {
           rawDate: firstDay.date,
           rawTimeSlot: `${plan.transportation.departure.arrival.time}`,
@@ -1135,7 +1159,7 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
         activityIndex: -1,
         activity: returnActivity,
         previousActivity: lastDay.activities[lastDay.activities.length - 1],
-        nextActivity: undefined,
+        nextActivity: returnArrivalActivity,
         timing: {
           rawDate: lastDay.date,
           rawTimeSlot: `${plan.transportation.return.departure.time} - ${plan.transportation.return.arrival.time}`,
@@ -1192,7 +1216,7 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
           activityIndex: -1,
           activity: returnActivity,
           previousActivity: lastDay.activities[lastDay.activities.length - 1],
-          nextActivity: undefined,
+          nextActivity: returnArrivalActivity,
           timing: {
             rawDate: lastDay.date,
             rawTimeSlot: `${plan.transportation.return.departure.time} - ${plan.transportation.return.arrival.time}`,
@@ -1244,7 +1268,7 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
         itinerary: lastDay,
         activityIndex: -1,
         activity: returnArrivalActivity,
-        previousActivity: lastDay.activities[lastDay.activities.length - 1],
+        previousActivity: returnActivity,
         nextActivity: undefined,
         timing: {
           rawDate: lastDay.date,

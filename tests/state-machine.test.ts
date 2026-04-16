@@ -118,6 +118,26 @@ describe("state machine", () => {
     ).toBe(activityCount);
   });
 
+  it("keeps synthetic planning-state nextActivity inside the synthetic chain", () => {
+    const plan = buildPlan(3);
+    const timeline = buildTimeline(plan, new Date("2026-04-09T00:00:00.000Z"));
+    const planningStep = timeline.find((step) => step.stepId === "planning:0:planning");
+    const packingStep = timeline.find((step) => step.stepId === "planning:0:packing");
+    const beforeDepartureStep = timeline.find(
+      (step) => step.stepId === "departing:1:before_departure",
+    );
+
+    expect(planningStep?.context?.nextActivity?.location).toBe(
+      packingStep?.context?.activity.location,
+    );
+    expect(packingStep?.context?.nextActivity?.location).toBe(
+      beforeDepartureStep?.context?.activity.location,
+    );
+    expect(beforeDepartureStep?.context?.nextActivity?.location).toBe(
+      `${plan.transportation.departure.departure.station} -> ${plan.transportation.departure.arrival.station}`,
+    );
+  });
+
   it("advances through steps and completes after the final postcard", () => {
     const plan = buildPlan(3);
     const timeline = buildTimeline(plan, new Date("2026-04-09T00:00:00.000Z"));
