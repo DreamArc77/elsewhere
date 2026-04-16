@@ -4,6 +4,7 @@ import {
   ConversationBindingRecord,
   SetupSession,
   SetupSessionDraft,
+  SetupSessionKind,
   StoredPersonaProfile,
   TravelCompanionGlobalConfig,
   TravelCompanionTextProviderKind,
@@ -11,6 +12,186 @@ import {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function displayValue(value: string | undefined): string {
+  return value?.trim() ? value.trim() : "未设置";
+}
+
+function displayList(values: string[] | undefined): string {
+  return values?.length ? values.join("、") : "未设置";
+}
+
+function isPersonaEditSession(session: SetupSession): boolean {
+  return session.kind === "persona" && Boolean(session.personaTargetId);
+}
+
+function shouldKeepCurrent(text: string, session: SetupSession): boolean {
+  return isPersonaEditSession(session) && text === "0";
+}
+
+function advancePersonaStep(
+  session: SetupSession,
+  nextStep:
+    | "name"
+    | "origin_city"
+    | "traits"
+    | "relationship"
+    | "tone"
+    | "persona_review",
+): SetupSession["step"] {
+  if (session.returnToReview && nextStep !== "persona_review") {
+    return "persona_review";
+  }
+
+  return nextStep;
+}
+
+function buildPersonaSummary(session: SetupSession): string[] {
+  return [
+    `名字：${displayValue(session.draft.name)}`,
+    `默认出发城市：${displayValue(
+      session.draft.originCity || session.draft.homeCity,
+    )}`,
+    `特征：${displayList(session.draft.traits)}`,
+    `关系：${displayValue(session.draft.relationship)}`,
+    `说话风格：${displayValue(session.draft.toneStyle)}`,
+  ];
+}
+
+function buildCurrentValuePrompt(input: {
+  currentValue: string;
+  body: string[];
+}): string {
+  return [
+    `当前值：${input.currentValue}`,
+    ...input.body,
+    "回复新内容，或回复 0",
+  ].join("\n");
+}
+
+function buildPersonaStepPrompt(session: SetupSession): string {
+  const editing = isPersonaEditSession(session);
+
+  switch (session.step) {
+    case "persona_intro":
+      return [
+        "我们先把 Ta 建起来。",
+        "",
+        "接下来我会依次确认：",
+        "1. 名字",
+        "2. 默认出发城市",
+        "3. 特征",
+        "4. 关系",
+        "5. 说话风格",
+        "6. 参考图",
+        "",
+        "准备好了回复 1",
+      ].join("\n");
+    case "existing_persona_confirm":
+      return [
+        "当前已经有 Ta 的设定了。",
+        "",
+        "这个命令会用于修改或覆盖现有资料。",
+        "回复：",
+        "1. 继续修改",
+        "2. 取消",
+      ].join("\n");
+    case "name":
+      return editing
+        ? buildCurrentValuePrompt({
+            currentValue: displayValue(session.draft.name),
+            body: ["Ta 叫什么？"],
+          })
+        : "Ta 叫什么？";
+    case "origin_city":
+      return editing
+        ? buildCurrentValuePrompt({
+            currentValue: displayValue(
+              session.draft.originCity || session.draft.homeCity,
+            ),
+            body: ["Ta 默认从哪座城市出发？"],
+          })
+        : "Ta 默认从哪座城市出发？";
+    case "traits":
+      return editing
+        ? buildCurrentValuePrompt({
+            currentValue: displayList(session.draft.traits),
+            body: [
+              "用几个词描述一下 Ta 的特征。",
+              "例如：地雷系、敏感、黏人",
+            ],
+          })
+        : ["用几个词描述一下 Ta 的特征。", "例如：地雷系、敏感、黏人"].join(
+            "\n",
+          );
+    case "relationship":
+      return editing
+        ? buildCurrentValuePrompt({
+            currentValue: displayValue(session.draft.relationship),
+            body: [
+              "Ta 和你是什么关系？",
+              "例如：异地恋女友、暧昧对象、旅行搭子",
+            ],
+          })
+        : [
+            "Ta 和你是什么关系？",
+            "例如：异地恋女友、暧昧对象、旅行搭子",
+          ].join("\n");
+    case "tone":
+      return editing
+        ? buildCurrentValuePrompt({
+            currentValue: displayValue(session.draft.toneStyle),
+            body: [
+              "Ta 平时说话是什么感觉？",
+              "例如：病娇、撒娇、冷淡、元气",
+            ],
+          })
+        : [
+            "Ta 平时说话是什么感觉？",
+            "例如：病娇、撒娇、冷淡、元气",
+          ].join("\n");
+    case "persona_review":
+      return [
+        "目前资料如下：",
+        "",
+        ...buildPersonaSummary(session),
+        "",
+        "回复：",
+        "1. 确认并继续处理参考图",
+        "2. 修改名字",
+        "3. 修改默认出发城市",
+        "4. 修改特征",
+        "5. 修改关系",
+        "6. 修改说话风格",
+        `7. 取消本次${editing ? "修改" : "设置"}`,
+      ].join("\n");
+    case "reference_photo_choice":
+      if (editing && session.draft.referenceImageAsset) {
+        return [
+          "当前已有参考图。",
+          "",
+          "回复：",
+          "1. 上传一张新参考图",
+          "2. 沿用当前参考图",
+          "3. 返回资料确认",
+        ].join("\n");
+      }
+
+      return [
+        "最后一步，处理参考图。",
+        "",
+        "回复：",
+        "1. 上传参考图",
+        "2. 返回资料确认",
+      ].join("\n");
+    case "reference_photo":
+      return "好，直接发一张图片就行。";
+    case "complete":
+      return editing ? "Ta 资料已更新。" : "Ta 创建完成。";
+    default:
+      return "继续完成 Ta 的资料。";
+  }
 }
 
 export interface OnboardingReadiness {
@@ -39,14 +220,60 @@ export function evaluateOnboardingReadiness(input: {
   };
 }
 
-export function createSetupSession(
-  existing?: SetupSessionDraft,
-): SetupSession {
-  const timestamp = nowIso();
+export function buildPersonaSetupDraft(
+  persona?: StoredPersonaProfile | null,
+): SetupSessionDraft {
+  if (!persona) {
+    return {};
+  }
+
   return {
-    step: "name",
+    name: persona.name,
+    originCity: persona.originCity || persona.homeCity,
+    traits: [...persona.traits],
+    relationship: persona.relationship,
+    toneStyle: persona.toneStyle,
+    referenceImageAsset: persona.referenceImageAsset,
+  };
+}
+
+export function buildModelSetupDraft(
+  config: TravelCompanionGlobalConfig,
+): SetupSessionDraft {
+  return {
+    textProviderKind: config.textProvider?.kind,
+    openaiBaseUrl:
+      config.textProvider?.kind === "openai-compatible"
+        ? config.textProvider.baseUrl
+        : undefined,
+    openaiApiKey:
+      config.textProvider?.kind === "openai-compatible"
+        ? config.textProvider.apiKey
+        : undefined,
+    openaiModel:
+      config.textProvider?.kind === "openai-compatible"
+        ? config.textProvider.model
+        : undefined,
+  };
+}
+
+export function createSetupSession(input?: {
+  kind?: SetupSessionKind;
+  draft?: SetupSessionDraft;
+  step?: SetupSession["step"];
+  personaTargetId?: string;
+}): SetupSession {
+  const timestamp = nowIso();
+  const kind = input?.kind ?? "persona";
+
+  return {
+    kind,
+    personaTargetId: input?.personaTargetId,
+    step:
+      input?.step ?? (kind === "model" ? "text_provider" : "persona_intro"),
     awaitingReferencePhoto: false,
-    draft: existing ?? {},
+    returnToReview: false,
+    draft: input?.draft ?? {},
     startedAt: timestamp,
     updatedAt: timestamp,
   };
@@ -54,7 +281,7 @@ export function createSetupSession(
 
 export function normalizeTraitsInput(value: string): string[] {
   return value
-    .split(/[,\n，]/u)
+    .split(/[,\n，、]/u)
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -87,6 +314,7 @@ export function advanceSetupSessionWithText(input: {
 }): {
   session: SetupSession;
   completed: boolean;
+  cancelled?: boolean;
   configPatch?: Partial<TravelCompanionGlobalConfig>;
 } {
   const text = input.text.trim();
@@ -102,39 +330,144 @@ export function advanceSetupSessionWithText(input: {
     updatedAt,
   };
 
+  if (input.session.kind === "persona") {
+    switch (input.session.step) {
+      case "persona_intro":
+        if (text !== "1") {
+          throw new Error("准备好了就回复 1。");
+        }
+        next.step = "name";
+        return { session: next, completed: false };
+      case "existing_persona_confirm":
+        if (text === "1") {
+          next.step = "name";
+          return { session: next, completed: false };
+        }
+        if (text === "2") {
+          return { session: next, completed: false, cancelled: true };
+        }
+        throw new Error("请回复 1 继续修改，或回复 2 取消。");
+      case "name":
+        if (!shouldKeepCurrent(text, input.session)) {
+          next.draft.name = text;
+        }
+        next.step = advancePersonaStep(input.session, "origin_city");
+        next.returnToReview = false;
+        return { session: next, completed: false };
+      case "origin_city":
+        if (!shouldKeepCurrent(text, input.session)) {
+          next.draft.originCity = text;
+        }
+        next.step = advancePersonaStep(input.session, "traits");
+        next.returnToReview = false;
+        return { session: next, completed: false };
+      case "traits":
+        if (!shouldKeepCurrent(text, input.session)) {
+          next.draft.traits = normalizeTraitsInput(text);
+        }
+        next.step = advancePersonaStep(input.session, "relationship");
+        next.returnToReview = false;
+        return { session: next, completed: false };
+      case "relationship":
+        if (!shouldKeepCurrent(text, input.session)) {
+          next.draft.relationship = text;
+        }
+        next.step = advancePersonaStep(input.session, "tone");
+        next.returnToReview = false;
+        return { session: next, completed: false };
+      case "tone":
+        if (!shouldKeepCurrent(text, input.session)) {
+          next.draft.toneStyle = text;
+        }
+        next.step = "persona_review";
+        next.returnToReview = false;
+        return { session: next, completed: false };
+      case "persona_review":
+        switch (text) {
+          case "1":
+            next.step = "reference_photo_choice";
+            next.returnToReview = false;
+            return { session: next, completed: false };
+          case "2":
+            next.step = "name";
+            next.returnToReview = true;
+            return { session: next, completed: false };
+          case "3":
+            next.step = "origin_city";
+            next.returnToReview = true;
+            return { session: next, completed: false };
+          case "4":
+            next.step = "traits";
+            next.returnToReview = true;
+            return { session: next, completed: false };
+          case "5":
+            next.step = "relationship";
+            next.returnToReview = true;
+            return { session: next, completed: false };
+          case "6":
+            next.step = "tone";
+            next.returnToReview = true;
+            return { session: next, completed: false };
+          case "7":
+            return { session: next, completed: false, cancelled: true };
+          default:
+            throw new Error("请回复 1-7 里的一个选项。");
+        }
+      case "reference_photo_choice":
+        if (text === "1") {
+          next.step = "reference_photo";
+          next.awaitingReferencePhoto = true;
+          return { session: next, completed: false };
+        }
+        if (
+          text === "2" &&
+          isPersonaEditSession(input.session) &&
+          Boolean(input.session.draft.referenceImageAsset)
+        ) {
+          next.step = "complete";
+          return { session: next, completed: true };
+        }
+        if (
+          text === "2" &&
+          !(
+            isPersonaEditSession(input.session) &&
+            input.session.draft.referenceImageAsset
+          )
+        ) {
+          next.step = "persona_review";
+          return { session: next, completed: false };
+        }
+        if (text === "3" && isPersonaEditSession(input.session)) {
+          next.step = "persona_review";
+          return { session: next, completed: false };
+        }
+        throw new Error(
+          isPersonaEditSession(input.session) &&
+            input.session.draft.referenceImageAsset
+            ? "请回复 1、2 或 3。"
+            : "请回复 1 或 2。",
+        );
+      case "complete":
+        return { session: next, completed: true };
+      default:
+        throw new Error("当前 persona setup 步骤不接收文字输入。");
+    }
+  }
+
   switch (input.session.step) {
-    case "name":
-      next.draft.name = text;
-      next.step = "home_city";
-      break;
-    case "home_city":
-      next.draft.homeCity = text;
-      next.step = "traits";
-      break;
-    case "traits":
-      next.draft.traits = normalizeTraitsInput(text);
-      next.step = "relationship";
-      break;
-    case "relationship":
-      next.draft.relationship = text;
-      next.step = "tone";
-      break;
-    case "tone":
-      next.draft.toneStyle = text;
-      next.step = "reference_photo";
-      next.awaitingReferencePhoto = true;
-      break;
     case "text_provider": {
       const choice = parseTextProviderChoice(text);
       if (!choice) {
         throw new Error(
-          "没看懂这个模型选项。回 1/2/3，或者直接回复 default / gemini / openai-compatible。",
+          "没看懂这个模型选项。回 1/2/3，或者直接回 default / gemini / openai-compatible。",
         );
       }
       next.draft.textProviderKind = choice;
       if (choice === "openai-compatible") {
         next.step = "openai_base_url";
-      } else if (hasGeminiKeyAlready) {
+        return { session: next, completed: false };
+      }
+      if (hasGeminiKeyAlready) {
         next.step = "complete";
         return {
           session: next,
@@ -143,9 +476,8 @@ export function advanceSetupSessionWithText(input: {
             textProvider: { kind: choice },
           },
         };
-      } else {
-        next.step = "gemini_api_key";
       }
+      next.step = "gemini_api_key";
       return {
         session: next,
         completed: false,
@@ -157,11 +489,11 @@ export function advanceSetupSessionWithText(input: {
     case "openai_base_url":
       next.draft.openaiBaseUrl = text;
       next.step = "openai_api_key";
-      break;
+      return { session: next, completed: false };
     case "openai_api_key":
       next.draft.openaiApiKey = text;
       next.step = "openai_model";
-      break;
+      return { session: next, completed: false };
     case "openai_model":
       next.draft.openaiModel = text;
       if (hasGeminiKeyAlready) {
@@ -210,28 +542,28 @@ export function advanceSetupSessionWithText(input: {
               : { kind: next.draft.textProviderKind ?? "host-default" },
         },
       };
+    case "complete":
+      return { session: next, completed: true };
     default:
-      throw new Error("当前 setup 步骤不接收文字输入。");
+      throw new Error("当前 model setup 步骤不接收文字输入。");
   }
-
-  return {
-    session: next,
-    completed: false,
-  };
 }
 
 export function advanceSetupSessionWithPhoto(input: {
   session: SetupSession;
   referenceImageAsset: string;
 }): SetupSession {
-  if (input.session.step !== "reference_photo") {
+  if (
+    input.session.kind !== "persona" ||
+    input.session.step !== "reference_photo"
+  ) {
     throw new Error("当前 setup 步骤不在等待照片。");
   }
 
   return {
     ...input.session,
     awaitingReferencePhoto: false,
-    step: "text_provider",
+    step: "complete",
     updatedAt: nowIso(),
     draft: {
       ...input.session.draft,
@@ -241,46 +573,65 @@ export function advanceSetupSessionWithPhoto(input: {
 }
 
 export function renderSetupStepPrompt(session: SetupSession): string {
-  switch (session.step) {
-    case "name":
-      return "先给 Ta 起个名字，直接回名字就行。";
-    case "home_city":
-      return "Ta 目前居住在哪个城市？直接回城市名就行。";
-    case "traits":
-      return "接下来给我几个 Ta 的性格关键词，用逗号分开就行。比如：温柔，黏人，爱撒娇。";
-    case "relationship":
-      return "你希望 Ta 和你是什么关系？直接用一句话回复就行。";
-    case "tone":
-      return "最后描述一下 Ta 平时说话的语气风格。";
-    case "reference_photo":
-      return "现在把 Ta 的参考照片发我一张。接下来你发来的下一张图片会被当作角色参考图。";
-    case "text_provider":
-      return [
-        "文字模型怎么配？回复一个选项：",
-        "1. default（使用当前 OpenClaw 默认模型）",
-        "2. gemini",
-        "3. openai-compatible",
-      ].join("\n");
-    case "openai_base_url":
-      return "回复 OpenAI-compatible 的 base URL。";
-    case "openai_api_key":
-      return "回复这个 OpenAI-compatible provider 的 API key。";
-    case "openai_model":
-      return "回复要使用的模型名。";
-    case "gemini_api_key":
-      return [
-        "还差 Gemini API key。",
-        "planning 和生图都会共用这一个 key。",
-        "Gemini key 获取链接：[Google AI Studio](https://aistudio.google.com/app/apikey)",
-        "直接把 key 发我就行。",
-      ].join("\n");
-    case "complete":
-      return "setup 已完成。";
+  if (session.kind === "model") {
+    switch (session.step) {
+      case "text_provider":
+        return [
+          "文本模型怎么配？回复一个选项：",
+          `当前：${displayValue(session.draft.textProviderKind)}`,
+          "1. default（使用当前 OpenClaw 默认模型）",
+          "2. gemini",
+          "3. openai-compatible",
+        ].join("\n");
+      case "openai_base_url":
+        return [
+          "回复 OpenAI-compatible 的 base URL。",
+          `当前：${displayValue(session.draft.openaiBaseUrl)}`,
+        ].join("\n");
+      case "openai_api_key":
+        return "回复这个 OpenAI-compatible provider 的 API key。";
+      case "openai_model":
+        return [
+          "回复要使用的模型名。",
+          `当前：${displayValue(session.draft.openaiModel)}`,
+        ].join("\n");
+      case "gemini_api_key":
+        return [
+          "还差 Gemini API key。",
+          "planning 和生图都会共用这一个 key。",
+          "Gemini key 获取链接：https://aistudio.google.com/app/apikey",
+          "直接把 key 发我就行。",
+        ].join("\n");
+      case "complete":
+        return "模型配置已完成。";
+      default:
+        return "继续完成模型配置。";
+    }
   }
+
+  return buildPersonaStepPrompt(session);
 }
 
 export function buildIdleGuideMessage(persona: StoredPersonaProfile): string {
-  return `${persona.name} 已经准备好了。你可以直接回我一个旅行目的地，比如“东京”或“大理”，我就会帮你开始这趟旅行。`;
+  return [
+    `${persona.name} 创建完成。`,
+    "",
+    "接下来你可以直接告诉我一个想去的目的地，",
+    "比如：东京 / 北京 / 巴黎",
+    "我就会开始准备这次旅行。",
+  ].join("\n");
+}
+
+export function buildPersonaUpdatedMessage(persona: StoredPersonaProfile): string {
+  return [
+    `${persona.name} 的资料已更新。`,
+    "",
+    "为了避免旧上下文影响体验，建议你先执行：",
+    "/travel-companion deactivate",
+    "",
+    "然后再执行：",
+    "/travel-companion activate",
+  ].join("\n");
 }
 
 export function buildOnboardingGateMessage(input: {
@@ -297,7 +648,7 @@ export function buildOnboardingGateMessage(input: {
     missing.push("Ta 的角色信息");
   }
   if (!input.readiness.hasTextProvider) {
-    missing.push("文字模型配置");
+    missing.push("文本模型配置");
   }
   if (!input.readiness.hasGeminiKey) {
     missing.push("Gemini key（planning 和生图共用）");
@@ -306,16 +657,19 @@ export function buildOnboardingGateMessage(input: {
   return [
     "这条会话已经进入 Ta 模式，但 onboarding 还没完成。",
     `还缺：${missing.join("、")}`,
-    "先运行 /travel-companion setup，我会一步步带你配完。",
+    "先运行 /travel-companion setup，我会一步步带你配完 Ta 的资料。",
+    "模型和 key 可以单独用 /travel-companion model 配。",
   ].join("\n");
 }
 
-export function createCompletedPersonaProfile(
-  draft: SetupSessionDraft,
-): StoredPersonaProfile {
+export function createCompletedPersonaProfile(input: {
+  draft: SetupSessionDraft;
+  existing?: StoredPersonaProfile | null;
+}): StoredPersonaProfile {
+  const draft = input.draft;
   if (
     !draft.name ||
-    !draft.homeCity ||
+    !(draft.originCity || draft.homeCity) ||
     !draft.traits?.length ||
     !draft.relationship ||
     !draft.toneStyle ||
@@ -325,13 +679,13 @@ export function createCompletedPersonaProfile(
   }
 
   return {
-    personaId: randomUUID(),
+    personaId: input.existing?.personaId ?? randomUUID(),
+    createdAt: input.existing?.createdAt ?? nowIso(),
     name: draft.name,
-    homeCity: draft.homeCity,
+    originCity: draft.originCity || draft.homeCity,
     traits: draft.traits,
     relationship: draft.relationship,
     toneStyle: draft.toneStyle,
     referenceImageAsset: draft.referenceImageAsset,
-    createdAt: nowIso(),
   };
 }

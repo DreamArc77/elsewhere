@@ -22,7 +22,9 @@ export const publicPostcardPhases = new Set<TripPhase>([
 
 export interface PersonaProfile {
   name: string;
-  homeCity: string;
+  originCity?: string;
+  /** @deprecated legacy alias kept only for compatibility migration */
+  homeCity?: string;
   traits: string[];
   relationship: string;
   toneStyle: string;
@@ -250,11 +252,12 @@ export interface PendingDispatch {
   phase: TripPhase;
   day: number;
   shotKind: ShotKind;
-  postcard: Postcard;
+  postcard: Postcard | null;
   dedupeKey: string;
   grounding: PhaseGroundingResult;
   imagePrompt: string;
   imageSummary?: string;
+  imageAsset: string;
   artifactIds: string[];
 }
 
@@ -302,11 +305,15 @@ export interface RecentPostcardPhotoContext {
 }
 
 export type SetupStep =
+  | "persona_intro"
+  | "existing_persona_confirm"
   | "name"
-  | "home_city"
+  | "origin_city"
   | "traits"
   | "relationship"
   | "tone"
+  | "persona_review"
+  | "reference_photo_choice"
   | "reference_photo"
   | "text_provider"
   | "openai_base_url"
@@ -315,8 +322,12 @@ export type SetupStep =
   | "gemini_api_key"
   | "complete";
 
+export type SetupSessionKind = "persona" | "model";
+
 export interface SetupSessionDraft {
   name?: string;
+  originCity?: string;
+  /** @deprecated legacy alias kept only for compatibility migration */
   homeCity?: string;
   traits?: string[];
   relationship?: string;
@@ -329,8 +340,11 @@ export interface SetupSessionDraft {
 }
 
 export interface SetupSession {
+  kind: SetupSessionKind;
+  personaTargetId?: string;
   step: SetupStep;
   awaitingReferencePhoto: boolean;
+  returnToReview?: boolean;
   draft: SetupSessionDraft;
   startedAt: string;
   updatedAt: string;

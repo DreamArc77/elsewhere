@@ -317,14 +317,86 @@ describe("travel companion command UX", () => {
       deps,
     );
 
-    expect(reply.text).toContain("Ta");
+    expect(reply.text).toContain("我们先把 Ta 建起来");
+    expect(reply.text).toContain("准备好了回复 1");
     const key = bindingKey({
       channel: "telegram",
       accountId: "default",
       target: "1459473177",
     });
     const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.setupSession?.step).toBe("name");
+    expect(state?.setupSession?.step).toBe("persona_intro");
+  });
+
+  it("reuses the current persona draft when setup is called again", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = createDeps(runtime, bindings);
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion activate"),
+      deps,
+    );
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      originCity: "Osaka",
+      traits: ["gentle", "curious"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const binding = await bindings.get(key);
+    await bindings.upsert({
+      ...binding!,
+      defaultPersonaId: persona.personaId,
+    });
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion setup"),
+      deps,
+    );
+
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.setupSession?.kind).toBe("persona");
+    expect(state?.setupSession?.step).toBe("existing_persona_confirm");
+    expect(state?.setupSession?.draft.name).toBe("Mori");
+    expect(state?.setupSession?.draft.originCity).toBe("Osaka");
+    expect(state?.setupSession?.draft.referenceImageAsset).toBe(
+      runtime.referenceImagePath,
+    );
+    expect(reply.text).toContain("当前已经有 Ta 的设定了");
+    expect(reply.text).toContain("1. 继续修改");
+  });
+
+  it("starts model-only setup flow with the model command", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = createDeps(runtime, bindings);
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion activate"),
+      deps,
+    );
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/travel-companion model"),
+      deps,
+    );
+
+    expect(reply.text).toContain("OpenClaw");
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.setupSession?.kind).toBe("model");
+    expect(state?.setupSession?.step).toBe("text_provider");
   });
 
   it("forces delayed replies and the next trip step immediately when tick is used", async () => {

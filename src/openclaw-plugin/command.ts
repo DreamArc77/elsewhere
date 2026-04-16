@@ -21,9 +21,11 @@ import {
 } from "./reference-image.js";
 import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 import {
-  advanceSetupSessionWithText,
+  buildModelSetupDraft,
   buildIdleGuideMessage,
   buildOnboardingGateMessage,
+  buildPersonaSetupDraft,
+  createCompletedPersonaProfile,
   createSetupSession,
   evaluateOnboardingReadiness,
   renderSetupStepPrompt,
@@ -64,8 +66,17 @@ export async function handleTravelCompanionCommand(
     case "deactivate":
       return deactivateConversation(ctx, deps);
     case "setup":
+      return requireActivatedThen(ctx, deps, () =>
+        setupPersona(ctx, parsed.options, deps, { mode: "edit" }),
+      );
     case "create":
-      return requireActivatedThen(ctx, deps, () => setupPersona(ctx, parsed.options, deps));
+      return requireActivatedThen(ctx, deps, () =>
+        setupPersona(ctx, parsed.options, deps, { mode: "create" }),
+      );
+    case "model":
+      return requireActivatedThen(ctx, deps, () =>
+        setupModel(ctx, parsed.options, deps),
+      );
     case "start":
       return requireActivatedThen(ctx, deps, () => startTrip(ctx, parsed.options, deps));
     case "status":
@@ -226,6 +237,7 @@ async function setupPersona(
   ctx: PluginCommandContext,
   options: Record<string, string>,
   deps: CommandDependencies,
+  input: { mode: "edit" | "create" },
 ): Promise<CommandReply> {
   const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
@@ -235,6 +247,9 @@ async function setupPersona(
   const state =
     (await deps.conversationStates.getByKey(binding.record.key)) ??
     null;
+  const currentPersona = binding.record.defaultPersonaId
+    ? await deps.personaRepository.getById(binding.record.defaultPersonaId)
+    : null;
 
   if (hasLegacySetupOptions(options, ctx.commandBody)) {
     const referenceImageInput = extractReferenceImageInput(
@@ -251,17 +266,22 @@ async function setupPersona(
       personasDir: deps.runtimeDataPaths.personasDir,
     });
 
-    const persona = await deps.service.createPersona({
-      name: requiredOption(options, "name"),
-      homeCity: requiredOption(options, "home-city"),
-      traits: requiredOption(options, "traits")
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
-      relationship: requiredOption(options, "relationship"),
-      toneStyle: requiredOption(options, "tone"),
-      referenceImageAsset,
+    const isEditingExistingPersona = Boolean(currentPersona);
+    const persona = createCompletedPersonaProfile({
+      draft: {
+        name: requiredOption(options, "name"),
+        originCity: requiredOptionAlias(options, ["origin-city", "home-city"]),
+        traits: requiredOption(options, "traits")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        relationship: requiredOption(options, "relationship"),
+        toneStyle: requiredOption(options, "tone"),
+        referenceImageAsset,
+      },
+      existing: input.mode === "edit" ? currentPersona : null,
     });
+    await deps.personaRepository.save(persona);
 
     await deps.bindings.upsert({
       ...binding.record,
@@ -270,16 +290,30 @@ async function setupPersona(
 
     return {
       text: [
-        `Ta 创建完成：${persona.name}`,
+        isEditingExistingPersona
+          ? `Ta 资料已更新：${persona.name}`
+          : `Ta 创建完成：${persona.name}`,
         `personaId: ${persona.personaId}`,
         "这条会话现在默认使用 Ta。",
       ].join("\n"),
     };
   }
 
+  const draft =
+    input.mode === "edit" ? buildPersonaSetupDraft(currentPersona) : {};
+  const initialStep =
+    input.mode === "edit" && currentPersona
+      ? "existing_persona_confirm"
+      : "persona_intro";
   const nextState = {
     ...(state ?? await deps.conversationService.activateConversation(binding.record)),
-    setupSession: createSetupSession(state?.setupSession?.draft),
+    setupSession: createSetupSession({
+      kind: "persona",
+      draft,
+      step: initialStep,
+      personaTargetId:
+        input.mode === "edit" ? currentPersona?.personaId : undefined,
+    }),
     updatedAt: new Date().toISOString(),
   };
   await deps.conversationStates.save(nextState);
@@ -309,6 +343,52 @@ async function setupPersona(
     latencyMs: 0,
     details: { conversationKey: binding.record.key, step: nextState.setupSession?.step },
   });
+  return {
+    text: renderSetupStepPrompt(nextState.setupSession),
+  };
+}
+
+async function setupModel(
+  ctx: PluginCommandContext,
+  _options: Record<string, string>,
+  deps: CommandDependencies,
+): Promise<CommandReply> {
+  const binding = await requireBinding(ctx, deps.bindings, deps.logger);
+  if ("reply" in binding) {
+    return binding.reply;
+  }
+
+  const state =
+    (await deps.conversationStates.getByKey(binding.record.key)) ??
+    null;
+  const globalConfig = await deps.globalConfigRepository.get();
+  const nextState = {
+    ...(state ?? await deps.conversationService.activateConversation(binding.record)),
+    setupSession: createSetupSession({
+      kind: "model",
+      draft: buildModelSetupDraft(globalConfig),
+    }),
+    updatedAt: new Date().toISOString(),
+  };
+  await deps.conversationStates.save(nextState);
+  await deps.logger?.log({
+    tripId: `conversation:${binding.record.key}`,
+    runId: `setup-model-start:${Date.now()}`,
+    phase: "system",
+    event: "setup.session.started",
+    decision: "Started model-only setup wizard.",
+    provider: "command",
+    status: "success",
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    latencyMs: 0,
+    details: {
+      conversationKey: binding.record.key,
+      kind: "model",
+      step: nextState.setupSession?.step,
+    },
+  });
+
   return {
     text: renderSetupStepPrompt(nextState.setupSession),
   };
@@ -387,12 +467,33 @@ async function startTrip(
     };
   }
 
-  const trip = await deps.service.startTrip({
-    personaId,
-    originCity: options.from ?? deps.pluginConfig.defaultOriginCity ?? "Hong Kong",
-    destinationCity: requiredOption(options, "to"),
-    startWindow: options.when,
-  });
+  const persona = await deps.personaRepository.getById(personaId);
+  if (!persona) {
+    return {
+      text: `Persona not found: ${personaId}`,
+      isError: true,
+    };
+  }
+
+  let trip: TripRecord;
+  try {
+    trip = await deps.service.startTrip({
+      personaId,
+      originCity:
+        options.from ??
+        persona.originCity ??
+        persona.homeCity ??
+        deps.pluginConfig.defaultOriginCity ??
+        "Hong Kong",
+      destinationCity: requiredOption(options, "to"),
+      startWindow: options.when,
+    });
+  } catch (error) {
+    return {
+      text: formatTripStartError(error),
+      isError: true,
+    };
+  }
 
   const patchedTrip: TripRecord = {
     ...trip,
@@ -429,6 +530,23 @@ async function startTrip(
       "The background worker will now advance the trip and proactively send postcards here.",
     ].join("\n"),
   };
+}
+
+function formatTripStartError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("User location is not supported for the API use.")) {
+    return [
+      "这次行程生成失败了。",
+      "Gemini 返回：当前 API 使用环境不支持这次请求。",
+      "这更像是 provider 侧限制，不是你目的地填错了。",
+      "我这边会继续处理成自动降级重试；你现在先不用重复发目的地。",
+    ].join("\n");
+  }
+
+  return [
+    "这次行程生成失败了。",
+    `错误信息：${message}`,
+  ].join("\n");
 }
 
 async function statusTrip(
@@ -1010,6 +1128,8 @@ function hasLegacySetupOptions(
 ): boolean {
   return Boolean(
     options.name ||
+      options["origin-city"] ||
+      options["home-city"] ||
       options.traits ||
       options.relationship ||
       options.tone ||
@@ -1112,6 +1232,22 @@ function requiredOption(options: Record<string, string>, key: string): string {
   return value;
 }
 
+function requiredOptionAlias(
+  options: Record<string, string>,
+  keys: string[],
+): string {
+  for (const key of keys) {
+    const value = options[key];
+    if (value) {
+      return value;
+    }
+  }
+
+  throw new Error(
+    `Missing required option ${keys.map((key) => `--${key}`).join(" or ")}`,
+  );
+}
+
 function parseArgs(rawArgs: string | undefined): ParsedArgs {
   const tokens = tokenize(rawArgs ?? "");
   const subcommand = tokens.shift() ?? "help";
@@ -1141,8 +1277,11 @@ function helpText(): string {
     "/travel-companion bind",
     "/travel-companion activate",
     "/travel-companion deactivate",
-    "/travel-companion setup --name Mori --home-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm --image /abs/path/ref.png",
-    "/travel-companion setup --name Mori --home-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp",
+    "/travel-companion setup                      # edit the current Ta",
+    "/travel-companion create                     # create a brand new Ta",
+    "/travel-companion model                      # reconfigure text model / Gemini key",
+    "/travel-companion setup --name Mori --origin-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm --image /abs/path/ref.png",
+    "/travel-companion setup --name Mori --origin-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp",
     "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
     "/travel-companion status [--trip <id>]",
     "/travel-companion tick [--trip <id>]  # force delayed replies + the next trip step immediately",

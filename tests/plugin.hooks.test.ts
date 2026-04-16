@@ -1,8 +1,12 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+﻿import { readdir, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { handleTravelCompanionInboundClaim } from "../src/openclaw-plugin/hooks.js";
+import {
+  handleTravelCompanionInboundClaim,
+  setConversationBindingInternalsForTests,
+} from "../src/openclaw-plugin/hooks.js";
 import { bindingKey } from "../src/openclaw-plugin/binding-state.js";
 import { createTestRuntime } from "./helpers/runtime.js";
 
@@ -28,6 +32,10 @@ function createInboundDeps(
     logger: runtime.logger,
   };
 }
+
+afterEach(() => {
+  setConversationBindingInternalsForTests();
+});
 
 describe("travel companion inbound takeover hook", () => {
   it("claims ordinary inbound messages in companion-exclusive conversations", async () => {
@@ -194,14 +202,82 @@ describe("travel companion inbound takeover hook", () => {
     const logFiles = await readdir(runtime.paths.logsDir);
     const payload = (
       await Promise.all(
-        logFiles.map((file) =>
-          readFile(`${runtime.paths.logsDir}\\${file}`, "utf8"),
-        ),
+        logFiles.map((file) => readFile(join(runtime.paths.logsDir, file), "utf8")),
       )
     ).join("\n");
     expect(payload).toContain('"event":"command.bridge.received"');
     expect(payload).toContain('"event":"command.bridge.executed"');
     expect(payload).toContain('"event":"command.bridge.replied"');
+  });
+
+  it("recovers a missing local binding from the official binding surface before bridging commands", async () => {
+    const runtime = await createTestRuntime();
+    const now = Date.now();
+    setConversationBindingInternalsForTests({
+      requestPluginConversationBinding: async () => ({
+        status: "bound",
+        binding: {
+          bindingId: "binding-official",
+          channel: "telegram",
+          accountId: "default",
+          conversationId: "1459473177",
+          boundAt: now,
+        },
+      }),
+      detachPluginConversationBinding: async () => ({ removed: true }),
+      getCurrentPluginConversationBinding: async () => ({
+        bindingId: "binding-official",
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        boundAt: now,
+      }),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "/travel-companion activate",
+        body: "/travel-companion activate",
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-recover",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-recover",
+      },
+      {
+        ...createInboundDeps(runtime),
+      },
+    );
+
+    expect(result).toEqual({ handled: true });
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const binding = await runtime.bindings.get(key);
+    expect(binding?.bindingId).toBe("binding-official");
+    expect(binding?.mode).toBe("companion-exclusive");
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text).toContain(
+      "Travel companion takeover is now active.",
+    );
+
+    const logFiles = await readdir(runtime.paths.logsDir);
+    const payload = (
+      await Promise.all(
+        logFiles.map((file) => readFile(join(runtime.paths.logsDir, file), "utf8")),
+      )
+    ).join("\n");
+    expect(payload).toContain('"event":"binding.recovered"');
   });
 
   it("deduplicates repeated bridged slash-command deliveries by message id", async () => {
@@ -282,9 +358,7 @@ describe("travel companion inbound takeover hook", () => {
     const logFiles = await readdir(runtime.paths.logsDir);
     const payload = (
       await Promise.all(
-        logFiles.map((file) =>
-          readFile(`${runtime.paths.logsDir}\\${file}`, "utf8"),
-        ),
+        logFiles.map((file) => readFile(join(runtime.paths.logsDir, file), "utf8")),
       )
     ).join("\n");
     expect(payload).toContain('"event":"command.bridge.duplicate"');
@@ -309,6 +383,7 @@ describe("travel companion inbound takeover hook", () => {
       conversationKey: key,
       mode: "companion-exclusive",
       setupSession: {
+        kind: "persona",
         step: "name",
         awaitingReferencePhoto: false,
         draft: {},
@@ -350,12 +425,12 @@ describe("travel companion inbound takeover hook", () => {
 
     expect(result).toEqual({ handled: true });
     const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.setupSession?.step).toBe("home_city");
+    expect(state?.setupSession?.step).toBe("origin_city");
     expect(state?.setupSession?.draft.name).toBe("Mori");
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Ta");
   });
 
-  it("accepts the next inbound image as setup reference photo", async () => {
+  it("accepts the next inbound image from inbound metadata as setup reference photo", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({
       channel: "telegram",
@@ -374,11 +449,12 @@ describe("travel companion inbound takeover hook", () => {
       conversationKey: key,
       mode: "companion-exclusive",
       setupSession: {
+        kind: "persona",
         step: "reference_photo",
         awaitingReferencePhoto: true,
         draft: {
           name: "Mori",
-          homeCity: "Hong Kong",
+          originCity: "Hong Kong",
           traits: ["gentle"],
           relationship: "travel soulmate",
           toneStyle: "warm",
@@ -408,7 +484,12 @@ describe("travel companion inbound takeover hook", () => {
         senderId: "1459473177",
         messageId: "setup-photo",
         isGroup: false,
-        mediaUrl: runtime.referenceImagePath,
+        metadata: {
+          mediaPath: runtime.referenceImagePath,
+          mediaType: "image/jpeg",
+          mediaPaths: [runtime.referenceImagePath],
+          mediaTypes: ["image/jpeg"],
+        },
       },
       {
         channelId: "telegram",
@@ -422,12 +503,113 @@ describe("travel companion inbound takeover hook", () => {
 
     expect(result).toEqual({ handled: true });
     const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.setupSession?.step).toBe("text_provider");
-    expect(state?.setupSession?.draft.referenceImageAsset).toBeTruthy();
+    expect(state?.setupSession).toBeUndefined();
+    expect(state?.awaitingDestination).toBe(false);
+    const savedPersona = await runtime.personaRepository.getById(
+      (await runtime.bindings.get(key))!.defaultPersonaId!,
+    );
+    expect(savedPersona?.referenceImageAsset).toBeTruthy();
     await expect(
-      stat(state!.setupSession!.draft.referenceImageAsset!),
+      stat(savedPersona!.referenceImageAsset),
     ).resolves.toBeTruthy();
-    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("openai-compatible");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Mori 创建完成");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("/travel-companion model");
+  });
+
+  it("updates the current persona instead of creating a new one when setup completes", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      originCity: "Osaka",
+      traits: ["gentle"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    await runtime.globalConfigRepository.save({
+      geminiApiKey: "test-key",
+      textProvider: { kind: "gemini" },
+      updatedAt: new Date().toISOString(),
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "persona",
+        step: "complete",
+        awaitingReferencePhoto: false,
+        draft: {
+          name: "Mori v2",
+          originCity: "Kyoto",
+          traits: ["gentle", "clingy"],
+          relationship: "soulmate",
+          toneStyle: "warmer",
+          referenceImageAsset: runtime.referenceImagePath,
+        },
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "done",
+        body: "done",
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "setup-complete-edit",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "setup-complete-edit",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const updated = await runtime.personaRepository.getById(persona.personaId);
+    expect(updated?.name).toBe("Mori v2");
+    expect(updated?.originCity).toBe("Kyoto");
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.awaitingDestination).toBe(false);
+    const personaFiles = await readdir(runtime.paths.personasDir);
+    expect(personaFiles.filter((name) => name.endsWith(".json"))).toHaveLength(1);
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain(
+      "/travel-companion deactivate",
+    );
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain(
+      "/travel-companion activate",
+    );
   });
 
   it("leaves non-travel-companion slash commands alone", async () => {

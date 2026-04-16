@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -8,6 +8,7 @@ import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
 import {
+  ConversationBindingRecord,
   ConversationBindingStore,
   ConversationStateRepository,
   GlobalConfigRepository,
@@ -24,6 +25,9 @@ import {
   advanceSetupSessionWithPhoto,
   advanceSetupSessionWithText,
   buildIdleGuideMessage,
+  buildOnboardingGateMessage,
+  buildPersonaUpdatedMessage,
+  createCompletedPersonaProfile,
   evaluateOnboardingReadiness,
   renderSetupStepPrompt,
 } from "./onboarding.js";
@@ -47,6 +51,7 @@ interface InboundClaimEvent {
   commandAuthorized?: boolean;
   mediaUrl?: string;
   mediaUrls?: string[];
+  metadata?: Record<string, unknown>;
   attachments?: Array<{
     path?: string;
     url?: string;
@@ -131,12 +136,14 @@ export async function handleTravelCompanionInboundClaim(
 ): Promise<InboundClaimResult | void> {
   const rawText =
     event.bodyForAgent ?? event.body ?? event.transcript ?? event.content ?? "";
-  const binding = await resolveBindingForInbound(event, ctx, deps.bindings);
-  if (!binding || binding.mode !== "companion-exclusive") {
+  const trimmed = rawText.trim();
+  const binding =
+    (await resolveBindingForInbound(event, ctx, deps.bindings)) ??
+    (await recoverBindingForInbound(event, ctx, deps));
+  if (!binding) {
     return;
   }
 
-  const trimmed = rawText.trim();
   const state = await deps.conversationStates.getByKey(binding.key);
 
   if (state?.setupSession) {
@@ -287,6 +294,10 @@ export async function handleTravelCompanionInboundClaim(
     return { handled: true };
   }
 
+  if (binding.mode !== "companion-exclusive") {
+    return;
+  }
+
   if (trimmed.startsWith("/")) {
     return;
   }
@@ -337,6 +348,78 @@ export async function handleTravelCompanionInboundClaim(
   return { handled: true };
 }
 
+async function recoverBindingForInbound(
+  event: InboundClaimEvent,
+  ctx: InboundClaimContext,
+  deps: Pick<
+    InboundClaimDependencies,
+    "bindings" | "conversationStates" | "logger"
+  >,
+): Promise<ConversationBindingRecord | null> {
+  const officialBinding = await getOfficialConversationBinding(event, ctx);
+  const fallbackChannel = officialBinding?.channel ?? event.channel;
+  const fallbackAccountId =
+    officialBinding?.accountId ?? event.accountId ?? ctx.accountId ?? "default";
+  const fallbackTarget =
+    normalizeRoutePart(officialBinding?.conversationId) ??
+    normalizeRoutePart(event.conversationId ?? ctx.conversationId) ??
+    normalizeRoutePart(event.senderId ?? ctx.senderId);
+  if (!fallbackTarget) {
+    return null;
+  }
+
+  const fallbackThreadId = officialBinding?.threadId ?? event.threadId;
+  const key = bindingKey({
+    channel: fallbackChannel,
+    accountId: fallbackAccountId,
+    target: fallbackTarget,
+    threadId: fallbackThreadId,
+  });
+  const existing = await deps.bindings.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const state = await deps.conversationStates.getByKey(key);
+  if (!officialBinding && !state) {
+    return null;
+  }
+
+  const record: ConversationBindingRecord = {
+    key,
+    bindingId: officialBinding?.bindingId,
+    channel: fallbackChannel,
+    accountId: fallbackAccountId,
+    target: fallbackTarget,
+    parentConversationId:
+      officialBinding?.parentConversationId ?? event.parentConversationId,
+    threadId: fallbackThreadId,
+    boundAt: officialBinding?.boundAt ?? Date.now(),
+    mode: state?.mode ?? "default",
+    defaultPersonaId: undefined,
+    lastTripId: undefined,
+  };
+  await deps.bindings.upsert(record);
+  await logCommandBridgeEvent(deps.logger, {
+    binding: record,
+    runId: `binding-recover:${String(event.messageId ?? randomUUID())}`,
+    event: "binding.recovered",
+    decision:
+      "Recovered a missing local binding record from the official binding surface or saved conversation state.",
+    provider: officialBinding ? "binding-recovery:official" : "binding-recovery:state",
+    status: "success",
+    details: {
+      recoveredFromOfficialBinding: Boolean(officialBinding),
+      recoveredFromConversationState: Boolean(state),
+      mode: record.mode,
+      accountId: record.accountId ?? "default",
+      target: record.target,
+      threadId: record.threadId ?? "main",
+    },
+  });
+  return record;
+}
+
 async function handleSetupSessionInbound(
   input: {
     event: InboundClaimEvent;
@@ -353,13 +436,52 @@ async function handleSetupSessionInbound(
   }
 
   const runId = `setup:${String(input.event.messageId ?? randomUUID())}`;
+  const logConfigPatch = async (
+    configPatch: Partial<
+      Awaited<ReturnType<GlobalConfigRepository["get"]>>
+    > | undefined,
+  ) => {
+    if (configPatch?.textProvider) {
+      await logCommandBridgeEvent(deps.logger, {
+        binding: input.binding,
+        runId,
+        event: "config.text_provider.updated",
+        decision: "Updated the configured text provider during setup.",
+        provider: "setup-session",
+        status: "success",
+        details: { kind: configPatch.textProvider.kind },
+      });
+    }
+    if (configPatch?.geminiApiKey) {
+      await logCommandBridgeEvent(deps.logger, {
+        binding: input.binding,
+        runId,
+        event: "config.gemini_key.updated",
+        decision: "Stored Gemini API key during setup.",
+        provider: "setup-session",
+        status: "success",
+        details: { hasGeminiKey: true },
+      });
+    }
+  };
+
   if (session.awaitingReferencePhoto) {
     const imageSource = extractInboundImageSource(input.event);
     if (!imageSource) {
+      await logCommandBridgeEvent(deps.logger, {
+        binding: input.binding,
+        runId,
+        event: "setup.photo.missing_source",
+        decision:
+          "Inbound message arrived while setup was waiting for a reference photo, but no usable media source was found on the event.",
+        provider: "setup-session",
+        status: "success",
+        details: buildSetupPhotoDebugDetails(input.event),
+      });
       if (input.trimmed) {
         await deps.messenger.sendTextReply({
           binding: input.binding,
-          text: "我现在在等你的参考照片。接下来发一张图片就行。",
+          text: "我现在在等你的参考图，接下来发一张图片就行。",
           dedupeKey: `setup-photo-reminder:${input.binding.key}:${runId}`,
         });
         return true;
@@ -384,6 +506,17 @@ async function handleSetupSessionInbound(
       session,
       referenceImageAsset,
     });
+    if (nextSession.step === "complete") {
+      await finalizeSetupSession({
+        input,
+        deps,
+        runId,
+        session: nextSession,
+        globalConfig: await deps.globalConfigRepository.get(),
+      });
+      return true;
+    }
+
     await deps.conversationStates.save({
       ...input.state,
       setupSession: nextSession,
@@ -402,12 +535,39 @@ async function handleSetupSessionInbound(
   }
 
   const globalConfig = await deps.globalConfigRepository.get();
-    const advanced = advanceSetupSessionWithText({
+  let advanced: ReturnType<typeof advanceSetupSessionWithText>;
+  try {
+    advanced = advanceSetupSessionWithText({
       session,
       text: input.trimmed,
       globalConfig,
       fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
     });
+  } catch (error) {
+    await deps.messenger.sendTextReply({
+      binding: input.binding,
+      text: error instanceof Error ? error.message : String(error),
+      dedupeKey: `setup-error:${input.binding.key}:${runId}`,
+    });
+    return true;
+  }
+
+  if (advanced.cancelled) {
+    await deps.conversationStates.save({
+      ...input.state,
+      setupSession: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+    await deps.messenger.sendTextReply({
+      binding: input.binding,
+      text:
+        session.kind === "persona" && session.personaTargetId
+          ? "已取消本次修改。"
+          : "已取消本次设置。",
+      dedupeKey: `setup-cancel:${input.binding.key}:${runId}`,
+    });
+    return true;
+  }
   const mergedConfig = advanced.configPatch
     ? {
         ...globalConfig,
@@ -419,7 +579,7 @@ async function handleSetupSessionInbound(
     await deps.globalConfigRepository.save(mergedConfig);
   }
 
-    if (!advanced.completed) {
+  if (!advanced.completed) {
     await logCommandBridgeEvent(deps.logger, {
       binding: input.binding,
       runId,
@@ -443,31 +603,10 @@ async function handleSetupSessionInbound(
         details: { nextStep: advanced.session.step },
       });
     }
-    if (advanced.configPatch?.textProvider) {
-      await logCommandBridgeEvent(deps.logger, {
-        binding: input.binding,
-        runId,
-        event: "config.text_provider.updated",
-        decision: "Updated the configured text provider during setup.",
-        provider: "setup-session",
-        status: "success",
-        details: { kind: advanced.configPatch.textProvider.kind },
-      });
-    }
-    if (advanced.configPatch?.geminiApiKey) {
-      await logCommandBridgeEvent(deps.logger, {
-        binding: input.binding,
-        runId,
-        event: "config.gemini_key.updated",
-        decision: "Stored Gemini API key during setup.",
-        provider: "setup-session",
-        status: "success",
-        details: { hasGeminiKey: true },
-      });
-    }
-      await deps.conversationStates.save({
-        ...input.state,
-        setupSession: advanced.session,
+    await logConfigPatch(advanced.configPatch);
+    await deps.conversationStates.save({
+      ...input.state,
+      setupSession: advanced.session,
       updatedAt: new Date().toISOString(),
     });
     await deps.messenger.sendTextReply({
@@ -478,26 +617,6 @@ async function handleSetupSessionInbound(
     return true;
   }
 
-  const persona = await deps.service.createPersona({
-    name: advanced.session.draft.name!,
-    homeCity: advanced.session.draft.homeCity!,
-    traits: advanced.session.draft.traits!,
-    relationship: advanced.session.draft.relationship!,
-    toneStyle: advanced.session.draft.toneStyle!,
-    referenceImageAsset: advanced.session.draft.referenceImageAsset!,
-  });
-  await deps.bindings.upsert({
-    ...input.binding,
-    defaultPersonaId: persona.personaId,
-  });
-  const nextState = {
-    ...input.state,
-    setupSession: undefined,
-    idleGuideSentAt: new Date().toISOString(),
-    awaitingDestination: true,
-    updatedAt: new Date().toISOString(),
-  };
-  await deps.conversationStates.save(nextState);
   await logCommandBridgeEvent(deps.logger, {
     binding: input.binding,
     runId,
@@ -510,50 +629,162 @@ async function handleSetupSessionInbound(
       nextStep: advanced.session.step,
     },
   });
-  if (advanced.configPatch?.textProvider) {
+  await logConfigPatch(advanced.configPatch);
+  await finalizeSetupSession({
+    input,
+    deps,
+    runId,
+    session: advanced.session,
+    globalConfig: mergedConfig,
+  });
+  return true;
+}
+
+async function finalizeSetupSession(input: {
+  input: {
+    event: InboundClaimEvent;
+    ctx: InboundClaimContext;
+    binding: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>>;
+    state: NonNullable<
+      Awaited<ReturnType<ConversationStateRepository["getByKey"]>>
+    >;
+    trimmed: string;
+  };
+  deps: InboundClaimDependencies;
+  runId: string;
+  session: NonNullable<
+    Awaited<ReturnType<ConversationStateRepository["getByKey"]>>
+  >["setupSession"];
+  globalConfig: Awaited<ReturnType<GlobalConfigRepository["get"]>>;
+}): Promise<void> {
+  const { input: inbound, deps, runId, session, globalConfig } = input;
+  if (!session) {
+    return;
+  }
+
+  if (session.kind === "persona") {
+    const targetPersonaId =
+      session.personaTargetId ?? inbound.binding.defaultPersonaId;
+    const existingPersona =
+      targetPersonaId != null
+        ? await deps.personaRepository.getById(targetPersonaId)
+        : null;
+    const isEditingExistingPersona = Boolean(existingPersona);
+    const persona = createCompletedPersonaProfile({
+      draft: session.draft,
+      existing: existingPersona,
+    });
+    await deps.personaRepository.save(persona);
+    const updatedBinding = {
+      ...inbound.binding,
+      defaultPersonaId: persona.personaId,
+    };
+    await deps.bindings.upsert(updatedBinding);
+    const readiness = evaluateOnboardingReadiness({
+      binding: updatedBinding,
+      config: globalConfig,
+      fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    });
+    const nextState = {
+      ...inbound.state,
+      setupSession: undefined,
+      idleGuideSentAt:
+        readiness.isComplete && !isEditingExistingPersona
+          ? new Date().toISOString()
+          : inbound.state.idleGuideSentAt ?? null,
+      awaitingDestination:
+        readiness.isComplete && !isEditingExistingPersona,
+      updatedAt: new Date().toISOString(),
+    };
+    await deps.conversationStates.save(nextState);
     await logCommandBridgeEvent(deps.logger, {
-      binding: input.binding,
+      binding: updatedBinding,
       runId,
-      event: "config.text_provider.updated",
-      decision: "Updated the configured text provider during setup.",
+      event: "setup.completed",
+      decision: "Completed persona setup and persisted the current Ta profile.",
       provider: "setup-session",
       status: "success",
-      details: { kind: advanced.configPatch.textProvider.kind },
+      details: {
+        kind: session.kind,
+        personaId: persona.personaId,
+        textProvider: globalConfig.textProvider?.kind ?? "none",
+        hasGeminiKey: Boolean(
+          globalConfig.geminiApiKey?.trim() || deps.pluginConfig.geminiApiKey,
+        ),
+      },
     });
-  }
-  if (advanced.configPatch?.geminiApiKey) {
-    await logCommandBridgeEvent(deps.logger, {
-      binding: input.binding,
-      runId,
-      event: "config.gemini_key.updated",
-      decision: "Stored Gemini API key during setup.",
-      provider: "setup-session",
-      status: "success",
-      details: { hasGeminiKey: true },
+    await deps.messenger.sendTextReply({
+      binding: updatedBinding,
+      text: readiness.isComplete
+        ? isEditingExistingPersona
+          ? buildPersonaUpdatedMessage(persona)
+          : buildIdleGuideMessage(persona)
+        : [
+            isEditingExistingPersona
+              ? buildPersonaUpdatedMessage(persona)
+              : `${persona.name} 创建完成。`,
+            buildOnboardingGateMessage({
+              binding: updatedBinding,
+              readiness,
+              hasSetupSession: false,
+            }),
+          ].join("\n"),
+      dedupeKey: `setup-complete:${updatedBinding.key}:${persona.personaId}`,
     });
+    return;
   }
+
+  const readiness = evaluateOnboardingReadiness({
+    binding: inbound.binding,
+    config: globalConfig,
+    fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+  });
+  const nextState = {
+    ...inbound.state,
+    setupSession: undefined,
+    idleGuideSentAt:
+      readiness.isComplete && inbound.binding.defaultPersonaId
+        ? new Date().toISOString()
+        : inbound.state.idleGuideSentAt ?? null,
+    awaitingDestination:
+      readiness.isComplete && Boolean(inbound.binding.defaultPersonaId),
+    updatedAt: new Date().toISOString(),
+  };
+  await deps.conversationStates.save(nextState);
   await logCommandBridgeEvent(deps.logger, {
-    binding: input.binding,
+    binding: inbound.binding,
     runId,
     event: "setup.completed",
-    decision: "Completed setup wizard, created persona, and entered idle mode.",
+    decision: "Completed model setup and persisted provider configuration.",
     provider: "setup-session",
     status: "success",
     details: {
-      personaId: persona.personaId,
-      textProvider: mergedConfig.textProvider?.kind ?? "none",
-      hasGeminiKey: Boolean(mergedConfig.geminiApiKey?.trim()),
+      kind: session.kind,
+      textProvider: globalConfig.textProvider?.kind ?? "none",
+      hasGeminiKey: Boolean(
+        globalConfig.geminiApiKey?.trim() || deps.pluginConfig.geminiApiKey,
+      ),
     },
   });
+
+  const persona = inbound.binding.defaultPersonaId
+    ? await deps.personaRepository.getById(inbound.binding.defaultPersonaId)
+    : null;
   await deps.messenger.sendTextReply({
-    binding: input.binding,
-    text: [
-      `Ta 鍒涘缓瀹屾垚锛?{persona.name}`,
-      buildIdleGuideMessage(persona),
-    ].join("\n"),
-    dedupeKey: `setup-complete:${input.binding.key}:${persona.personaId}`,
+    binding: inbound.binding,
+    text:
+      readiness.isComplete && persona
+        ? ["模型配置已更新。", buildIdleGuideMessage(persona)].join("\n")
+        : [
+            "模型配置已更新。",
+            buildOnboardingGateMessage({
+              binding: inbound.binding,
+              readiness,
+              hasSetupSession: false,
+            }),
+          ].join("\n"),
+    dedupeKey: `setup-complete:${inbound.binding.key}:model`,
   });
-  return true;
 }
 
 function extractInboundImageSource(event: InboundClaimEvent): string | null {
@@ -576,7 +807,73 @@ function extractInboundImageSource(event: InboundClaimEvent): string | null {
     }
   }
 
+  const metadataMedia = extractMetadataMediaCandidates(event.metadata);
+  for (const candidate of metadataMedia) {
+    if (candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
   return null;
+}
+
+function extractMetadataMediaCandidates(
+  metadata: Record<string, unknown> | undefined,
+): string[] {
+  if (!metadata) {
+    return [];
+  }
+
+  const candidates: string[] = [];
+  for (const value of [
+    metadata.mediaPath,
+    metadata.mediaUrl,
+    ...(Array.isArray(metadata.mediaPaths) ? metadata.mediaPaths : []),
+    ...(Array.isArray(metadata.mediaUrls) ? metadata.mediaUrls : []),
+  ]) {
+    if (typeof value === "string" && value.trim()) {
+      candidates.push(value);
+    }
+  }
+  return candidates;
+}
+
+function buildSetupPhotoDebugDetails(event: InboundClaimEvent) {
+  const metadata = event.metadata;
+  return {
+    messageId: event.messageId,
+    contentPreview: event.content.slice(0, 120),
+    bodyPreview: (event.body ?? "").slice(0, 120),
+    hasMediaUrl:
+      typeof event.mediaUrl === "string" && event.mediaUrl.trim().length > 0,
+    mediaUrlsCount: Array.isArray(event.mediaUrls) ? event.mediaUrls.length : 0,
+    attachmentsCount: Array.isArray(event.attachments) ? event.attachments.length : 0,
+    attachmentKinds: Array.isArray(event.attachments)
+      ? event.attachments.map((attachment) => ({
+          kind: attachment.kind ?? null,
+          contentType: attachment.contentType ?? null,
+          mimeType: attachment.mimeType ?? null,
+          hasPath:
+            typeof attachment.path === "string" && attachment.path.trim().length > 0,
+          hasUrl:
+            typeof attachment.url === "string" && attachment.url.trim().length > 0,
+          hasMediaUrl:
+            typeof attachment.mediaUrl === "string" &&
+            attachment.mediaUrl.trim().length > 0,
+        }))
+      : [],
+    metadataKeys: metadata ? Object.keys(metadata).sort() : [],
+    metadataMediaPath:
+      typeof metadata?.mediaPath === "string" ? metadata.mediaPath : null,
+    metadataMediaPathsCount: Array.isArray(metadata?.mediaPaths)
+      ? metadata.mediaPaths.length
+      : 0,
+    metadataMediaType:
+      typeof metadata?.mediaType === "string" ? metadata.mediaType : null,
+    metadataMediaTypesCount: Array.isArray(metadata?.mediaTypes)
+      ? metadata.mediaTypes.length
+      : 0,
+  };
 }
 
 function buildSyntheticCommandContext(
@@ -630,9 +927,57 @@ function buildSyntheticCommandContext(
   } as unknown as PluginCommandContext;
 }
 
+type OfficialConversationBinding = {
+  bindingId?: string;
+  channel: string;
+  accountId?: string;
+  conversationId: string;
+  parentConversationId?: string;
+  threadId?: string | number;
+  boundAt?: number;
+};
+
+async function getOfficialConversationBinding(
+  event: InboundClaimEvent,
+  ctx: InboundClaimContext,
+): Promise<OfficialConversationBinding | null> {
+  const conversationId = event.conversationId ?? ctx.conversationId;
+  if (!conversationId) {
+    return null;
+  }
+
+  try {
+    const binding = await (
+      await getConversationBindingInternals()
+    ).getCurrentPluginConversationBinding({
+      pluginRoot: resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."),
+      conversation: {
+        channel: event.channel,
+        accountId: event.accountId ?? ctx.accountId ?? "default",
+        conversationId,
+        parentConversationId: event.parentConversationId,
+        threadId: event.threadId,
+      },
+    });
+
+    if (!isOfficialConversationBinding(binding)) {
+      return null;
+    }
+    return binding;
+  } catch {
+    return null;
+  }
+}
+
 function getConversationBindingInternals(): Promise<ConversationBindingInternals> {
   bindingInternalsPromise ??= loadConversationBindingInternals();
   return bindingInternalsPromise;
+}
+
+export function setConversationBindingInternalsForTests(
+  value?: ConversationBindingInternals,
+): void {
+  bindingInternalsPromise = value ? Promise.resolve(value) : undefined;
 }
 
 async function loadConversationBindingInternals(): Promise<ConversationBindingInternals> {
@@ -751,6 +1096,20 @@ function normalizeRoutePart(value: string | number | undefined): string | null {
   }
   const normalized = String(value).trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function isOfficialConversationBinding(
+  value: unknown,
+): value is OfficialConversationBinding {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.channel === "string" &&
+    typeof candidate.conversationId === "string"
+  );
 }
 
 async function logCommandBridgeEvent(
