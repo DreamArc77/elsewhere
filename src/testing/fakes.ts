@@ -467,14 +467,14 @@ export class FakeGroundingPort implements GroundingPort {
     stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
     resolvedState: ResolvedAgentState;
-    imagePrompt: string;
+    imageSummary?: string;
   }): Promise<{ caption: string; provider: string }> {
     return {
       caption:
         `${input.persona.name} is at ${input.grounding.locality}. ` +
         `Day ${Math.max(input.day, 1)} ${input.phase}, ` +
         `${input.stepContext.sendMoment} update. ` +
-        `Just snapped: ${input.imagePrompt.slice(0, 40)}...`,
+        `Just snapped: ${(input.imageSummary ?? "no-summary").slice(0, 40)}...`,
       provider: "fake-grounding",
     };
   }

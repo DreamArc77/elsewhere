@@ -646,7 +646,7 @@ export interface GroundingPort {
     stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
     resolvedState: ResolvedAgentState;
-    imagePrompt: string;
+    imageSummary?: string;
   }): Promise<{ caption: string; provider: string }>;
   composeCompanionReply(input: {
     conversationKey: string;

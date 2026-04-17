@@ -186,7 +186,8 @@ describe("text provider routing", () => {
         groundingSources: [],
       },
       resolvedState,
-      imagePrompt: "普通的出发前随手拍",
+      imageSummary:
+        '{"scene":"packing corner","otherPeopleVisible":"none","notableDetails":["open suitcase"]}',
     });
 
     expect(caption.caption).toBe("只是很普通的一张出发前随拍。");
@@ -284,7 +285,8 @@ describe("text provider routing", () => {
         groundingSources: [],
       },
       resolvedState,
-      imagePrompt: "鏅€氱殑鍑哄彂鍓嶉殢鎵嬫媿",
+      imageSummary:
+        '{"scene":"packing corner","otherPeopleVisible":"none","notableDetails":["open suitcase"]}',
     });
 
     expect(prepareSimpleCompletionModel).toHaveBeenCalledWith(

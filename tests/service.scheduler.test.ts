@@ -382,7 +382,7 @@ describe("service scheduling and crash recovery", () => {
     );
   });
 
-  it("keeps the image summary instruction out of compose-caption while preserving it for image generation", async () => {
+  it("passes image summary into compose-caption while preserving the summary instruction only for image generation", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
@@ -394,7 +394,7 @@ describe("service scheduling and crash recovery", () => {
     });
 
     let generatedImagePrompt = "";
-    let captionImagePrompt = "";
+    let captionImageSummary = "";
 
     const originalGenerateImage =
       runtime.imageGeneration.generateImage.bind(runtime.imageGeneration);
@@ -406,7 +406,7 @@ describe("service scheduling and crash recovery", () => {
     const originalComposeCaption =
       runtime.grounding.composeCaption.bind(runtime.grounding);
     runtime.grounding.composeCaption = async (input) => {
-      captionImagePrompt = input.imagePrompt;
+      captionImageSummary = input.imageSummary ?? "";
       return await originalComposeCaption(input);
     };
 
@@ -419,7 +419,7 @@ describe("service scheduling and crash recovery", () => {
     await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
 
     expect(generatedImagePrompt).toContain("输出该图片的提要信息");
-    expect(captionImagePrompt).not.toContain("输出该图片的提要信息");
-    expect(captionImagePrompt).not.toContain('"otherPeopleVisible"');
+    expect(captionImageSummary).toContain('"otherPeopleVisible"');
+    expect(captionImageSummary).not.toContain("输出该图片的提要信息");
   });
 });

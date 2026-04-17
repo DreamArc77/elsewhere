@@ -112,21 +112,18 @@ export async function renderCaptionPrompt(input: {
   stepContext: RuntimeStepContext;
   grounding: PhaseGroundingResult;
   resolvedState: ResolvedAgentState;
-  currentStateSummary: string;
-  currentStateGrounding: string;
-  imagePrompt: string;
+  currentSituation: string;
+  recentImageSummary: string;
 }): Promise<string> {
   const template = await loadTemplate("compose-caption.md");
   return renderTemplate(template, {
     personaSummary: buildPersonaSummary(input.persona),
-    destinationCity: input.request.destinationCity,
     phase: input.phase,
     day: input.day,
     stepContext: summarizeStepContext(input.stepContext),
     grounding: JSON.stringify(input.grounding, null, 2),
-    currentStateSummary: input.currentStateSummary,
-    currentStateGrounding: input.currentStateGrounding,
-    imagePrompt: input.imagePrompt,
+    currentSituation: input.currentSituation,
+    recentImageSummary: input.recentImageSummary,
   });
 }
 

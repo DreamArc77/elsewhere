@@ -280,6 +280,101 @@ function buildCurrentStateSummary(input: {
   );
 }
 
+function buildCaptionCurrentActivity(
+  resolvedState: ResolvedAgentState,
+): string {
+  const activity = resolvedState.state.currentActivity;
+  if (activity) {
+    return [activity.location, activity.description].filter(Boolean).join(" / ");
+  }
+
+  switch (resolvedState.stage.substate) {
+    case "planning":
+      return "正在自己的房间中做旅行计划";
+    case "packing":
+      return "正在自己的房间中整理行李，准备出发";
+    case "before_departure":
+      return "正在去机场或车站的路上";
+    case "departing":
+      return "正在乘坐这次出发的大交通";
+    case "arrive":
+      return "刚到达，正在缓一缓并准备安顿下来";
+    case "freetime":
+      return "正处在两个活动之间的空档";
+    case "moving_to_next_activity":
+      return "正在前往下一个活动地点";
+    case "transport":
+      return "正在通勤途中";
+    case "sightseeing":
+      return "正在观光打卡";
+    case "food":
+      return "正在吃饭或找地方吃饭";
+    case "accommodation":
+      return "正在住处休息或处理入住相关的事";
+    case "shopping":
+      return "正在逛店或买东西";
+    case "idle":
+    default:
+      return "暂时没有在旅行中";
+  }
+}
+
+function formatCaptionActivityBrief(
+  activity: ResolvedAgentState["state"]["previousActivity"] | ResolvedAgentState["state"]["nextActivity"],
+): string {
+  if (!activity) {
+    return "无";
+  }
+
+  return [
+    `类型：${activity.type}`,
+    `地点：${activity.location}`,
+    `详情：${activity.description}`,
+  ].join("\n");
+}
+
+function buildCaptionCurrentSituation(
+  resolvedState: ResolvedAgentState,
+): string {
+  const state = resolvedState.state;
+  const stage = resolvedState.stage;
+  const arrivalContext = state.arrivalContext ?? state.currentActivity?.arrival_context ?? null;
+  const route = state.route ?? state.currentActivity?.route ?? null;
+  const weatherForecast =
+    state.weatherForecast ??
+    state.currentActivity?.real_time_info.live_update ??
+    state.nextActivity?.real_time_info.live_update ??
+    "无";
+
+  return [
+    `当前阶段：${stage.substate}`,
+    `当前阶段开始时间：${stage.startedAtUtc}`,
+    `当前阶段结束时间：${stage.endsAtUtc ?? "未知"}`,
+    `当前地点：${state.location ?? "未知"}`,
+    `当前地址：${state.address ?? "无"}`,
+    `当前天气：${weatherForecast}`,
+    `当前活动：${buildCaptionCurrentActivity(resolvedState)}`,
+    `上一个活动：${formatCaptionActivityBrief(state.previousActivity)}`,
+    "下一个活动：",
+    formatCaptionActivityBrief(state.nextActivity),
+    `arrivalContext：${arrivalContext ? JSON.stringify(arrivalContext, null, 2) : "无"}`,
+    `route：${route ? JSON.stringify(route, null, 2) : "无"}`,
+    `note：${state.note ?? "无"}`,
+  ].join("\n");
+}
+
+function buildCaptionRecentImageSummary(imageSummary?: string): string {
+  if (!imageSummary?.trim()) {
+    return JSON.stringify({ available: false }, null, 2);
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(imageSummary), null, 2);
+  } catch {
+    return imageSummary.trim();
+  }
+}
+
 function buildCurrentStateGrounding(
   resolvedState: ResolvedAgentState,
 ): string {
@@ -1007,14 +1102,11 @@ export class GeminiRestGroundingAdapter
     stepContext: RuntimeStepContext;
     grounding: PhaseGroundingResult;
     resolvedState: ResolvedAgentState;
-    imagePrompt: string;
+    imageSummary?: string;
   }): Promise<{ caption: string; provider: string }> {
     const startedAt = nowIso();
     const promptProvider = await this.describeTextProvider();
-    const currentStateSummary = buildCurrentStateSummary({
-      resolvedState: input.resolvedState,
-    });
-    const currentStateGrounding = buildCurrentStateGrounding(input.resolvedState);
+    const currentSituation = buildCaptionCurrentSituation(input.resolvedState);
     const prompt = await renderCaptionPrompt({
       persona: input.persona,
       request: input.request,
@@ -1023,9 +1115,8 @@ export class GeminiRestGroundingAdapter
       stepContext: input.stepContext,
       grounding: input.grounding,
       resolvedState: input.resolvedState,
-      currentStateSummary,
-      currentStateGrounding,
-      imagePrompt: input.imagePrompt,
+      currentSituation,
+      recentImageSummary: buildCaptionRecentImageSummary(input.imageSummary),
     });
 
     await this.logPromptEntry({
