@@ -201,6 +201,51 @@ describe("travel companion command UX", () => {
     expect(reply.text).toContain("/elsewhere model");
   });
 
+  it("sends the idle destination guide immediately on activate after onboarding is complete", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = createDeps(runtime, bindings);
+    await seedCompletedOnboarding(runtime);
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/elsewhere activate"),
+      deps,
+    );
+    await seedSystemLocale(runtime, keyForDefaultChat());
+
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      originCity: "Osaka",
+      traits: ["gentle", "curious"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const binding = await bindings.get(keyForDefaultChat());
+    await bindings.upsert({
+      ...binding!,
+      defaultPersonaId: persona.personaId,
+    });
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/elsewhere activate"),
+      deps,
+    );
+
+    expect(reply.isError).toBeUndefined();
+    expect(reply.text).toContain("旅伴模式已开启");
+    expect(reply.text).toContain("现在直接告诉旅伴一个想去的目的地就行");
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text?.length ?? 0).toBeGreaterThan(
+      0,
+    );
+    const state = await runtime.conversationStateRepository.getByKey(
+      keyForDefaultChat(),
+    );
+    expect(state?.awaitingDestination).toBe(true);
+    expect(state?.idleGuideSentAt).toBeTruthy();
+  });
+
   it("creates a persona from an image URL pasted in the setup command after locale is selected", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);

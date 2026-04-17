@@ -243,7 +243,7 @@ async function activateConversation(
   if (!activatedBinding.lastTripId && !state.awaitingDestination) {
     await deps.conversationService.enterIdleAwaitingDestination({
       binding: activatedBinding,
-      sendGuideNow: false,
+      sendGuideNow: true,
       reason: "activate",
     });
   }
