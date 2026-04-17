@@ -26,8 +26,9 @@ export interface PersonaProfile {
   /** @deprecated legacy alias kept only for compatibility migration */
   homeCity?: string;
   traits: string[];
-  relationship: string;
   toneStyle: string;
+  relationship: string;
+  userAddressing?: string;
   referenceImageAsset: string;
 }
 
@@ -310,8 +311,9 @@ export type SetupStep =
   | "name"
   | "origin_city"
   | "traits"
-  | "relationship"
   | "tone"
+  | "relationship"
+  | "user_addressing"
   | "persona_review"
   | "reference_photo_choice"
   | "reference_photo"
@@ -330,8 +332,9 @@ export interface SetupSessionDraft {
   /** @deprecated legacy alias kept only for compatibility migration */
   homeCity?: string;
   traits?: string[];
-  relationship?: string;
   toneStyle?: string;
+  relationship?: string;
+  userAddressing?: string;
   referenceImageAsset?: string;
   textProviderKind?: TravelCompanionTextProviderKind;
   openaiBaseUrl?: string;

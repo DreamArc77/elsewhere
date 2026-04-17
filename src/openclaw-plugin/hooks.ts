@@ -704,7 +704,7 @@ async function finalizeSetupSession(input: {
             buildOnboardingGateMessage({
               binding: updatedBinding,
               readiness,
-              hasSetupSession: false,
+              setupSession: null,
             }),
           ].join("\n"),
       dedupeKey: `setup-complete:${updatedBinding.key}:${persona.personaId}`,
@@ -777,7 +777,7 @@ async function finalizeSetupSession(input: {
             buildOnboardingGateMessage({
               binding: inbound.binding,
               readiness,
-              hasSetupSession: false,
+              setupSession: null,
             }),
           ].join("\n"),
     dedupeKey: `setup-complete:${inbound.binding.key}:model`,

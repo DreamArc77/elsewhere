@@ -189,7 +189,7 @@ async function activateConversation(
         buildOnboardingGateMessage({
           binding: activatedBinding,
           readiness,
-          hasSetupSession: Boolean(state?.setupSession),
+          setupSession: state?.setupSession,
         }),
       ].join("\n"),
     };
@@ -283,8 +283,9 @@ async function setupPersona(
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
-        relationship: requiredOption(options, "relationship"),
         toneStyle: requiredOption(options, "tone"),
+        relationship: requiredOption(options, "relationship"),
+        userAddressing: requiredOption(options, "user-address"),
         referenceImageAsset,
       },
       existing: input.mode === "edit" ? currentPersona : null,
@@ -459,9 +460,8 @@ async function startTrip(
       text: buildOnboardingGateMessage({
         binding: binding.record,
         readiness,
-        hasSetupSession: Boolean(
-          (await deps.conversationStates.getByKey(binding.record.key))?.setupSession,
-        ),
+        setupSession: (await deps.conversationStates.getByKey(binding.record.key))
+          ?.setupSession,
       }),
       isError: true,
     };
@@ -1149,8 +1149,9 @@ function hasLegacySetupOptions(
       options["origin-city"] ||
       options["home-city"] ||
       options.traits ||
-      options.relationship ||
       options.tone ||
+      options.relationship ||
+      options["user-address"] ||
       options.image ||
       extractReferenceImageInput(options.image, commandBody),
   );
@@ -1212,8 +1213,8 @@ function helpText(): string {
     "/travel-companion setup                      # edit the current Ta",
     "/travel-companion create                     # create a brand new Ta",
     "/travel-companion model                      # reconfigure text model / Gemini key",
-    "/travel-companion setup --name Mori --origin-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm --image /abs/path/ref.png",
-    "/travel-companion setup --name Mori --origin-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm --image https://example.com/ref.webp",
+    "/travel-companion setup --name Mori --origin-city Hong-Kong --traits gentle,curious --tone warm --relationship soulmate --user-address baby --image /abs/path/ref.png",
+    "/travel-companion setup --name Mori --origin-city Hong-Kong --traits gentle,curious --tone warm --relationship soulmate --user-address baby --image https://example.com/ref.webp",
     "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
     "/travel-companion status [--trip <id>]",
     "/travel-companion tick [--trip <id>]  # force delayed replies + the next trip step immediately",

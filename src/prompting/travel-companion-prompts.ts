@@ -79,9 +79,11 @@ function summarizeStepContext(stepContext: RuntimeStepContext): string {
 export function buildPersonaSummary(persona: StoredPersonaProfile): string {
   return [
     `Name: ${persona.name}`,
-    `Traits: ${persona.traits.join(", ")}`,
-    `Relationship to user: ${persona.relationship}`,
+    `Residence city: ${persona.originCity || persona.homeCity || "unknown"}`,
+    `Personality traits: ${persona.traits.join(", ")}`,
     `Tone style: ${persona.toneStyle}`,
+    `Relationship to user: ${persona.relationship}`,
+    `How you address the user: ${persona.userAddressing || "未设置"}`,
   ].join("\n");
 }
 

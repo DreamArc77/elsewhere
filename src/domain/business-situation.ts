@@ -547,10 +547,11 @@ function buildResolvedIdentity(input: {
       personaSummary: input.persona
         ? [
             `Name: ${input.persona.name}`,
-            `Origin city: ${resolvePersonaOriginCity(input.persona) ?? "unknown"}`,
-            `Traits: ${input.persona.traits.join(", ")}`,
-            `Relationship to user: ${input.persona.relationship}`,
+            `Residence city: ${resolvePersonaOriginCity(input.persona) ?? "unknown"}`,
+            `Personality traits: ${input.persona.traits.join(", ")}`,
             `Tone style: ${input.persona.toneStyle}`,
+            `Relationship to user: ${input.persona.relationship}`,
+            `How you address the user: ${input.persona.userAddressing || "未设置"}`,
         ].join("\n")
       : undefined,
     relationshipSummary: input.persona?.relationship,

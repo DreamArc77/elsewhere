@@ -36,8 +36,9 @@ function advancePersonaStep(
     | "name"
     | "origin_city"
     | "traits"
-    | "relationship"
     | "tone"
+    | "relationship"
+    | "user_addressing"
     | "persona_review",
 ): SetupSession["step"] {
   if (session.returnToReview && nextStep !== "persona_review") {
@@ -50,12 +51,13 @@ function advancePersonaStep(
 function buildPersonaSummary(session: SetupSession): string[] {
   return [
     `名字：${displayValue(session.draft.name)}`,
-    `默认出发城市：${displayValue(
+    `Ta 居住的城市：${displayValue(
       session.draft.originCity || session.draft.homeCity,
     )}`,
-    `特征：${displayList(session.draft.traits)}`,
-    `关系：${displayValue(session.draft.relationship)}`,
+    `性格特征：${displayList(session.draft.traits)}`,
     `说话风格：${displayValue(session.draft.toneStyle)}`,
+    `和你的关系：${displayValue(session.draft.relationship)}`,
+    `对你的称呼：${displayValue(session.draft.userAddressing)}`,
   ];
 }
 
@@ -80,11 +82,12 @@ function buildPersonaStepPrompt(session: SetupSession): string {
         "",
         "接下来我会依次确认：",
         "1. 名字",
-        "2. 默认出发城市",
-        "3. 特征",
-        "4. 关系",
-        "5. 说话风格",
-        "6. 参考图",
+        "2. Ta 居住的城市",
+        "3. 性格特征",
+        "4. 说话风格",
+        "5. 和你的关系",
+        "6. 对你的称呼",
+        "7. 参考图",
         "",
         "准备好了回复 1",
       ].join("\n");
@@ -110,34 +113,21 @@ function buildPersonaStepPrompt(session: SetupSession): string {
             currentValue: displayValue(
               session.draft.originCity || session.draft.homeCity,
             ),
-            body: ["Ta 默认从哪座城市出发？"],
+            body: ["Ta 目前居住在哪座城市？"],
           })
-        : "Ta 默认从哪座城市出发？";
+        : "Ta 目前居住在哪座城市？";
     case "traits":
       return editing
         ? buildCurrentValuePrompt({
             currentValue: displayList(session.draft.traits),
             body: [
-              "用几个词描述一下 Ta 的特征。",
+              "用几个词描述一下 Ta 的性格特征。",
               "例如：地雷系、敏感、黏人",
             ],
           })
-        : ["用几个词描述一下 Ta 的特征。", "例如：地雷系、敏感、黏人"].join(
+        : ["用几个词描述一下 Ta 的性格特征。", "例如：地雷系、敏感、黏人"].join(
             "\n",
           );
-    case "relationship":
-      return editing
-        ? buildCurrentValuePrompt({
-            currentValue: displayValue(session.draft.relationship),
-            body: [
-              "Ta 和你是什么关系？",
-              "例如：异地恋女友、暧昧对象、旅行搭子",
-            ],
-          })
-        : [
-            "Ta 和你是什么关系？",
-            "例如：异地恋女友、暧昧对象、旅行搭子",
-          ].join("\n");
     case "tone":
       return editing
         ? buildCurrentValuePrompt({
@@ -151,6 +141,32 @@ function buildPersonaStepPrompt(session: SetupSession): string {
             "Ta 平时说话是什么感觉？",
             "例如：病娇、撒娇、冷淡、元气",
           ].join("\n");
+    case "relationship":
+      return editing
+        ? buildCurrentValuePrompt({
+            currentValue: displayValue(session.draft.relationship),
+            body: [
+              "Ta 和你是什么关系？",
+              "例如：异地恋女友、暧昧对象、旅行搭子",
+            ],
+          })
+        : [
+            "Ta 和你是什么关系？",
+            "例如：异地恋女友、暧昧对象、旅行搭子",
+          ].join("\n");
+    case "user_addressing":
+      return editing
+        ? buildCurrentValuePrompt({
+            currentValue: displayValue(session.draft.userAddressing),
+            body: [
+              "Ta 平时怎么称呼你？",
+              "例如：哥哥、宝宝、宝、名字里的称呼",
+            ],
+          })
+        : [
+            "Ta 平时怎么称呼你？",
+            "例如：哥哥、宝宝、宝、名字里的称呼",
+          ].join("\n");
     case "persona_review":
       return [
         "目前资料如下：",
@@ -160,11 +176,12 @@ function buildPersonaStepPrompt(session: SetupSession): string {
         "回复：",
         "1. 确认并继续处理参考图",
         "2. 修改名字",
-        "3. 修改默认出发城市",
-        "4. 修改特征",
-        "5. 修改关系",
-        "6. 修改说话风格",
-        `7. 取消本次${editing ? "修改" : "设置"}`,
+        "3. 修改 Ta 居住的城市",
+        "4. 修改性格特征",
+        "5. 修改说话风格",
+        "6. 修改和你的关系",
+        "7. 修改对你的称呼",
+        `8. 取消本次${editing ? "修改" : "设置"}`,
       ].join("\n");
     case "reference_photo_choice":
       if (editing && session.draft.referenceImageAsset) {
@@ -231,8 +248,9 @@ export function buildPersonaSetupDraft(
     name: persona.name,
     originCity: persona.originCity || persona.homeCity,
     traits: [...persona.traits],
-    relationship: persona.relationship,
     toneStyle: persona.toneStyle,
+    relationship: persona.relationship,
+    userAddressing: persona.userAddressing,
     referenceImageAsset: persona.referenceImageAsset,
   };
 }
@@ -365,6 +383,13 @@ export function advanceSetupSessionWithText(input: {
         if (!shouldKeepCurrent(text, input.session)) {
           next.draft.traits = normalizeTraitsInput(text);
         }
+        next.step = advancePersonaStep(input.session, "tone");
+        next.returnToReview = false;
+        return { session: next, completed: false };
+      case "tone":
+        if (!shouldKeepCurrent(text, input.session)) {
+          next.draft.toneStyle = text;
+        }
         next.step = advancePersonaStep(input.session, "relationship");
         next.returnToReview = false;
         return { session: next, completed: false };
@@ -372,12 +397,15 @@ export function advanceSetupSessionWithText(input: {
         if (!shouldKeepCurrent(text, input.session)) {
           next.draft.relationship = text;
         }
-        next.step = advancePersonaStep(input.session, "tone");
+        next.step = advancePersonaStep(input.session, "user_addressing");
         next.returnToReview = false;
         return { session: next, completed: false };
-      case "tone":
+      case "user_addressing":
+        if (shouldKeepCurrent(text, input.session) && !next.draft.userAddressing) {
+          throw new Error("当前还没有设定 Ta 对你的称呼，这一项需要补一个。");
+        }
         if (!shouldKeepCurrent(text, input.session)) {
-          next.draft.toneStyle = text;
+          next.draft.userAddressing = text;
         }
         next.step = "persona_review";
         next.returnToReview = false;
@@ -401,17 +429,21 @@ export function advanceSetupSessionWithText(input: {
             next.returnToReview = true;
             return { session: next, completed: false };
           case "5":
-            next.step = "relationship";
-            next.returnToReview = true;
-            return { session: next, completed: false };
-          case "6":
             next.step = "tone";
             next.returnToReview = true;
             return { session: next, completed: false };
+          case "6":
+            next.step = "relationship";
+            next.returnToReview = true;
+            return { session: next, completed: false };
           case "7":
+            next.step = "user_addressing";
+            next.returnToReview = true;
+            return { session: next, completed: false };
+          case "8":
             return { session: next, completed: false, cancelled: true };
           default:
-            throw new Error("请回复 1-7 里的一个选项。");
+            throw new Error("请回复 1-8 里的一个选项。");
         }
       case "reference_photo_choice":
         if (text === "1") {
@@ -641,10 +673,14 @@ export function buildPersonaUpdatedMessage(persona: StoredPersonaProfile): strin
 export function buildOnboardingGateMessage(input: {
   binding: ConversationBindingRecord;
   readiness: OnboardingReadiness;
-  hasSetupSession: boolean;
+  setupSession?: SetupSession | null;
 }): string {
-  if (input.hasSetupSession) {
+  if (input.setupSession?.kind === "persona") {
     return "Ta 的资料还没配完。继续用 /travel-companion setup，然后按提示一步步回复就行。";
+  }
+
+  if (input.setupSession?.kind === "model") {
+    return "模型配置还没配完。继续用 /travel-companion model，然后按提示一步步回复就行。";
   }
 
   const missing: string[] = [];
@@ -658,10 +694,26 @@ export function buildOnboardingGateMessage(input: {
     missing.push("Gemini key（planning 和生图共用）");
   }
 
+  if (!input.readiness.hasPersona && !input.readiness.hasTextProvider && !input.readiness.hasGeminiKey) {
+    return [
+      "还没完成首次配置。",
+      "先运行 /travel-companion setup，完成 Ta 的资料创建。",
+      "再运行 /travel-companion model，完成文本模型和 Gemini key 配置。",
+    ].join("\n");
+  }
+
+  if (!input.readiness.hasPersona) {
+    return [
+      `还差最后几项配置：${missing.join("、")}`,
+      "先运行 /travel-companion setup，我会一步步带你配完 Ta 的资料。",
+      "Ta 的资料配好后，再用 /travel-companion model 补模型和 key。",
+    ].join("\n");
+  }
+
   return [
-    `还差最后几项配置：${missing.join("、")}`,
-    "先运行 /travel-companion setup，我会一步步带你配完 Ta 的资料。",
-    "模型和 key 也可以单独用 /travel-companion model 配。",
+    `还差：${missing.join("、")}`,
+    "Ta 的资料已经有了。",
+    "现在运行 /travel-companion model，把文本模型和 Gemini key 配完就行。",
   ].join("\n");
 }
 
@@ -674,8 +726,9 @@ export function createCompletedPersonaProfile(input: {
     !draft.name ||
     !(draft.originCity || draft.homeCity) ||
     !draft.traits?.length ||
-    !draft.relationship ||
     !draft.toneStyle ||
+    !draft.relationship ||
+    !draft.userAddressing ||
     !draft.referenceImageAsset
   ) {
     throw new Error("setup 还没收集完整的人设信息。");
@@ -687,8 +740,9 @@ export function createCompletedPersonaProfile(input: {
     name: draft.name,
     originCity: draft.originCity || draft.homeCity,
     traits: draft.traits,
-    relationship: draft.relationship,
     toneStyle: draft.toneStyle,
+    relationship: draft.relationship,
+    userAddressing: draft.userAddressing,
     referenceImageAsset: draft.referenceImageAsset,
   };
 }

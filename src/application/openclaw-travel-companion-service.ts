@@ -70,8 +70,14 @@ export class OpenClawTravelCompanionService {
     const persona: StoredPersonaProfile = {
       personaId: randomUUID(),
       createdAt: nowIso(this.dependencies.clock),
-      ...profile,
+      name: profile.name,
       originCity,
+      homeCity: profile.homeCity,
+      traits: profile.traits,
+      toneStyle: profile.toneStyle,
+      relationship: profile.relationship,
+      userAddressing: profile.userAddressing,
+      referenceImageAsset: profile.referenceImageAsset,
     };
 
     await this.dependencies.personaRepository.save(persona);

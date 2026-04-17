@@ -157,7 +157,7 @@ describe("travel companion command UX", () => {
 
     const reply = await handleTravelCompanionCommand(
       createTelegramContext(
-        "/travel-companion setup --name Mori --home-city Hong-Kong --traits gentle --relationship soulmate --tone warm https://example.com/mori.webp",
+        "/travel-companion setup --name Mori --home-city Hong-Kong --traits gentle --tone warm --relationship soulmate --user-address baby https://example.com/mori.webp",
       ),
       createDeps(runtime, bindings),
     );
@@ -280,7 +280,7 @@ describe("travel companion command UX", () => {
 
     const reply = await handleTravelCompanionCommand(
       createTelegramContext(
-        "/travel-companion setup --name Mori --home-city Hong-Kong --traits gentle,curious --relationship soulmate --tone warm https://example.com/mori.webp",
+        "/travel-companion setup --name Mori --home-city Hong-Kong --traits gentle,curious --tone warm --relationship soulmate --user-address baby https://example.com/mori.webp",
       ),
       deps,
     );
