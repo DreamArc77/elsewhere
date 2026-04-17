@@ -2,20 +2,25 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 import { handleTravelCompanionCommand } from "./src/openclaw-plugin/command.js";
 import { BindingRegistryStore } from "./src/openclaw-plugin/binding-state.js";
+import {
+  LEGACY_COMMAND_NAME,
+  PRIMARY_COMMAND_NAME,
+} from "./src/openclaw-plugin/command-alias.js";
 import { resolvePluginConfig } from "./src/openclaw-plugin/config.js";
 import { createRuntimeBundle, startPollingService } from "./src/openclaw-plugin/service.js";
 import { handleTravelCompanionInboundClaim } from "./src/openclaw-plugin/hooks.js";
 
 export default definePluginEntry({
   id: "openclaw-travel-companion",
-  name: "OpenClaw Travel Companion",
-  description: "Travel-frog-style soulmate travel companion with proactive postcards.",
+  name: "elsewhere",
+  description: "A companion travel plugin with proactive postcards and delayed chat.",
   configSchema: {
     jsonSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         geminiApiKey: { type: "string" },
+        openrouterApiKey: { type: "string" },
         defaultOriginCity: { type: "string" },
         pollIntervalSeconds: { type: "integer", minimum: 15, maximum: 3600 },
         openclawBinaryPath: { type: "string" },
@@ -23,6 +28,8 @@ export default definePluginEntry({
         textModel: { type: "string" },
         imageModel: { type: "string" },
         geminiBaseUrl: { type: "string" },
+        openrouterBaseUrl: { type: "string" },
+        logMode: { type: "string", enum: ["safe", "debug"] },
       },
     },
     validate(value) {
@@ -94,39 +101,53 @@ export default definePluginEntry({
       }
     });
 
-    api.registerCommand({
-      name: "travel-companion",
-      nativeNames: { default: "travel-companion" },
-      nativeProgressMessages: { default: "Travel companion is getting organized..." },
-      description: "Bind a conversation, create a persona, and start or inspect trips.",
-      acceptsArgs: true,
-      requireAuth: true,
-      async handler(ctx) {
-        try {
-          const runtimeBundle = await getRuntimeBundle();
-          return await handleTravelCompanionCommand(ctx, {
-            service: runtimeBundle.service,
-            conversationService: runtimeBundle.conversationService,
-            tripRepository: runtimeBundle.tripRepository,
-            personaRepository: runtimeBundle.personaRepository,
-            conversationStates: runtimeBundle.conversationStateRepository,
-            globalConfigRepository: runtimeBundle.globalConfigRepository,
-            messenger: runtimeBundle.messenger,
-            bindings,
-            pluginConfig,
-            runtimeDataPaths: runtimeBundle.runtimeDataPaths,
-            logger: runtimeBundle.logger,
-          });
-        } catch (error) {
-          return {
-            text:
-              error instanceof Error
-                ? error.message
-                : `Travel companion failed: ${String(error)}`,
-            isError: true,
-          };
-        }
-      },
-    });
+    const registerCompanionCommand = (
+      name: string,
+      description: string,
+      progressMessage: string,
+    ) => {
+      api.registerCommand({
+        name,
+        nativeNames: { default: name },
+        nativeProgressMessages: { default: progressMessage },
+        description,
+        acceptsArgs: true,
+        requireAuth: true,
+        async handler(ctx) {
+          try {
+            const runtimeBundle = await getRuntimeBundle();
+            return await handleTravelCompanionCommand(ctx, {
+              service: runtimeBundle.service,
+              conversationService: runtimeBundle.conversationService,
+              tripRepository: runtimeBundle.tripRepository,
+              personaRepository: runtimeBundle.personaRepository,
+              conversationStates: runtimeBundle.conversationStateRepository,
+              globalConfigRepository: runtimeBundle.globalConfigRepository,
+              messenger: runtimeBundle.messenger,
+              bindings,
+              pluginConfig,
+              runtimeDataPaths: runtimeBundle.runtimeDataPaths,
+              logger: runtimeBundle.logger,
+            });
+          } catch (error) {
+            return {
+              text: "This action could not be completed right now. Please try again later.",
+              isError: true,
+            };
+          }
+        },
+      });
+    };
+
+    registerCompanionCommand(
+      PRIMARY_COMMAND_NAME,
+      "Set up your companion, configure models, and manage trips.",
+      "elsewhere is getting ready...",
+    );
+    registerCompanionCommand(
+      LEGACY_COMMAND_NAME,
+      "Legacy alias for elsewhere.",
+      "elsewhere is getting ready...",
+    );
   },
 });

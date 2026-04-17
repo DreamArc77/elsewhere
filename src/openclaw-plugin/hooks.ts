@@ -15,11 +15,17 @@ import {
   HostMessengerPort,
   LoggerPort,
   PersonaRepository,
+  SystemLocale,
   TripRepository,
 } from "../domain/types.js";
 import { bindingKey } from "./binding-state.js";
 import { handleTravelCompanionCommand } from "./command.js";
 import { TravelCompanionPluginConfig } from "./config.js";
+import {
+  extractSetupImageCommandUrl,
+  isSupportedSlashCommand,
+  normalizeSupportedSlashCommand,
+} from "./command-alias.js";
 import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 import {
   advanceSetupSessionWithPhoto,
@@ -32,6 +38,7 @@ import {
   renderSetupStepPrompt,
 } from "./onboarding.js";
 import { hasConfiguredGeminiProvider } from "./gemini-provider-config.js";
+import { getSystemCatalog, getSystemLocale } from "./i18n/catalog.js";
 import { materializeReferenceImage } from "./reference-image.js";
 
 interface InboundClaimEvent {
@@ -163,7 +170,8 @@ export async function handleTravelCompanionInboundClaim(
     }
   }
 
-  if (trimmed.startsWith("/travel-companion")) {
+  if (isSupportedSlashCommand(trimmed)) {
+    const normalizedCommandBody = normalizeSupportedSlashCommand(rawText);
     const messageId = String(event.messageId ?? "");
     const duplicateByMessageId =
       messageId.length > 0
@@ -175,19 +183,19 @@ export async function handleTravelCompanionInboundClaim(
     const inFlightKey =
       messageId.length > 0
         ? `${binding.key}:${messageId}`
-        : `${binding.key}:${trimmed}`;
-    const inFlightBodyKey = `${binding.key}:${trimmed}`;
+        : `${binding.key}:${normalizedCommandBody}`;
+    const inFlightBodyKey = `${binding.key}:${normalizedCommandBody}`;
     if (duplicateByMessageId || inFlightCommandKeys.has(inFlightKey) || inFlightCommandBodies.has(inFlightBodyKey)) {
       await logCommandBridgeEvent(deps.logger, {
         binding,
         runId: `command:${messageId || randomUUID()}`,
         event: "command.bridge.duplicate",
         decision:
-          "Skipped a duplicate bridged travel-companion slash command delivery.",
+          "Skipped a duplicate bridged companion slash command delivery.",
         provider: "inbound-claim",
         status: "skipped",
         details: {
-          commandBody: rawText,
+          commandBody: normalizedCommandBody,
           messageId,
           mode: binding.mode,
           duplicateByMessageId,
@@ -204,11 +212,11 @@ export async function handleTravelCompanionInboundClaim(
         binding,
         runId: commandRunId,
         event: "command.bridge.received",
-        decision: "Received travel-companion slash command inside a companion-exclusive conversation.",
+        decision: "Received a companion slash command inside a companion-exclusive conversation.",
         provider: "inbound-claim",
         status: "success",
         details: {
-          commandBody: rawText,
+          commandBody: normalizedCommandBody,
           messageId,
           mode: binding.mode,
         },
@@ -216,7 +224,7 @@ export async function handleTravelCompanionInboundClaim(
 
       const commandStartedAt = Date.now();
       const reply = await handleTravelCompanionCommand(
-        buildSyntheticCommandContext(event, ctx, rawText),
+        buildSyntheticCommandContext(event, ctx, normalizedCommandBody),
         {
           service: deps.service,
           conversationService: deps.conversationService,
@@ -235,12 +243,12 @@ export async function handleTravelCompanionInboundClaim(
         binding,
         runId: commandRunId,
         event: "command.bridge.executed",
-        decision: "Executed the bridged travel-companion slash command.",
+        decision: "Executed the bridged companion slash command.",
         provider: "command-handler",
         status: "success",
         startedAtMs: commandStartedAt,
         details: {
-          commandBody: rawText,
+          commandBody: normalizedCommandBody,
           messageId,
           isError: reply.isError ?? false,
         },
@@ -261,7 +269,7 @@ export async function handleTravelCompanionInboundClaim(
         status: "success",
         startedAtMs: replyStartedAt,
         details: {
-          commandBody: rawText,
+          commandBody: normalizedCommandBody,
           messageId,
           replyLength: reply.text.length,
         },
@@ -281,7 +289,7 @@ export async function handleTravelCompanionInboundClaim(
         startedAtMs: Date.now(),
         errorCode: error instanceof Error ? error.name : "command_bridge_reply_failed",
         details: {
-          commandBody: rawText,
+          commandBody: normalizedCommandBody,
           messageId,
           errorMessage: error instanceof Error ? error.message : String(error),
         },
@@ -402,6 +410,8 @@ async function handleSetupSessionInbound(
     return false;
   }
 
+  const locale = getSystemLocale(input.state);
+  const catalog = getSystemCatalog(locale);
   const runId = `setup:${String(input.event.messageId ?? randomUUID())}`;
   const logConfigPatch = async (
     configPatch: Partial<
@@ -454,8 +464,7 @@ async function handleSetupSessionInbound(
       if (input.trimmed) {
         await deps.messenger.sendTextReply({
           binding: input.binding,
-          text:
-            "我现在在等你的参考图。你可以直接发一张图片；如果这个平台传图不稳定，也可以直接发图片 URL，或者发 `/travel-companion setup --image 图片URL`。",
+          text: catalog.setup.errorWaitingForPhotoWithFallback,
           dedupeKey: `setup-photo-reminder:${input.binding.key}:${runId}`,
         });
         return true;
@@ -479,6 +488,7 @@ async function handleSetupSessionInbound(
     const nextSession = advanceSetupSessionWithPhoto({
       session,
       referenceImageAsset,
+      locale,
     });
     if (nextSession.step === "complete") {
       await finalizeSetupSession({
@@ -487,6 +497,7 @@ async function handleSetupSessionInbound(
         runId,
         session: nextSession,
         globalConfig: await deps.globalConfigRepository.get(),
+        selectedLocale: undefined,
       });
       return true;
     }
@@ -498,7 +509,7 @@ async function handleSetupSessionInbound(
     });
     await deps.messenger.sendTextReply({
       binding: input.binding,
-      text: renderSetupStepPrompt(nextSession),
+      text: renderSetupStepPrompt(nextSession, locale),
       dedupeKey: `setup-step:${input.binding.key}:${runId}`,
     });
     return true;
@@ -514,11 +525,25 @@ async function handleSetupSessionInbound(
     advanced = advanceSetupSessionWithText({
       session,
       text: input.trimmed,
+      locale,
       globalConfig,
       fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
       fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
     });
   } catch (error) {
+    if (session.kind === "locale") {
+      await logCommandBridgeEvent(deps.logger, {
+        binding: input.binding,
+        runId,
+        event: "locale.selection.invalid_input",
+        decision: "Rejected invalid locale selection input.",
+        provider: "setup-session",
+        status: "failure",
+        details: {
+          input: input.trimmed,
+        },
+      });
+    }
     await deps.messenger.sendTextReply({
       binding: input.binding,
       text: error instanceof Error ? error.message : String(error),
@@ -537,8 +562,8 @@ async function handleSetupSessionInbound(
       binding: input.binding,
       text:
         session.kind === "persona" && session.personaTargetId
-          ? "已取消本次修改。"
-          : "已取消本次设置。",
+          ? catalog.setup.cancelledEdit
+          : catalog.setup.cancelledCreate,
       dedupeKey: `setup-cancel:${input.binding.key}:${runId}`,
     });
     return true;
@@ -586,7 +611,7 @@ async function handleSetupSessionInbound(
     });
     await deps.messenger.sendTextReply({
       binding: input.binding,
-      text: renderSetupStepPrompt(advanced.session),
+      text: renderSetupStepPrompt(advanced.session, locale),
       dedupeKey: `setup-step:${input.binding.key}:${runId}`,
     });
     return true;
@@ -611,6 +636,7 @@ async function handleSetupSessionInbound(
     runId,
     session: advanced.session,
     globalConfig: mergedConfig,
+    selectedLocale: advanced.selectedLocale,
   });
   return true;
 }
@@ -631,9 +657,76 @@ async function finalizeSetupSession(input: {
     Awaited<ReturnType<ConversationStateRepository["getByKey"]>>
   >["setupSession"];
   globalConfig: Awaited<ReturnType<GlobalConfigRepository["get"]>>;
+  selectedLocale?: SystemLocale;
 }): Promise<void> {
-  const { input: inbound, deps, runId, session, globalConfig } = input;
+  const {
+    input: inbound,
+    deps,
+    runId,
+    session,
+    globalConfig,
+    selectedLocale,
+  } = input;
   if (!session) {
+    return;
+  }
+
+  const locale = getSystemLocale(inbound.state);
+  const catalog = getSystemCatalog(locale);
+
+  if (session.kind === "locale") {
+    const localeToPersist = selectedLocale ?? locale;
+    const nextState = {
+      ...inbound.state,
+      systemLocale: localeToPersist,
+      setupSession: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    await deps.conversationStates.save(nextState);
+    await logCommandBridgeEvent(deps.logger, {
+      binding: inbound.binding,
+      runId,
+      event: "locale.selection.completed",
+      decision: "Persisted system locale selection.",
+      provider: "setup-session",
+      status: "success",
+      details: {
+        locale: localeToPersist,
+      },
+    });
+
+    const selectedCatalog = getSystemCatalog(localeToPersist);
+    const readiness = evaluateOnboardingReadiness({
+      binding: inbound.binding,
+      config: globalConfig,
+      fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+      fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
+    });
+    if (readiness.isComplete && !inbound.binding.lastTripId && !nextState.awaitingDestination) {
+      await deps.conversationService.enterIdleAwaitingDestination({
+        binding: inbound.binding,
+        sendGuideNow: false,
+        reason: "activate",
+      });
+    }
+    await deps.messenger.sendTextReply({
+      binding: inbound.binding,
+      text: [
+        selectedCatalog.setup.localeSelectionPersisted(
+          selectedCatalog.locale.eventLabel(localeToPersist),
+        ),
+        selectedCatalog.command.activateEnabled,
+        readiness.isComplete
+          ? selectedCatalog.command.activateReady
+          : buildOnboardingGateMessage({
+              binding: inbound.binding,
+              readiness,
+              setupSession: null,
+              locale: localeToPersist,
+            }),
+      ].join("\n"),
+      dedupeKey: `setup-complete:${inbound.binding.key}:locale`,
+    });
     return;
   }
 
@@ -668,6 +761,7 @@ async function finalizeSetupSession(input: {
       !inbound.state.idleGuideSentAt;
     const nextState = {
       ...inbound.state,
+      systemLocale: inbound.state.systemLocale,
       setupSession: undefined,
       idleEnteredAt:
         readiness.isComplete && !isEditingExistingPersona
@@ -706,16 +800,17 @@ async function finalizeSetupSession(input: {
       binding: updatedBinding,
       text: readiness.isComplete
         ? isEditingExistingPersona
-          ? buildPersonaUpdatedMessage(persona)
-          : buildPersonaCreatedMessage(persona)
+          ? buildPersonaUpdatedMessage(persona, locale)
+          : buildPersonaCreatedMessage(persona, locale)
         : [
             isEditingExistingPersona
-              ? buildPersonaUpdatedMessage(persona)
-              : `${persona.name} 创建完成。`,
+              ? buildPersonaUpdatedMessage(persona, locale)
+              : buildPersonaCreatedMessage(persona, locale),
             buildOnboardingGateMessage({
               binding: updatedBinding,
               readiness,
               setupSession: null,
+              locale,
             }),
           ].join("\n"),
       dedupeKey: `setup-complete:${updatedBinding.key}:${persona.personaId}`,
@@ -743,6 +838,7 @@ async function finalizeSetupSession(input: {
     !inbound.state.idleGuideSentAt;
   const nextState = {
     ...inbound.state,
+    systemLocale: inbound.state.systemLocale,
     setupSession: undefined,
     idleEnteredAt:
       readiness.isComplete && inbound.binding.defaultPersonaId
@@ -784,13 +880,14 @@ async function finalizeSetupSession(input: {
     binding: inbound.binding,
     text:
       readiness.isComplete && persona
-        ? "模型配置已更新。"
+        ? catalog.onboarding.modelUpdated
         : [
-            "模型配置已更新。",
+            catalog.onboarding.modelUpdated,
             buildOnboardingGateMessage({
               binding: inbound.binding,
               readiness,
               setupSession: null,
+              locale,
             }),
           ].join("\n"),
     dedupeKey: `setup-complete:${inbound.binding.key}:model`,
@@ -840,11 +937,10 @@ function extractReferenceImageSourceFromText(text: string): string | null {
     return null;
   }
 
-  const setupImageMatch = trimmed.match(
-    /\/travel-companion\s+setup\b[\s\S]*?--image\s+(\S+)/iu,
-  );
   const candidate =
-    setupImageMatch?.[1] ?? trimmed.match(/https?:\/\/\S+/iu)?.[0] ?? null;
+    extractSetupImageCommandUrl(trimmed) ??
+    trimmed.match(/https?:\/\/\S+/iu)?.[0] ??
+    null;
   if (!candidate) {
     return null;
   }

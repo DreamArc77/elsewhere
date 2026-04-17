@@ -30,6 +30,7 @@ export async function createTestRuntime(options?: {
   days?: number;
   now?: Date;
   hooks?: RuntimeHooks;
+  logMode?: "safe" | "debug";
 }) {
   const rootDir = await mkdtemp(join(tmpdir(), "openclaw-travel-"));
   const paths = await ensureRuntimeDataPaths(rootDir);
@@ -41,7 +42,7 @@ export async function createTestRuntime(options?: {
   const messenger = new FakeMessenger();
   const grounding = new FakeGroundingPort(options?.days ?? 3);
   const imageGeneration = new FakeImageGenerationPort();
-  const logger = new JsonlFileLogger(paths.logsDir);
+  const logger = new JsonlFileLogger(paths.logsDir, options?.logMode ?? "safe");
   const personaRepository = new JsonPersonaRepository(paths.personasDir);
   const tripRepository = new JsonTripRepository(paths.tripsDir);
   const conversationStateRepository = new JsonConversationStateRepository(

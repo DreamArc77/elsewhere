@@ -44,8 +44,8 @@ describe("buildOnboardingGateMessage", () => {
       setupSession: setupSession("persona"),
     });
 
-    expect(message).toContain("/travel-companion setup");
-    expect(message).not.toContain("/travel-companion model");
+    expect(message).toContain("/elsewhere setup");
+    expect(message).not.toContain("/elsewhere model");
   });
 
   it("continues model setup when model wizard is already open", () => {
@@ -55,8 +55,8 @@ describe("buildOnboardingGateMessage", () => {
       setupSession: setupSession("model"),
     });
 
-    expect(message).toContain("/travel-companion model");
-    expect(message).not.toContain("/travel-companion setup");
+    expect(message).toContain("/elsewhere model");
+    expect(message).not.toContain("/elsewhere setup");
   });
 
   it("guides full first-time onboarding in two steps", () => {
@@ -66,9 +66,9 @@ describe("buildOnboardingGateMessage", () => {
       setupSession: null,
     });
 
-    expect(message).toContain("还没完成首次配置");
-    expect(message).toContain("/travel-companion setup");
-    expect(message).toContain("/travel-companion model");
+    expect(message).toContain("欢迎来到 elsewhere");
+    expect(message).toContain("/elsewhere setup");
+    expect(message).toContain("/elsewhere model");
   });
 
   it("guides setup first when persona is missing", () => {
@@ -78,9 +78,9 @@ describe("buildOnboardingGateMessage", () => {
       setupSession: null,
     });
 
-    expect(message).toContain("Ta 的角色信息");
-    expect(message).toContain("/travel-companion setup");
-    expect(message).not.toContain("Ta 的资料已经有了");
+    expect(message).toContain("旅伴资料");
+    expect(message).toContain("/elsewhere setup");
+    expect(message).not.toContain("旅伴资料已经有了");
   });
 
   it("guides model when only provider config is missing", () => {
@@ -91,8 +91,8 @@ describe("buildOnboardingGateMessage", () => {
     });
 
     expect(message).toContain("文本模型配置");
-    expect(message).toContain("Ta 的资料已经有了");
-    expect(message).toContain("/travel-companion model");
+    expect(message).toContain("旅伴资料已经有了");
+    expect(message).toContain("/elsewhere model");
   });
 
   it("guides model when only gemini key is missing", () => {
@@ -103,7 +103,7 @@ describe("buildOnboardingGateMessage", () => {
     });
 
     expect(message).toContain("planning / 生图通道配置");
-    expect(message).toContain("/travel-companion model");
-    expect(message).not.toContain("/travel-companion setup");
+    expect(message).toContain("/elsewhere model");
+    expect(message).not.toContain("/elsewhere setup");
   });
 });

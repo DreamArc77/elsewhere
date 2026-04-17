@@ -64,7 +64,10 @@ export async function createRuntimeBundle(input: {
     runtimeDataPaths.configPath,
   );
   const artifactStore = new JsonArtifactStore(runtimeDataPaths.artifactsDir);
-  const logger = new JsonlFileLogger(runtimeDataPaths.logsDir);
+  const logger = new JsonlFileLogger(
+    runtimeDataPaths.logsDir,
+    input.pluginConfig.logMode ?? "safe",
+  );
   const bindings = new BindingRegistryStore(runtimeRoot);
 
   const commandRunner: MessageCommandRunner = {

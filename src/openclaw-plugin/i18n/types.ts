@@ -1,0 +1,144 @@
+import type { SystemLocale } from "../../domain/types.js";
+
+export type { SystemLocale };
+
+export interface SystemLocaleCatalog {
+  common: {
+    none: string;
+    unknown: string;
+    invalidOption: string;
+    laterRetry: string;
+  };
+  locale: {
+    menu: string;
+    invalid: string;
+    completed: string;
+    eventLabel(locale: SystemLocale): string;
+  };
+  help: {
+    lines: string[];
+  };
+  command: {
+    bindSuccess: string;
+    bindNextActivate: string;
+    activateEnabled: string;
+    activateReady: string;
+    deactivateClosed: string;
+    deactivateTripStopped: string;
+    deactivateDefaultAssistant: string;
+    notReadyBind: string;
+    activateFirst: string;
+    notActiveYet: string;
+    approvalRequired(approvalId: string): string;
+    startCreated(input: {
+      tripId: string;
+      destination: string;
+      days: number;
+    }): string;
+    startMissingPersona: string;
+    statusNoTrip(input: {
+      channel: string;
+      channelCombinedPostcard: string;
+      channelMediaPostcard: string;
+      channelInboundImageSetup: string;
+      channelProactiveMessaging: string;
+    }): string;
+    tripNotFound(tripId: string): string;
+    tickSuccess(input: { id: string; status?: string; phase?: string; nextRunAt?: string }): string;
+    tickFailure(id: string): string;
+    tickReplySuccess(id: string): string;
+    tickReplyFailure(id: string): string;
+    stopNoTrip: string;
+    stopSuccess(input: { tripId: string; status: string }): string;
+    tripStartProviderBlocked: string;
+    tripStartFailed(message?: string): string;
+    internalFailure: string;
+    channelCapabilitySupported: string;
+    channelCapabilityLimited: string;
+    channelCapabilityUnsupported: string;
+    channelCapabilityUnknown: string;
+  };
+  onboarding: {
+    gateContinueSetup: string;
+    gateContinueModel: string;
+    gateFirstTime: string;
+    gateMissingPersona: string;
+    gateMissingModel: string;
+    gateMissingGemini: string;
+    gateMissingSummary(items: string[]): string;
+    gatePersonaFirstSetup: string;
+    gatePersonaFirstModel: string;
+    gateModelOnlyIntro: string;
+    gateModelOnlyAction: string;
+    personaCreated(name: string): string;
+    personaUpdated(name: string): string;
+    personaUpdatedReactivateHint: string;
+    modelUpdated: string;
+    idleGuideHint: string;
+  };
+  setup: {
+    cancelledCreate: string;
+    cancelledEdit: string;
+    readyReplyOne: string;
+    keepCurrentHint: string;
+    personaIntro: string;
+    existingPersonaConfirm: string;
+    currentValue(value: string): string;
+    askName: string;
+    askOriginCity: string;
+    askTraits: string;
+    askTone: string;
+    askRelationship: string;
+    askUserAddressing: string;
+    traitsExample: string;
+    toneExample: string;
+    relationshipExample: string;
+    userAddressingExample: string;
+    reviewTitle: string;
+    reviewConfirmEdit: string;
+    reviewConfirmCreate: string;
+    reviewEditName: string;
+    reviewEditOriginCity: string;
+    reviewEditTraits: string;
+    reviewEditTone: string;
+    reviewEditRelationship: string;
+    reviewEditUserAddressing: string;
+    reviewCancelEdit: string;
+    reviewCancelCreate: string;
+    referencePhotoChoiceWithCurrent: string;
+    referencePhotoChoiceWithoutCurrent: string;
+    referencePhotoAwaiting: string;
+    completePersonaCreated: string;
+    completePersonaUpdated: string;
+    completeModel: string;
+    completeGeneric: string;
+    textProviderChoice(current: string): string;
+    askOpenAiBaseUrl(current: string): string;
+    askOpenAiApiKey: string;
+    askOpenAiModel(current: string): string;
+    geminiProviderChoice(current: string): string;
+    askGeminiApiKey: string;
+    askOpenRouterApiKey: string;
+    localeSelectionPersisted(localeLabel: string): string;
+    errorReplyOne: string;
+    errorContinueOrCancel: string;
+    errorReviewOption: string;
+    errorReferencePhotoChoiceWithCurrent: string;
+    errorReferencePhotoChoiceWithoutCurrent: string;
+    errorModelChoice: string;
+    errorGeminiProviderChoice: string;
+    errorNeedUserAddressing: string;
+    errorWaitingForPhoto: string;
+    errorWaitingForPhotoWithFallback: string;
+    errorUnsupportedImage: string;
+    errorImageDownloadFailed: string;
+    errorGeneric: string;
+  };
+  replyErrors: {
+    personaRequired: string;
+    idleDestinationStartFailed: string;
+    planningFailed: string;
+    postcardFailed: string;
+    replyFailed: string;
+  };
+}

@@ -1,9 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdtemp } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
 import { GeminiRestGroundingAdapter } from "../src/infrastructure/gemini-rest-adapters.js";
+import { JsonlFileLogger } from "../src/infrastructure/jsonl-file-logger.js";
 import { buildFixtureTripPlan } from "../src/testing/fakes.js";
 import { createTestRuntime } from "./helpers/runtime.js";
 
@@ -147,5 +150,64 @@ describe("structured logging", () => {
       responseTextPreviewTail: expect.any(String),
       responseTextLooksJsonComplete: expect.any(Boolean),
     });
+  });
+
+  it("redacts rendered prompts and raw previews in safe log mode", async () => {
+    const logsDir = await mkdtemp(join(tmpdir(), "travel-log-safe-"));
+    const logger = new JsonlFileLogger(logsDir, "safe");
+
+    await logger.log({
+      tripId: "trip-safe",
+      runId: "run-safe",
+      phase: "planning",
+      event: "plan.prompt.rendered",
+      decision: "test",
+      provider: "gemini",
+      status: "success",
+      startedAt: "2026-04-09T00:00:00.000Z",
+      finishedAt: "2026-04-09T00:00:00.000Z",
+      latencyMs: 0,
+      details: {
+        promptLength: 123,
+        renderedPrompt: "FULL PROMPT",
+        responseTextPreviewHead: "HEAD",
+        responseTextPreviewTail: "TAIL",
+      },
+    });
+
+    const content = await readFile(join(logsDir, "2026-04-09.jsonl"), "utf8");
+    const entry = JSON.parse(content.trim()) as { details: Record<string, unknown> };
+    expect(entry.details.promptLength).toBe(123);
+    expect(entry.details.renderedPrompt).toBeUndefined();
+    expect(entry.details.responseTextPreviewHead).toBeUndefined();
+    expect(entry.details.responseTextPreviewTail).toBeUndefined();
+    expect(entry.details.redacted).toBe(true);
+  });
+
+  it("keeps rendered prompts in debug log mode", async () => {
+    const logsDir = await mkdtemp(join(tmpdir(), "travel-log-debug-"));
+    const logger = new JsonlFileLogger(logsDir, "debug");
+
+    await logger.log({
+      tripId: "trip-debug",
+      runId: "run-debug",
+      phase: "planning",
+      event: "plan.prompt.rendered",
+      decision: "test",
+      provider: "gemini",
+      status: "success",
+      startedAt: "2026-04-09T00:00:00.000Z",
+      finishedAt: "2026-04-09T00:00:00.000Z",
+      latencyMs: 0,
+      details: {
+        promptLength: 123,
+        renderedPrompt: "FULL PROMPT",
+      },
+    });
+
+    const content = await readFile(join(logsDir, "2026-04-09.jsonl"), "utf8");
+    const entry = JSON.parse(content.trim()) as { details: Record<string, unknown> };
+    expect(entry.details.renderedPrompt).toBe("FULL PROMPT");
+    expect(entry.details.redacted).toBeUndefined();
   });
 });

@@ -1,27 +1,36 @@
 import { randomUUID } from "node:crypto";
 
-import {
+import type {
   ConversationBindingRecord,
   SetupSession,
   SetupSessionDraft,
   SetupSessionKind,
   StoredPersonaProfile,
+  SystemLocale,
   TravelCompanionGeminiProviderKind,
   TravelCompanionGlobalConfig,
   TravelCompanionTextProviderKind,
 } from "../domain/types.js";
+import { getSystemCatalog } from "./i18n/catalog.js";
 import { hasConfiguredGeminiProvider } from "./gemini-provider-config.js";
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function displayValue(value: string | undefined): string {
-  return value?.trim() ? value.trim() : "未设置";
+function displayValue(
+  value: string | undefined,
+  locale: SystemLocale,
+): string {
+  const text = value?.trim();
+  return text ? text : getSystemCatalog(locale).common.none;
 }
 
-function displayList(values: string[] | undefined): string {
-  return values?.length ? values.join("、") : "未设置";
+function displayList(
+  values: string[] | undefined,
+  locale: SystemLocale,
+): string {
+  return values?.length ? values.join(" / ") : getSystemCatalog(locale).common.none;
 }
 
 function isPersonaEditSession(session: SetupSession): boolean {
@@ -29,7 +38,7 @@ function isPersonaEditSession(session: SetupSession): boolean {
 }
 
 function shouldKeepCurrent(text: string, session: SetupSession): boolean {
-  return isPersonaEditSession(session) && text === "0";
+  return isPersonaEditSession(session) && text.trim() === "0";
 }
 
 function advancePersonaStep(
@@ -50,167 +59,127 @@ function advancePersonaStep(
   return nextStep;
 }
 
-function buildPersonaSummary(session: SetupSession): string[] {
+function buildPersonaSummary(
+  session: SetupSession,
+  locale: SystemLocale,
+): string[] {
+  const catalog = getSystemCatalog(locale);
+  const clean = (text: string) => text.replace(/[？?。.:：]+$/u, "");
   return [
-    `名字：${displayValue(session.draft.name)}`,
-    `Ta 居住的城市：${displayValue(
-      session.draft.originCity || session.draft.homeCity,
-    )}`,
-    `性格特征：${displayList(session.draft.traits)}`,
-    `说话风格：${displayValue(session.draft.toneStyle)}`,
-    `和你的关系：${displayValue(session.draft.relationship)}`,
-    `对你的称呼：${displayValue(session.draft.userAddressing)}`,
+    `1. ${clean(catalog.setup.askName)}: ${displayValue(session.draft.name, locale)}`,
+    `2. ${clean(catalog.setup.askOriginCity)}: ${displayValue(session.draft.originCity || session.draft.homeCity, locale)}`,
+    `3. ${clean(catalog.setup.askTraits)}: ${displayList(session.draft.traits, locale)}`,
+    `4. ${clean(catalog.setup.askTone)}: ${displayValue(session.draft.toneStyle, locale)}`,
+    `5. ${clean(catalog.setup.askRelationship)}: ${displayValue(session.draft.relationship, locale)}`,
+    `6. ${clean(catalog.setup.askUserAddressing)}: ${displayValue(session.draft.userAddressing, locale)}`,
   ];
 }
 
 function buildCurrentValuePrompt(input: {
+  locale: SystemLocale;
   currentValue: string;
   body: string[];
 }): string {
+  const catalog = getSystemCatalog(input.locale);
   return [
-    `当前值：${input.currentValue}`,
+    catalog.setup.currentValue(input.currentValue),
     ...input.body,
-    "回复新内容，或回复 0 沿用当前值",
+    catalog.setup.keepCurrentHint,
   ].join("\n");
 }
 
-function buildPersonaStepPrompt(session: SetupSession): string {
+function buildPersonaStepPrompt(
+  session: SetupSession,
+  locale: SystemLocale,
+): string {
+  const catalog = getSystemCatalog(locale);
   const editing = isPersonaEditSession(session);
 
   switch (session.step) {
+    case "locale_select":
+      return catalog.locale.menu;
     case "persona_intro":
-      return [
-        "我们先把 Ta 建起来。",
-        "",
-        "接下来我会依次确认：",
-        "1. 名字",
-        "2. Ta 居住的城市",
-        "3. 性格特征",
-        "4. 说话风格",
-        "5. 和你的关系",
-        "6. 对你的称呼",
-        "7. 参考图",
-        "",
-        "准备好了回复 1",
-      ].join("\n");
+      return catalog.setup.personaIntro;
     case "existing_persona_confirm":
-      return [
-        "当前已经有 Ta 的设定了。",
-        "",
-        "这个命令会用于修改或覆盖现有资料。",
-        "回复：",
-        "1. 继续修改",
-        "2. 取消",
-      ].join("\n");
+      return catalog.setup.existingPersonaConfirm;
     case "name":
       return editing
         ? buildCurrentValuePrompt({
-            currentValue: displayValue(session.draft.name),
-            body: ["Ta 叫什么？"],
+            locale,
+            currentValue: displayValue(session.draft.name, locale),
+            body: [catalog.setup.askName],
           })
-        : "Ta 叫什么？";
+        : catalog.setup.askName;
     case "origin_city":
       return editing
         ? buildCurrentValuePrompt({
+            locale,
             currentValue: displayValue(
               session.draft.originCity || session.draft.homeCity,
+              locale,
             ),
-            body: ["Ta 目前居住在哪座城市？"],
+            body: [catalog.setup.askOriginCity],
           })
-        : "Ta 目前居住在哪座城市？";
+        : catalog.setup.askOriginCity;
     case "traits":
       return editing
         ? buildCurrentValuePrompt({
-            currentValue: displayList(session.draft.traits),
-            body: [
-              "用几个词描述一下 Ta 的性格特征。",
-              "例如：地雷系、敏感、黏人",
-            ],
+            locale,
+            currentValue: displayList(session.draft.traits, locale),
+            body: [catalog.setup.askTraits, catalog.setup.traitsExample],
           })
-        : [
-            "用几个词描述一下 Ta 的性格特征。",
-            "例如：地雷系、敏感、黏人",
-          ].join("\n");
+        : [catalog.setup.askTraits, catalog.setup.traitsExample].join("\n");
     case "tone":
       return editing
         ? buildCurrentValuePrompt({
-            currentValue: displayValue(session.draft.toneStyle),
-            body: [
-              "Ta 平时说话是什么感觉？",
-              "例如：病娇、撒娇、冷淡、元气",
-            ],
+            locale,
+            currentValue: displayValue(session.draft.toneStyle, locale),
+            body: [catalog.setup.askTone, catalog.setup.toneExample],
           })
-        : [
-            "Ta 平时说话是什么感觉？",
-            "例如：病娇、撒娇、冷淡、元气",
-          ].join("\n");
+        : [catalog.setup.askTone, catalog.setup.toneExample].join("\n");
     case "relationship":
       return editing
         ? buildCurrentValuePrompt({
-            currentValue: displayValue(session.draft.relationship),
-            body: [
-              "Ta 和你是什么关系？",
-              "例如：异地恋女友、暧昧对象、旅行搭子",
-            ],
+            locale,
+            currentValue: displayValue(session.draft.relationship, locale),
+            body: [catalog.setup.askRelationship, catalog.setup.relationshipExample],
           })
-        : [
-            "Ta 和你是什么关系？",
-            "例如：异地恋女友、暧昧对象、旅行搭子",
-          ].join("\n");
+        : [catalog.setup.askRelationship, catalog.setup.relationshipExample].join("\n");
     case "user_addressing":
       return editing
         ? buildCurrentValuePrompt({
-            currentValue: displayValue(session.draft.userAddressing),
-            body: [
-              "Ta 平时怎么称呼你？",
-              "例如：哥哥、宝宝、宝、名字里的称呼",
-            ],
+            locale,
+            currentValue: displayValue(session.draft.userAddressing, locale),
+            body: [catalog.setup.askUserAddressing, catalog.setup.userAddressingExample],
           })
-        : [
-            "Ta 平时怎么称呼你？",
-            "例如：哥哥、宝宝、宝、名字里的称呼",
-          ].join("\n");
+        : [catalog.setup.askUserAddressing, catalog.setup.userAddressingExample].join("\n");
     case "persona_review":
       return [
-        "修改后的资料如下：",
+        catalog.setup.reviewTitle,
         "",
-        ...buildPersonaSummary(session),
+        ...buildPersonaSummary(session, locale),
         "",
-        "回复：",
-        "1. 确认并继续处理参考图",
-        "2. 修改名字",
-        "3. 修改 Ta 居住的城市",
-        "4. 修改性格特征",
-        "5. 修改说话风格",
-        "6. 修改和你的关系",
-        "7. 修改对你的称呼",
-        `8. 取消本次${editing ? "修改" : "设置"}`,
+        catalog.setup.reviewConfirmCreate,
+        catalog.setup.reviewEditName,
+        catalog.setup.reviewEditOriginCity,
+        catalog.setup.reviewEditTraits,
+        catalog.setup.reviewEditTone,
+        catalog.setup.reviewEditRelationship,
+        catalog.setup.reviewEditUserAddressing,
+        editing ? catalog.setup.reviewCancelEdit : catalog.setup.reviewCancelCreate,
       ].join("\n");
     case "reference_photo_choice":
-      if (editing && session.draft.referenceImageAsset) {
-        return [
-          "当前已经有参考图。",
-          "",
-          "回复：",
-          "1. 上传一张新参考图",
-          "2. 沿用当前参考图",
-          "3. 返回资料确认",
-        ].join("\n");
-      }
-
-      return [
-        "最后一步，处理参考图。",
-        "",
-        "回复：",
-        "1. 上传参考图",
-        "2. 返回资料确认",
-      ].join("\n");
+      return editing && session.draft.referenceImageAsset
+        ? catalog.setup.referencePhotoChoiceWithCurrent
+        : catalog.setup.referencePhotoChoiceWithoutCurrent;
     case "reference_photo":
-      return "好，直接发一张图片就行。";
+      return catalog.setup.referencePhotoAwaiting;
     case "complete":
-      return editing ? "Ta 资料已更新。" : "Ta 创建完成。";
+      return editing
+        ? catalog.setup.completePersonaUpdated
+        : catalog.setup.completePersonaCreated;
     default:
-      return "继续完成 Ta 的资料。";
+      return catalog.setup.completeGeneric;
   }
 }
 
@@ -300,11 +269,17 @@ export function createSetupSession(input?: {
   const timestamp = nowIso();
   const kind = input?.kind ?? "persona";
 
+  const defaultStep =
+    kind === "locale"
+      ? "locale_select"
+      : kind === "model"
+        ? "text_provider"
+        : "persona_intro";
+
   return {
     kind,
     personaTargetId: input?.personaTargetId,
-    step:
-      input?.step ?? (kind === "model" ? "text_provider" : "persona_intro"),
+    step: input?.step ?? defaultStep,
     awaitingReferencePhoto: false,
     returnToReview: false,
     draft: input?.draft ?? {},
@@ -324,17 +299,13 @@ export function parseTextProviderChoice(
   value: string,
 ): TravelCompanionTextProviderKind | null {
   const normalized = value.trim().toLowerCase();
-  if (
-    ["1", "default", "host-default", "host", "openclaw"].includes(normalized)
-  ) {
+  if (["1", "default", "host-default", "host", "openclaw"].includes(normalized)) {
     return "host-default";
   }
   if (["2", "gemini", "google"].includes(normalized)) {
     return "gemini";
   }
-  if (
-    ["3", "openai", "openai-compatible", "compatible"].includes(normalized)
-  ) {
+  if (["3", "openai", "openai-compatible", "compatible"].includes(normalized)) {
     return "openai-compatible";
   }
   return null;
@@ -344,9 +315,7 @@ export function parseGeminiProviderChoice(
   value: string,
 ): TravelCompanionGeminiProviderKind | null {
   const normalized = value.trim().toLowerCase();
-  if (
-    ["1", "google", "gemini", "google-direct", "direct"].includes(normalized)
-  ) {
+  if (["1", "google", "gemini", "google-direct", "direct"].includes(normalized)) {
     return "google-direct";
   }
   if (["2", "openrouter", "or"].includes(normalized)) {
@@ -358,6 +327,7 @@ export function parseGeminiProviderChoice(
 export function advanceSetupSessionWithText(input: {
   session: SetupSession;
   text: string;
+  locale?: SystemLocale;
   globalConfig: TravelCompanionGlobalConfig;
   fallbackGeminiApiKey?: string;
   fallbackOpenRouterApiKey?: string;
@@ -365,9 +335,12 @@ export function advanceSetupSessionWithText(input: {
   session: SetupSession;
   completed: boolean;
   cancelled?: boolean;
+  selectedLocale?: SystemLocale;
   configPatch?: Partial<TravelCompanionGlobalConfig>;
 } {
   const text = input.text.trim();
+  const locale = input.locale ?? "zh-CN";
+  const catalog = getSystemCatalog(locale);
   const updatedAt = nowIso();
   const hasGeminiKeyAlready = hasConfiguredGeminiProvider({
     globalConfig: input.globalConfig,
@@ -383,11 +356,26 @@ export function advanceSetupSessionWithText(input: {
     updatedAt,
   };
 
+  if (input.session.kind === "locale") {
+    if (text === "1" || text === "2" || text === "3") {
+      const selectedLocale =
+        text === "1" ? "zh-CN" : text === "2" ? "ja-JP" : "en";
+      next.step = "complete";
+      return {
+        session: next,
+        completed: true,
+        selectedLocale,
+      };
+    }
+
+    throw new Error(catalog.locale.invalid);
+  }
+
   if (input.session.kind === "persona") {
     switch (input.session.step) {
       case "persona_intro":
         if (text !== "1") {
-          throw new Error("准备好了就回复 1。");
+          throw new Error(catalog.setup.errorReplyOne);
         }
         next.step = "name";
         return { session: next, completed: false };
@@ -399,7 +387,7 @@ export function advanceSetupSessionWithText(input: {
         if (text === "2") {
           return { session: next, completed: false, cancelled: true };
         }
-        throw new Error("请回复 1 继续修改，或回复 2 取消。");
+        throw new Error(catalog.setup.errorContinueOrCancel);
       case "name":
         if (!shouldKeepCurrent(text, input.session)) {
           next.draft.name = text;
@@ -437,9 +425,7 @@ export function advanceSetupSessionWithText(input: {
         return { session: next, completed: false };
       case "user_addressing":
         if (shouldKeepCurrent(text, input.session) && !next.draft.userAddressing) {
-          throw new Error(
-            "当前还没有设置 Ta 对你的称呼，这一项需要补一个。",
-          );
+          throw new Error(catalog.setup.errorNeedUserAddressing);
         }
         if (!shouldKeepCurrent(text, input.session)) {
           next.draft.userAddressing = text;
@@ -480,7 +466,7 @@ export function advanceSetupSessionWithText(input: {
           case "8":
             return { session: next, completed: false, cancelled: true };
           default:
-            throw new Error("请回复 1-8 里的一个选项。");
+            throw new Error(catalog.setup.errorReviewOption);
         }
       case "reference_photo_choice":
         if (text === "1") {
@@ -498,10 +484,7 @@ export function advanceSetupSessionWithText(input: {
         }
         if (
           text === "2" &&
-          !(
-            isPersonaEditSession(input.session) &&
-            input.session.draft.referenceImageAsset
-          )
+          !(isPersonaEditSession(input.session) && input.session.draft.referenceImageAsset)
         ) {
           next.step = "persona_review";
           return { session: next, completed: false };
@@ -511,15 +494,14 @@ export function advanceSetupSessionWithText(input: {
           return { session: next, completed: false };
         }
         throw new Error(
-          isPersonaEditSession(input.session) &&
-            input.session.draft.referenceImageAsset
-            ? "请回复 1、2 或 3。"
-            : "请回复 1 或 2。",
+          isPersonaEditSession(input.session) && input.session.draft.referenceImageAsset
+            ? catalog.setup.errorReferencePhotoChoiceWithCurrent
+            : catalog.setup.errorReferencePhotoChoiceWithoutCurrent,
         );
       case "complete":
         return { session: next, completed: true };
       default:
-        throw new Error("当前 persona setup 步骤不接收文字输入。");
+        throw new Error(catalog.setup.errorGeneric);
     }
   }
 
@@ -527,9 +509,7 @@ export function advanceSetupSessionWithText(input: {
     case "text_provider": {
       const choice = parseTextProviderChoice(text);
       if (!choice) {
-        throw new Error(
-          "没看懂这个模型选项。回 1/2/3，或者直接回 default / gemini / openai-compatible。",
-        );
+        throw new Error(catalog.setup.errorModelChoice);
       }
       next.draft.textProviderKind = choice;
       if (choice === "openai-compatible") {
@@ -541,18 +521,14 @@ export function advanceSetupSessionWithText(input: {
         return {
           session: next,
           completed: true,
-          configPatch: {
-            textProvider: { kind: choice },
-          },
+          configPatch: { textProvider: { kind: choice } },
         };
       }
       next.step = "gemini_provider";
       return {
         session: next,
         completed: false,
-        configPatch: {
-          textProvider: { kind: choice },
-        },
+        configPatch: { textProvider: { kind: choice } },
       };
     }
     case "openai_base_url":
@@ -596,9 +572,7 @@ export function advanceSetupSessionWithText(input: {
     case "gemini_provider": {
       const choice = parseGeminiProviderChoice(text);
       if (!choice) {
-        throw new Error(
-          "没看懂这个 planning / 生图通道选项。回 1/2，或者直接回 google-direct / openrouter。",
-        );
+        throw new Error(catalog.setup.errorGeminiProviderChoice);
       }
       next.draft.geminiProviderKind = choice;
       next.step =
@@ -656,19 +630,22 @@ export function advanceSetupSessionWithText(input: {
     case "complete":
       return { session: next, completed: true };
     default:
-      throw new Error("当前 model setup 步骤不接收文字输入。");
+      throw new Error(catalog.setup.errorGeneric);
   }
 }
 
 export function advanceSetupSessionWithPhoto(input: {
   session: SetupSession;
   referenceImageAsset: string;
+  locale?: SystemLocale;
 }): SetupSession {
   if (
     input.session.kind !== "persona" ||
     input.session.step !== "reference_photo"
   ) {
-    throw new Error("当前 setup 步骤不在等待照片。");
+    throw new Error(
+      getSystemCatalog(input.locale ?? "zh-CN").setup.errorWaitingForPhoto,
+    );
   }
 
   return {
@@ -683,85 +660,73 @@ export function advanceSetupSessionWithPhoto(input: {
   };
 }
 
-export function renderSetupStepPrompt(session: SetupSession): string {
+export function renderSetupStepPrompt(
+  session: SetupSession,
+  locale: SystemLocale = "zh-CN",
+): string {
+  const catalog = getSystemCatalog(locale);
+
+  if (session.kind === "locale") {
+    return catalog.locale.menu;
+  }
+
   if (session.kind === "model") {
     switch (session.step) {
       case "text_provider":
-        return [
-          "文本模型怎么配？回复一个选项：",
-          `当前：${displayValue(session.draft.textProviderKind)}`,
-          "1. default（使用当前 OpenClaw 默认模型）",
-          "2. gemini",
-          "3. openai-compatible",
-        ].join("\n");
+        return catalog.setup.textProviderChoice(
+          displayValue(session.draft.textProviderKind, locale),
+        );
       case "openai_base_url":
-        return [
-          "回复 OpenAI-compatible 的 base URL。",
-          `当前：${displayValue(session.draft.openaiBaseUrl)}`,
-        ].join("\n");
+        return catalog.setup.askOpenAiBaseUrl(
+          displayValue(session.draft.openaiBaseUrl, locale),
+        );
       case "openai_api_key":
-        return "回复这个 OpenAI-compatible provider 的 API key。";
+        return catalog.setup.askOpenAiApiKey;
       case "openai_model":
-        return [
-          "回复要使用的模型名。",
-          `当前：${displayValue(session.draft.openaiModel)}`,
-        ].join("\n");
+        return catalog.setup.askOpenAiModel(
+          displayValue(session.draft.openaiModel, locale),
+        );
       case "gemini_provider":
-        return [
-          "planning 和生图要走哪种 Gemini 通道？回复一个选项：",
-          `当前：${displayValue(session.draft.geminiProviderKind)}`,
-          "1. google-direct（Gemini API key / AI Studio）",
-          "2. openrouter（用 OpenRouter key 调 Gemini）",
-        ].join("\n");
+        return catalog.setup.geminiProviderChoice(
+          displayValue(session.draft.geminiProviderKind, locale),
+        );
       case "gemini_api_key":
-        return [
-          "还差 Gemini API key。",
-          "planning 和生图都会共用这一个 Google Gemini key。",
-          "Gemini key 获取链接：https://aistudio.google.com/app/apikey",
-          "直接把 key 发我就行。",
-        ].join("\n");
+        return catalog.setup.askGeminiApiKey;
       case "openrouter_api_key":
-        return [
-          "还差 OpenRouter API key。",
-          "planning 和生图都会共用这一个 OpenRouter key，并通过 OpenRouter 调 Gemini。",
-          "OpenRouter key 获取链接：https://openrouter.ai/settings/keys",
-          "直接把 key 发我就行。",
-        ].join("\n");
+        return catalog.setup.askOpenRouterApiKey;
       case "complete":
-        return "模型配置已完成。";
+        return catalog.setup.completeModel;
       default:
-        return "继续完成模型配置。";
+        return catalog.setup.completeGeneric;
     }
   }
 
-  return buildPersonaStepPrompt(session);
+  return buildPersonaStepPrompt(session, locale);
 }
 
-export function buildIdleGuideMessage(_persona: StoredPersonaProfile): string {
-  return [
-    "接下来你可以直接告诉我一个想去的目的地，",
-    "比如：东京 / 北京 / 巴黎",
-    "我就会开始准备这次旅行。",
-  ].join("\n");
+export function buildIdleGuideMessage(
+  _persona: StoredPersonaProfile,
+  locale: SystemLocale = "zh-CN",
+): string {
+  return getSystemCatalog(locale).onboarding.idleGuideHint;
 }
 
 export function buildPersonaCreatedMessage(
   persona: StoredPersonaProfile,
+  locale: SystemLocale = "zh-CN",
 ): string {
-  return `${persona.name} 创建完成。`;
+  return getSystemCatalog(locale).onboarding.personaCreated(persona.name);
 }
 
 export function buildPersonaUpdatedMessage(
   persona: StoredPersonaProfile,
+  locale: SystemLocale = "zh-CN",
 ): string {
+  const catalog = getSystemCatalog(locale);
   return [
-    `${persona.name} 的资料已更新。`,
+    catalog.onboarding.personaUpdated(persona.name),
     "",
-    "为了避免旧上下文影响体验，建议你先执行：",
-    "/travel-companion deactivate",
-    "",
-    "然后再执行：",
-    "/travel-companion activate",
+    catalog.onboarding.personaUpdatedReactivateHint,
   ].join("\n");
 }
 
@@ -769,24 +734,28 @@ export function buildOnboardingGateMessage(input: {
   binding: ConversationBindingRecord;
   readiness: OnboardingReadiness;
   setupSession?: SetupSession | null;
+  locale?: SystemLocale;
 }): string {
+  const locale = input.locale ?? "zh-CN";
+  const catalog = getSystemCatalog(locale);
+
   if (input.setupSession?.kind === "persona") {
-    return "Ta 的资料还没配完。继续用 /travel-companion setup，然后按提示一步步回复就行。";
+    return catalog.onboarding.gateContinueSetup;
   }
 
   if (input.setupSession?.kind === "model") {
-    return "模型配置还没配完。继续用 /travel-companion model，然后按提示一步步回复就行。";
+    return catalog.onboarding.gateContinueModel;
   }
 
   const missing: string[] = [];
   if (!input.readiness.hasPersona) {
-    missing.push("Ta 的角色信息");
+    missing.push(catalog.onboarding.gateMissingPersona);
   }
   if (!input.readiness.hasTextProvider) {
-    missing.push("文本模型配置");
+    missing.push(catalog.onboarding.gateMissingModel);
   }
   if (!input.readiness.hasGeminiKey) {
-    missing.push("planning / 生图通道配置");
+    missing.push(catalog.onboarding.gateMissingGemini);
   }
 
   if (
@@ -794,25 +763,21 @@ export function buildOnboardingGateMessage(input: {
     !input.readiness.hasTextProvider &&
     !input.readiness.hasGeminiKey
   ) {
-    return [
-      "还没完成首次配置。",
-      "先运行 /travel-companion setup，完成 Ta 的资料创建。",
-      "再运行 /travel-companion model，完成文本模型和 planning / 生图通道配置。",
-    ].join("\n");
+    return catalog.onboarding.gateFirstTime;
   }
 
   if (!input.readiness.hasPersona) {
     return [
-      `还差最后几项配置：${missing.join("、")}`,
-      "先运行 /travel-companion setup，我会一步步带你配完 Ta 的资料。",
-      "Ta 的资料配好后，再用 /travel-companion model 补模型和 planning / 生图通道。",
+      catalog.onboarding.gateMissingSummary(missing),
+      catalog.onboarding.gatePersonaFirstSetup,
+      catalog.onboarding.gatePersonaFirstModel,
     ].join("\n");
   }
 
   return [
-    `还差：${missing.join("、")}`,
-    "Ta 的资料已经有了。",
-    "现在运行 /travel-companion model，把文本模型和 planning / 生图通道配完就行。",
+    catalog.onboarding.gateMissingSummary(missing),
+    catalog.onboarding.gateModelOnlyIntro,
+    catalog.onboarding.gateModelOnlyAction,
   ].join("\n");
 }
 
@@ -830,7 +795,7 @@ export function createCompletedPersonaProfile(input: {
     !draft.userAddressing ||
     !draft.referenceImageAsset
   ) {
-    throw new Error("setup 还没收集完整的人设信息。");
+    throw new Error("setup is missing required persona fields");
   }
 
   return {

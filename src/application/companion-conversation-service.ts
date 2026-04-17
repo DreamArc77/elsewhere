@@ -23,6 +23,7 @@ import {
   deriveReplyDueAt,
   resolveAgentState,
 } from "../domain/business-situation.js";
+import { getSystemCatalog, getSystemLocale } from "../openclaw-plugin/i18n/catalog.js";
 
 function nowIso(clock: ClockPort): string {
   return clock.now().toISOString();
@@ -69,6 +70,7 @@ function emptyConversationState(
   return {
     conversationKey,
     mode,
+    systemLocale: undefined,
     setupSession: undefined,
     pendingUserMessages: [],
     pendingReplyDispatch: null,
@@ -154,6 +156,7 @@ export class CompanionConversationService {
     const nextState: ConversationCompanionState = {
       ...state,
       mode: "default",
+      systemLocale: state.systemLocale,
       setupSession: undefined,
       pendingUserMessages: [],
       pendingReplyDispatch: null,
@@ -201,6 +204,7 @@ export class CompanionConversationService {
     const nextState: ConversationCompanionState = {
       ...state,
       mode: input.preserveMode ?? state.mode,
+      systemLocale: state.systemLocale,
       pendingUserMessages: [],
       pendingReplyDispatch: null,
       instantReplyWindow: null,
@@ -246,6 +250,7 @@ export class CompanionConversationService {
     const nextState: ConversationCompanionState = {
       ...state,
       mode: input.binding.mode,
+      systemLocale: state.systemLocale,
       setupSession: undefined,
       pendingUserMessages: [],
       pendingReplyDispatch: null,
@@ -685,7 +690,7 @@ export class CompanionConversationService {
       persona === null
         ? {
             segments: [
-              "我还没准备好出发呢，先用 /travel-companion setup 帮我设定形象和性格吧，然后我就能认真回你了。",
+              getSystemCatalog(getSystemLocale(state)).replyErrors.personaRequired,
             ],
             provider: "conversation-service",
           }
@@ -962,7 +967,8 @@ export class CompanionConversationService {
     } catch (error) {
       input.replyPlan.segments = [
         ...input.replyPlan.segments,
-        "我刚刚想把这趟行程接起来，不过这边卡住了。你晚一点再跟我说一次目的地，我会继续试。",
+        getSystemCatalog(getSystemLocale(input.state)).replyErrors
+          .idleDestinationStartFailed,
       ];
       await this.log({
         tripId: `conversation:${input.binding.key}`,

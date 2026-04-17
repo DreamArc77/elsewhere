@@ -9,6 +9,7 @@ export interface TravelCompanionPluginConfig {
   imageModel?: string;
   geminiBaseUrl?: string;
   openrouterBaseUrl?: string;
+  logMode?: "safe" | "debug";
 }
 
 export function resolvePluginConfig(
@@ -32,6 +33,10 @@ export function resolvePluginConfig(
       asString(raw?.openrouterBaseUrl) ??
       env.OPENROUTER_BASE_URL ??
       "https://openrouter.ai/api/v1",
+    logMode:
+      asLogMode(raw?.logMode) ??
+      asLogMode(env.OPENCLAW_TRAVEL_COMPANION_LOG_MODE) ??
+      "safe",
   };
 }
 
@@ -41,4 +46,8 @@ function asString(value: unknown): string | undefined {
 
 function asInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
+function asLogMode(value: unknown): "safe" | "debug" | undefined {
+  return value === "safe" || value === "debug" ? value : undefined;
 }

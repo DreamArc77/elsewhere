@@ -2,7 +2,7 @@ import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
-import {
+import type {
   ConversationBindingRecord,
   ConversationBindingStore,
   ConversationStateRepository,
@@ -10,16 +10,24 @@ import {
   HostMessengerPort,
   LoggerPort,
   PersonaRepository,
+  SystemLocale,
   TripRecord,
   TripRepository,
 } from "../domain/types.js";
+import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 import { bindingKey } from "./binding-state.js";
+import { PRIMARY_SLASH_COMMAND } from "./command-alias.js";
+import {
+  buildLocaleSelectionMenu,
+  getSystemCatalog,
+  getSystemLocale,
+} from "./i18n/catalog.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import {
-  extractReferenceImageInput,
-  materializeReferenceImage,
-} from "./reference-image.js";
-import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
+  formatChannelCapability,
+  getChannelCapabilities,
+} from "./channel-capabilities.js";
+import { describeConfiguredGeminiProvider } from "./gemini-provider-config.js";
 import {
   buildModelSetupDraft,
   buildOnboardingGateMessage,
@@ -30,10 +38,9 @@ import {
   renderSetupStepPrompt,
 } from "./onboarding.js";
 import {
-  formatChannelCapability,
-  getChannelCapabilities,
-} from "./channel-capabilities.js";
-import { describeConfiguredGeminiProvider } from "./gemini-provider-config.js";
+  extractReferenceImageInput,
+  materializeReferenceImage,
+} from "./reference-image.js";
 
 type CommandReply = { text: string; isError?: boolean };
 
@@ -78,21 +85,27 @@ export async function handleTravelCompanionCommand(
         setupPersona(ctx, parsed.options, deps, { mode: "create" }),
       );
     case "model":
-      return requireActivatedThen(ctx, deps, () =>
-        setupModel(ctx, parsed.options, deps),
-      );
+      return requireActivatedThen(ctx, deps, () => setupModel(ctx, deps));
     case "start":
-      return requireActivatedThen(ctx, deps, () => startTrip(ctx, parsed.options, deps));
+      return requireActivatedThen(ctx, deps, () =>
+        startTrip(parsed.options, deps, ctx),
+      );
     case "status":
-      return requireActivatedThen(ctx, deps, () => statusTrip(ctx, parsed.options, deps));
+      return requireActivatedThen(ctx, deps, () =>
+        statusTrip(parsed.options, deps, ctx),
+      );
     case "tick":
-      return requireActivatedThen(ctx, deps, () => tickTrip(ctx, parsed.options, deps));
+      return requireActivatedThen(ctx, deps, () =>
+        tickTrip(parsed.options, deps, ctx),
+      );
     case "tick-reply":
-      return requireActivatedThen(ctx, deps, () => tickReply(ctx, parsed.options, deps));
+      return requireActivatedThen(ctx, deps, () => tickReply(deps, ctx));
     case "stop":
-      return requireActivatedThen(ctx, deps, () => stopTrip(ctx, parsed.options, deps));
+      return requireActivatedThen(ctx, deps, () =>
+        stopTrip(parsed.options, deps, ctx),
+      );
     default:
-      return { text: helpText() };
+      return { text: helpText(undefined) };
   }
 }
 
@@ -107,17 +120,14 @@ async function bindConversation(
     deps.logger,
   );
   if ("reply" in binding) {
-    return {
-      text: binding.reply.text,
-      isError: binding.reply.isError,
-    };
+    return binding.reply;
   }
 
+  const catalog = getSystemCatalog(undefined);
   return {
-    text: [
-      "这条会话已经和 Ta 绑定好了。",
-      "接下来运行 /travel-companion activate，进入 Ta 模式。",
-    ].join("\n"),
+    text: [catalog.command.bindSuccess, catalog.command.bindNextActivate].join(
+      "\n",
+    ),
   };
 }
 
@@ -140,10 +150,37 @@ async function activateConversation(
     mode: "companion-exclusive" as const,
   };
   await deps.bindings.upsert(activatedBinding);
-  await deps.conversationService.activateConversation(activatedBinding);
+  const activatedState =
+    await deps.conversationService.activateConversation(activatedBinding);
   const state =
     (await deps.conversationStates.getByKey(activatedBinding.key)) ??
-    null;
+    activatedState;
+
+  if (!state.systemLocale) {
+    const nextState = {
+      ...state,
+      setupSession: createSetupSession({ kind: "locale" }),
+      updatedAt: new Date().toISOString(),
+    };
+    await deps.conversationStates.save(nextState);
+    await deps.logger?.log({
+      tripId: `conversation:${activatedBinding.key}`,
+      runId: `locale-selection:${Date.now()}`,
+      phase: "system",
+      event: "locale.selection.started",
+      decision: "Started system locale selection during activate.",
+      provider: "command",
+      status: "success",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: { conversationKey: activatedBinding.key },
+    });
+    return { text: buildLocaleSelectionMenu() };
+  }
+
+  const locale = getSystemLocale(state);
+  const catalog = getSystemCatalog(locale);
   const globalConfig = await deps.globalConfigRepository.get();
   const readiness = evaluateOnboardingReadiness({
     binding: activatedBinding,
@@ -176,7 +213,8 @@ async function activateConversation(
       runId: `config-gate:${Date.now()}`,
       phase: "system",
       event: "config.missing_gate_triggered",
-      decision: "Blocked companion activation from entering idle because onboarding/config is incomplete.",
+      decision:
+        "Blocked companion activation from entering idle because onboarding/config is incomplete.",
       provider: "command",
       status: "success",
       startedAt: new Date().toISOString(),
@@ -191,17 +229,18 @@ async function activateConversation(
     });
     return {
       text: [
-        "Ta 模式已开启。",
+        catalog.command.activateEnabled,
         buildOnboardingGateMessage({
           binding: activatedBinding,
           readiness,
-          setupSession: state?.setupSession,
+          setupSession: state.setupSession,
+          locale,
         }),
       ].join("\n"),
     };
   }
 
-  if (!binding.record.lastTripId && !state?.awaitingDestination) {
+  if (!activatedBinding.lastTripId && !state.awaitingDestination) {
     await deps.conversationService.enterIdleAwaitingDestination({
       binding: activatedBinding,
       sendGuideNow: false,
@@ -210,7 +249,7 @@ async function activateConversation(
   }
 
   return {
-    text: ["Ta 模式已开启。", "直接告诉 Ta 一个想去的目的地就行。"].join(
+    text: [catalog.command.activateEnabled, catalog.command.activateReady].join(
       "\n",
     ),
   };
@@ -224,6 +263,12 @@ async function deactivateConversation(
   if ("reply" in binding) {
     return binding.reply;
   }
+
+  const locale = await resolveLocaleForBinding(
+    binding.record,
+    deps.conversationStates,
+  );
+  const catalog = getSystemCatalog(locale);
 
   if (binding.record.lastTripId) {
     await deps.service.stopTrip(binding.record.lastTripId);
@@ -240,9 +285,9 @@ async function deactivateConversation(
 
   return {
     text: [
-      "Ta 模式已关闭。",
-      "当前行程已停止。",
-      "这条会话已经回到默认助手。",
+      catalog.command.deactivateClosed,
+      catalog.command.deactivateTripStopped,
+      catalog.command.deactivateDefaultAssistant,
     ].join("\n"),
   };
 }
@@ -259,8 +304,9 @@ async function setupPersona(
   }
 
   const state =
-    (await deps.conversationStates.getByKey(binding.record.key)) ??
-    null;
+    (await deps.conversationStates.getByKey(binding.record.key)) ?? null;
+  const locale = getSystemLocale(state);
+  const catalog = getSystemCatalog(locale);
   const currentPersona = binding.record.defaultPersonaId
     ? await deps.personaRepository.getById(binding.record.defaultPersonaId)
     : null;
@@ -271,9 +317,10 @@ async function setupPersona(
       ctx.commandBody,
     );
     if (!referenceImageInput) {
-      throw new Error(
-        "Missing reference image. Pass --image <absolute-path-or-image-url>, or paste an image URL in the setup command.",
-      );
+      return {
+        text: catalog.setup.errorWaitingForPhotoWithFallback,
+        isError: true,
+      };
     }
     const referenceImageAsset = await materializeReferenceImage({
       source: referenceImageInput,
@@ -297,7 +344,6 @@ async function setupPersona(
       existing: input.mode === "edit" ? currentPersona : null,
     });
     await deps.personaRepository.save(persona);
-
     await deps.bindings.upsert({
       ...binding.record,
       defaultPersonaId: persona.personaId,
@@ -306,10 +352,9 @@ async function setupPersona(
     return {
       text: [
         isEditingExistingPersona
-          ? `Ta 资料已更新：${persona.name}`
-          : `Ta 创建完成：${persona.name}`,
+          ? catalog.onboarding.personaUpdated(persona.name)
+          : catalog.onboarding.personaCreated(persona.name),
         `personaId: ${persona.personaId}`,
-        "这条会话现在默认使用 Ta。",
       ].join("\n"),
     };
   }
@@ -321,7 +366,7 @@ async function setupPersona(
       ? "existing_persona_confirm"
       : "persona_intro";
   const nextState = {
-    ...(state ?? await deps.conversationService.activateConversation(binding.record)),
+    ...(state ?? (await deps.conversationService.activateConversation(binding.record))),
     setupSession: createSetupSession({
       kind: "persona",
       draft,
@@ -343,29 +388,20 @@ async function setupPersona(
     startedAt: new Date().toISOString(),
     finishedAt: new Date().toISOString(),
     latencyMs: 0,
-    details: { conversationKey: binding.record.key, step: nextState.setupSession?.step },
+    details: {
+      conversationKey: binding.record.key,
+      kind: "persona",
+      step: nextState.setupSession?.step,
+    },
   });
-  await deps.logger?.log({
-    tripId: `conversation:${binding.record.key}`,
-    runId: `setup-prompt:${Date.now()}`,
-    phase: "system",
-    event: "setup.step.prompted",
-    decision: "Prompted the next setup step.",
-    provider: "command",
-    status: "success",
-    startedAt: new Date().toISOString(),
-    finishedAt: new Date().toISOString(),
-    latencyMs: 0,
-    details: { conversationKey: binding.record.key, step: nextState.setupSession?.step },
-  });
+
   return {
-    text: renderSetupStepPrompt(nextState.setupSession),
+    text: renderSetupStepPrompt(nextState.setupSession, locale),
   };
 }
 
 async function setupModel(
   ctx: PluginCommandContext,
-  _options: Record<string, string>,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
   const binding = await requireBinding(ctx, deps.bindings, deps.logger);
@@ -374,11 +410,11 @@ async function setupModel(
   }
 
   const state =
-    (await deps.conversationStates.getByKey(binding.record.key)) ??
-    null;
+    (await deps.conversationStates.getByKey(binding.record.key)) ?? null;
+  const locale = getSystemLocale(state);
   const globalConfig = await deps.globalConfigRepository.get();
   const nextState = {
-    ...(state ?? await deps.conversationService.activateConversation(binding.record)),
+    ...(state ?? (await deps.conversationService.activateConversation(binding.record))),
     setupSession: createSetupSession({
       kind: "model",
       draft: buildModelSetupDraft(globalConfig),
@@ -405,20 +441,25 @@ async function setupModel(
   });
 
   return {
-    text: renderSetupStepPrompt(nextState.setupSession),
+    text: renderSetupStepPrompt(nextState.setupSession, locale),
   };
 }
 
 async function startTrip(
-  ctx: PluginCommandContext,
   options: Record<string, string>,
   deps: CommandDependencies,
+  ctx: PluginCommandContext,
 ): Promise<CommandReply> {
   const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
 
+  const locale = await resolveLocaleForBinding(
+    binding.record,
+    deps.conversationStates,
+  );
+  const catalog = getSystemCatalog(locale);
   const globalConfig = await deps.globalConfigRepository.get();
   const readiness = evaluateOnboardingReadiness({
     binding: binding.record,
@@ -444,6 +485,7 @@ async function startTrip(
       hasGeminiKey: readiness.hasGeminiKey,
     },
   });
+
   if (!readiness.isComplete) {
     await deps.logger?.log({
       tripId: `conversation:${binding.record.key}`,
@@ -469,6 +511,7 @@ async function startTrip(
         readiness,
         setupSession: (await deps.conversationStates.getByKey(binding.record.key))
           ?.setupSession,
+        locale,
       }),
       isError: true,
     };
@@ -476,16 +519,13 @@ async function startTrip(
 
   const personaId = options.persona ?? binding.record.defaultPersonaId;
   if (!personaId) {
-    return {
-      text: "No default persona is set for this conversation. Run /travel-companion setup first, or pass --persona.",
-      isError: true,
-    };
+    return { text: catalog.command.startMissingPersona, isError: true };
   }
 
   const persona = await deps.personaRepository.getById(personaId);
   if (!persona) {
     return {
-      text: `Persona not found: ${personaId}`,
+      text: catalog.command.tripNotFound(personaId),
       isError: true,
     };
   }
@@ -505,7 +545,7 @@ async function startTrip(
     });
   } catch (error) {
     return {
-      text: formatTripStartError(error),
+      text: formatTripStartError(error, locale),
       isError: true,
     };
   }
@@ -541,61 +581,72 @@ async function startTrip(
   }
 
   return {
-    text: [
-      `Trip created: ${patchedTrip.tripId}`,
-      `Destination: ${patchedTrip.request.destinationCity}`,
-      `Days: ${patchedTrip.plan.metadata.days}`,
-      "The background worker will now advance the trip and proactively send postcards here.",
-    ].join("\n"),
+    text: catalog.command.startCreated({
+      tripId: patchedTrip.tripId,
+      destination: patchedTrip.request.destinationCity,
+      days: patchedTrip.plan.metadata.days,
+    }),
   };
 }
 
-function formatTripStartError(error: unknown): string {
+function formatTripStartError(
+  error: unknown,
+  locale: SystemLocale,
+): string {
+  const catalog = getSystemCatalog(locale);
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("User location is not supported for the API use.")) {
-    return [
-      "这次行程生成失败了。",
-      "Gemini 返回：当前 API 使用环境不支持这次请求。",
-      "这更像是 provider 侧限制，不是你目的地填错了。",
-      "我这边会继续处理成自动降级重试；你现在先不用重复发目的地。",
-    ].join("\n");
+    return catalog.command.tripStartProviderBlocked;
   }
 
-  return [
-    "这次行程生成失败了。",
-    `错误信息：${message}`,
-  ].join("\n");
+  return catalog.command.tripStartFailed(message);
 }
 
 async function statusTrip(
-  ctx: PluginCommandContext,
   options: Record<string, string>,
   deps: CommandDependencies,
+  ctx: PluginCommandContext,
 ): Promise<CommandReply> {
   const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
 
+  const locale = await resolveLocaleForBinding(
+    binding.record,
+    deps.conversationStates,
+  );
+  const catalog = getSystemCatalog(locale);
   const channelCapabilities = getChannelCapabilities(binding.record.channel);
   const tripId = options.trip ?? binding.record.lastTripId;
   if (!tripId) {
     return {
-      text: [
-        "No recent trip is recorded for this conversation yet.",
-        `channel: ${binding.record.channel}`,
-        `channelCombinedPostcard: ${formatChannelCapability(channelCapabilities.combinedPostcard)}`,
-        `channelMediaPostcard: ${formatChannelCapability(channelCapabilities.mediaPostcard)}`,
-        `channelInboundImageSetup: ${formatChannelCapability(channelCapabilities.inboundImageSetup)}`,
-        `channelProactiveMessaging: ${formatChannelCapability(channelCapabilities.proactiveMessaging)}`,
-      ].join("\n"),
+      text: catalog.command.statusNoTrip({
+        channel: binding.record.channel,
+        channelCombinedPostcard: formatLocalizedChannelCapability(
+          formatChannelCapability(channelCapabilities.combinedPostcard),
+          locale,
+        ),
+        channelMediaPostcard: formatLocalizedChannelCapability(
+          formatChannelCapability(channelCapabilities.mediaPostcard),
+          locale,
+        ),
+        channelInboundImageSetup: formatLocalizedChannelCapability(
+          formatChannelCapability(channelCapabilities.inboundImageSetup),
+          locale,
+        ),
+        channelProactiveMessaging: formatLocalizedChannelCapability(
+          formatChannelCapability(channelCapabilities.proactiveMessaging),
+          locale,
+        ),
+      }),
       isError: true,
     };
   }
 
   const trip = await deps.tripRepository.getById(tripId);
   if (!trip) {
-    return { text: `Trip not found: ${tripId}`, isError: true };
+    return { text: catalog.command.tripNotFound(tripId), isError: true };
   }
 
   const inspection = await deps.conversationService.inspectConversation({
@@ -638,6 +689,7 @@ async function statusTrip(
       `lastPostcardCapabilityMedia: ${trip.state.lastPostcardDelivery?.capabilities.mediaPostcard ?? "none"}`,
       `artifacts: ${trip.state.artifacts.length}`,
       `conversationMode: ${binding.record.mode}`,
+      `systemLocale: ${locale}`,
       `onboardingComplete: ${readiness.isComplete}`,
       `setupStep: ${inspection.state?.setupSession?.step ?? "none"}`,
       `textProvider: ${globalConfig.textProvider?.kind ?? "none"}`,
@@ -661,15 +713,20 @@ async function statusTrip(
 }
 
 async function tickTrip(
-  ctx: PluginCommandContext,
   options: Record<string, string>,
   deps: CommandDependencies,
+  ctx: PluginCommandContext,
 ): Promise<CommandReply> {
   const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
 
+  const locale = await resolveLocaleForBinding(
+    binding.record,
+    deps.conversationStates,
+  );
+  const catalog = getSystemCatalog(locale);
   const tripId = options.trip ?? binding.record.lastTripId;
 
   try {
@@ -679,45 +736,41 @@ async function tickTrip(
 
     if (!tripId) {
       return {
-        text: [
-          `Ticked immediately: ${binding.record.key}`,
-          "reply: processed pending conversation replies",
-          "trip: none",
-        ].join("\n"),
+        text: catalog.command.tickSuccess({ id: binding.record.key }),
       };
     }
 
     const trip = await deps.service.runTrip(tripId, { ignoreSchedule: true });
     return {
-      text: [
-        `Ticked immediately: ${trip.tripId}`,
-        "reply: processed pending conversation replies",
-        `status: ${trip.state.status}`,
-        `phase: ${trip.state.currentPhase}`,
-        `nextRunAt: ${trip.state.nextRunAt ?? "none"}`,
-      ].join("\n"),
+      text: catalog.command.tickSuccess({
+        id: trip.tripId,
+        status: trip.state.status,
+        phase: trip.state.currentPhase,
+        nextRunAt: trip.state.nextRunAt ?? "none",
+      }),
     };
   } catch {
     return {
-      text: [
-        `Tick attempted: ${tripId ?? binding.record.key}`,
-        "The postcard or delayed reply could not be confirmed just now.",
-        "The state was preserved. Please try /travel-companion tick again shortly.",
-      ].join("\n"),
+      text: catalog.command.tickFailure(tripId ?? binding.record.key),
       isError: true,
     };
   }
 }
 
 async function tickReply(
-  ctx: PluginCommandContext,
-  _options: Record<string, string>,
   deps: CommandDependencies,
+  ctx: PluginCommandContext,
 ): Promise<CommandReply> {
   const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
+
+  const locale = await resolveLocaleForBinding(
+    binding.record,
+    deps.conversationStates,
+  );
+  const catalog = getSystemCatalog(locale);
 
   try {
     await deps.conversationService.runConversation(binding.record.key, {
@@ -725,37 +778,34 @@ async function tickReply(
     });
 
     return {
-      text: [
-        `Ticked reply immediately: ${binding.record.key}`,
-        "reply: processed pending conversation replies",
-        "trip: not advanced",
-      ].join("\n"),
+      text: catalog.command.tickReplySuccess(binding.record.key),
     };
   } catch {
     return {
-      text: [
-        `Reply tick attempted: ${binding.record.key}`,
-        "The delayed reply could not be confirmed just now.",
-        "The state was preserved. Please try /travel-companion tick-reply again shortly.",
-      ].join("\n"),
+      text: catalog.command.tickReplyFailure(binding.record.key),
       isError: true,
     };
   }
 }
 
 async function stopTrip(
-  ctx: PluginCommandContext,
   options: Record<string, string>,
   deps: CommandDependencies,
+  ctx: PluginCommandContext,
 ): Promise<CommandReply> {
   const binding = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in binding) {
     return binding.reply;
   }
 
+  const locale = await resolveLocaleForBinding(
+    binding.record,
+    deps.conversationStates,
+  );
+  const catalog = getSystemCatalog(locale);
   const tripId = options.trip ?? binding.record.lastTripId;
   if (!tripId) {
-    return { text: "No trip is available to stop.", isError: true };
+    return { text: catalog.command.stopNoTrip, isError: true };
   }
 
   const trip = await deps.service.stopTrip(tripId);
@@ -771,13 +821,38 @@ async function stopTrip(
     reason: "trip_stopped",
   });
   return {
-    text: [
-      `Stopped: ${trip.tripId}`,
-      `status: ${trip.state.status}`,
-      "This trip will not schedule more messages.",
-      "Conversation runtime state was cleared, companion-exclusive mode stays active, and Ta is back in idle.",
-    ].join("\n"),
+    text: catalog.command.stopSuccess({
+      tripId: trip.tripId,
+      status: trip.state.status,
+    }),
   };
+}
+
+async function resolveLocaleForBinding(
+  binding: ConversationBindingRecord,
+  conversationStates: ConversationStateRepository,
+): Promise<SystemLocale> {
+  if (typeof conversationStates?.getByKey !== "function") {
+    return "zh-CN";
+  }
+  return getSystemLocale(await conversationStates.getByKey(binding.key));
+}
+
+function formatLocalizedChannelCapability(
+  value: ReturnType<typeof formatChannelCapability>,
+  locale: SystemLocale,
+): string {
+  const catalog = getSystemCatalog(locale);
+  switch (value) {
+    case "supported":
+      return catalog.command.channelCapabilitySupported;
+    case "limited":
+      return catalog.command.channelCapabilityLimited;
+    case "unsupported":
+      return catalog.command.channelCapabilityUnsupported;
+    default:
+      return catalog.command.channelCapabilityUnknown;
+  }
 }
 
 async function requireBinding(
@@ -840,7 +915,7 @@ async function requireBinding(
   if (!inferred) {
     return {
       reply: {
-        text: "This conversation is not ready yet. Run /travel-companion bind in the chat where you want to receive postcards.",
+        text: getSystemCatalog(undefined).command.notReadyBind,
         isError: true,
       },
     };
@@ -850,7 +925,8 @@ async function requireBinding(
   if (record) {
     await logBindingEvent(logger, {
       event: "binding.fallback_existing",
-      decision: "Fell back to locally stored inferred binding because no official current binding was present.",
+      decision:
+        "Fell back to locally stored inferred binding because no official current binding was present.",
       status: "skipped",
       ctx,
       details: {
@@ -868,7 +944,8 @@ async function requireBinding(
   await bindings.upsert(inferred);
   await logBindingEvent(logger, {
     event: "binding.fallback_inferred",
-    decision: "Created a locally inferred binding because no official current binding was present.",
+    decision:
+      "Created a locally inferred binding because no official current binding was present.",
     status: "skipped",
     ctx,
     details: {
@@ -890,16 +967,28 @@ async function requireActivatedThen(
   const resolved = await requireBinding(ctx, deps.bindings, deps.logger);
   if ("reply" in resolved) {
     return {
-      text: "This conversation is not ready yet. Run /travel-companion activate first.",
+      text: getSystemCatalog(undefined).command.activateFirst,
       isError: true,
     };
   }
 
   if (resolved.record.mode !== "companion-exclusive") {
+    const locale = await resolveLocaleForBinding(
+      resolved.record,
+      deps.conversationStates,
+    );
     return {
-      text: "Travel companion is not active in this chat yet. Run /travel-companion activate first.",
+      text: getSystemCatalog(locale).command.notActiveYet,
       isError: true,
     };
+  }
+
+  const state =
+    typeof deps.conversationStates?.getByKey === "function"
+      ? await deps.conversationStates.getByKey(resolved.record.key)
+      : null;
+  if (state && (!state.systemLocale || state.setupSession?.kind === "locale")) {
+    return { text: buildLocaleSelectionMenu(), isError: true };
   }
 
   return fn();
@@ -943,14 +1032,15 @@ async function ensurePluginConversationBinding(
 > {
   const requested = await ctx.requestConversationBinding({
     summary:
-      "Allow OpenClaw Travel Companion to own this conversation for travel postcards and delayed chat replies.",
+      "Allow elsewhere to own this conversation for travel postcards and delayed chat replies.",
     detachHint:
-      "Run /travel-companion deactivate to stop the trip and return this chat to the default assistant.",
+      `Run ${PRIMARY_SLASH_COMMAND} deactivate to stop the trip and return this chat to the default assistant.`,
   });
 
   await logBindingEvent(logger, {
     event: "binding.requested",
-    decision: "Requested official OpenClaw conversation binding for travel companion.",
+    decision:
+      "Requested official OpenClaw conversation binding for travel companion.",
     status:
       requested.status === "bound"
         ? "success"
@@ -986,11 +1076,9 @@ async function ensurePluginConversationBinding(
   if (requested.status === "pending") {
     return {
       reply: {
-        text: [
-          "Conversation binding approval is required before takeover can start.",
-          `approvalId: ${requested.approvalId}`,
-          "Approve it, then run /travel-companion activate again.",
-        ].join("\n"),
+        text: getSystemCatalog(undefined).command.approvalRequired(
+          requested.approvalId,
+        ),
         isError: true,
       },
     };
@@ -999,7 +1087,9 @@ async function ensurePluginConversationBinding(
   if (requested.status === "error") {
     return {
       reply: {
-        text: requested.message,
+        text:
+          requested.message ||
+          getSystemCatalog(undefined).command.internalFailure,
         isError: true,
       },
     };
@@ -1045,7 +1135,8 @@ async function ensurePluginConversationBinding(
   await bindings.upsert(record);
   await logBindingEvent(logger, {
     event: "binding.stored",
-    decision: "Stored conversation binding metadata locally after official binding request.",
+    decision:
+      "Stored conversation binding metadata locally after official binding request.",
     status: "success",
     ctx,
     details: {
@@ -1237,20 +1328,6 @@ function tokenize(input: string): string[] {
   return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
 }
 
-function helpText(): string {
-  return [
-    "/travel-companion bind",
-    "/travel-companion activate",
-    "/travel-companion deactivate",
-    "/travel-companion setup                      # edit the current Ta",
-    "/travel-companion create                     # create a brand new Ta",
-    "/travel-companion model                      # reconfigure text model / Gemini key",
-    "/travel-companion setup --name Mori --origin-city Hong-Kong --traits gentle,curious --tone warm --relationship soulmate --user-address baby --image /abs/path/ref.png",
-    "/travel-companion setup --name Mori --origin-city Hong-Kong --traits gentle,curious --tone warm --relationship soulmate --user-address baby --image https://example.com/ref.webp",
-    "/travel-companion start --to Tokyo [--from Hong-Kong] [--when next-week]",
-    "/travel-companion status [--trip <id>]",
-    "/travel-companion tick [--trip <id>]  # force delayed replies + the next trip step immediately",
-    "/travel-companion tick-reply           # force delayed replies only",
-    "/travel-companion stop [--trip <id>]",
-  ].join("\n");
+function helpText(locale: SystemLocale | undefined): string {
+  return getSystemCatalog(locale).help.lines.join("\n");
 }

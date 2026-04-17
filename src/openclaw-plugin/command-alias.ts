@@ -1,0 +1,28 @@
+export const PRIMARY_COMMAND_NAME = "elsewhere";
+export const LEGACY_COMMAND_NAME = "travel-companion";
+
+export const PRIMARY_SLASH_COMMAND = `/${PRIMARY_COMMAND_NAME}`;
+export const LEGACY_SLASH_COMMAND = `/${LEGACY_COMMAND_NAME}`;
+
+const COMMAND_PREFIX_PATTERN =
+  /^\/(?:elsewhere|travel-companion)\b/iu;
+
+export function isSupportedSlashCommand(text: string): boolean {
+  return COMMAND_PREFIX_PATTERN.test(text.trim());
+}
+
+export function normalizeSupportedSlashCommand(text: string): string {
+  return text.trim().replace(COMMAND_PREFIX_PATTERN, PRIMARY_SLASH_COMMAND);
+}
+
+export function extractSetupImageCommandUrl(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const setupImageMatch = trimmed.match(
+    /\/(?:elsewhere|travel-companion)\s+setup\b[\s\S]*?--image\s+(\S+)/iu,
+  );
+  return setupImageMatch?.[1]?.trim() ?? null;
+}

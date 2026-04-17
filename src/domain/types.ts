@@ -317,7 +317,10 @@ export interface RecentPostcardPhotoContext {
   imageSummary?: string;
 }
 
+export type SystemLocale = "zh-CN" | "ja-JP" | "en";
+
 export type SetupStep =
+  | "locale_select"
   | "persona_intro"
   | "existing_persona_confirm"
   | "name"
@@ -338,7 +341,7 @@ export type SetupStep =
   | "openrouter_api_key"
   | "complete";
 
-export type SetupSessionKind = "persona" | "model";
+export type SetupSessionKind = "locale" | "persona" | "model";
 
 export interface SetupSessionDraft {
   name?: string;
@@ -578,6 +581,7 @@ export interface InstantReplyWindow {
 export interface ConversationCompanionState {
   conversationKey: string;
   mode: ConversationMode;
+  systemLocale?: SystemLocale;
   setupSession?: SetupSession;
   pendingUserMessages: InboundUserMessage[];
   pendingReplyDispatch: PendingReplyDispatch | null;

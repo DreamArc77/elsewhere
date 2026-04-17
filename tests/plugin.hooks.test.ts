@@ -61,6 +61,12 @@ describe("travel companion inbound takeover hook", () => {
       boundAt: Date.now(),
       mode: "companion-exclusive",
     });
+    await runtime.conversationStateRepository.save({
+      ...(await runtime.conversationStateRepository.getByKey(key))!,
+      systemLocale: "zh-CN",
+      setupSession: undefined,
+      updatedAt: new Date().toISOString(),
+    });
 
     const result = await handleTravelCompanionInboundClaim(
       {
@@ -242,6 +248,12 @@ describe("travel companion inbound takeover hook", () => {
       boundAt: Date.now(),
       mode: "companion-exclusive",
     });
+    await runtime.conversationStateRepository.save({
+      ...(await runtime.conversationStateRepository.getByKey(key))!,
+      systemLocale: "zh-CN",
+      setupSession: undefined,
+      updatedAt: new Date().toISOString(),
+    });
 
     const result = await handleTravelCompanionInboundClaim(
       {
@@ -271,7 +283,7 @@ describe("travel companion inbound takeover hook", () => {
     expect(state?.pendingUserMessages).toHaveLength(0);
     expect(runtime.messenger.sentReplies).toHaveLength(1);
     expect(runtime.messenger.sentReplies[0]?.text).toContain(
-      "No recent trip is recorded for this conversation yet.",
+      "这条会话还没有记录到最近的行程。",
     );
 
     const logFiles = await readdir(runtime.paths.logsDir);
@@ -311,8 +323,8 @@ describe("travel companion inbound takeover hook", () => {
 
     const result = await handleTravelCompanionInboundClaim(
       {
-        content: "/travel-companion activate",
-        body: "/travel-companion activate",
+        content: "/elsewhere activate",
+        body: "/elsewhere activate",
         channel: "telegram",
         accountId: "default",
         conversationId: "1459473177",
@@ -342,7 +354,9 @@ describe("travel companion inbound takeover hook", () => {
     expect(binding?.bindingId).toBe("binding-official");
     expect(binding?.mode).toBe("companion-exclusive");
     expect(runtime.messenger.sentReplies).toHaveLength(1);
-    expect(runtime.messenger.sentReplies[0]?.text).toContain("Ta 模式已开启");
+    expect(runtime.messenger.sentReplies[0]?.text).toContain(
+      "Choose system language",
+    );
 
     const logFiles = await readdir(runtime.paths.logsDir);
     const payload = (
@@ -500,7 +514,7 @@ describe("travel companion inbound takeover hook", () => {
     const state = await runtime.conversationStateRepository.getByKey(key);
     expect(state?.setupSession?.step).toBe("origin_city");
     expect(state?.setupSession?.draft.name).toBe("Mori");
-    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Ta");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("旅伴");
   });
 
   it("accepts the next inbound image from inbound metadata as setup reference photo", async () => {
@@ -588,7 +602,7 @@ describe("travel companion inbound takeover hook", () => {
     ).resolves.toBeTruthy();
     expect(runtime.messenger.sentReplies).toHaveLength(1);
     expect(runtime.messenger.sentReplies[0]?.text).toContain("Mori 创建完成");
-    expect(runtime.messenger.sentReplies[0]?.text).toContain("/travel-companion model");
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("/elsewhere model");
   });
 
   it("updates the current persona instead of creating a new one when setup completes", async () => {
@@ -681,10 +695,10 @@ describe("travel companion inbound takeover hook", () => {
     const personaFiles = await readdir(runtime.paths.personasDir);
     expect(personaFiles.filter((name) => name.endsWith(".json"))).toHaveLength(1);
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain(
-      "/travel-companion deactivate",
+      "/elsewhere deactivate",
     );
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain(
-      "/travel-companion activate",
+      "/elsewhere activate",
     );
   });
 

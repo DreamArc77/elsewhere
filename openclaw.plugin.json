@@ -1,7 +1,7 @@
 {
   "id": "openclaw-travel-companion",
-  "name": "OpenClaw Travel Companion",
-  "description": "A travel-frog-style companion plugin with bundled skills, Gemini grounding, and autonomous postcard delivery.",
+  "name": "elsewhere",
+  "description": "A companion travel plugin with proactive postcards, delayed chat, and guided onboarding.",
   "skills": ["./skills"],
   "configSchema": {
     "type": "object",
@@ -38,6 +38,10 @@
       },
       "openrouterBaseUrl": {
         "type": "string"
+      },
+      "logMode": {
+        "type": "string",
+        "enum": ["safe", "debug"]
       }
     }
   },
@@ -83,6 +87,10 @@
     "openrouterBaseUrl": {
       "label": "OpenRouter Base URL",
       "placeholder": "https://openrouter.ai/api/v1"
+    },
+    "logMode": {
+      "label": "Log Mode",
+      "help": "safe redacts prompts and raw model text; debug keeps them for troubleshooting."
     }
   }
 }
