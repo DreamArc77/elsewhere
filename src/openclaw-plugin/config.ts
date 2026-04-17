@@ -1,5 +1,6 @@
 export interface TravelCompanionPluginConfig {
   geminiApiKey?: string;
+  openrouterApiKey?: string;
   defaultOriginCity?: string;
   pollIntervalSeconds?: number;
   openclawBinaryPath?: string;
@@ -7,6 +8,7 @@ export interface TravelCompanionPluginConfig {
   textModel?: string;
   imageModel?: string;
   geminiBaseUrl?: string;
+  openrouterBaseUrl?: string;
 }
 
 export function resolvePluginConfig(
@@ -17,6 +19,8 @@ export function resolvePluginConfig(
   return {
     geminiApiKey:
       asString(raw?.geminiApiKey) ?? env.GEMINI_API_KEY ?? env.GOOGLE_API_KEY,
+    openrouterApiKey:
+      asString(raw?.openrouterApiKey) ?? env.OPENROUTER_API_KEY,
     defaultOriginCity: asString(raw?.defaultOriginCity) ?? "Hong Kong",
     pollIntervalSeconds: asInteger(raw?.pollIntervalSeconds) ?? 60,
     openclawBinaryPath: asString(raw?.openclawBinaryPath) ?? "openclaw",
@@ -24,6 +28,10 @@ export function resolvePluginConfig(
     textModel: asString(raw?.textModel) ?? "gemini-3-flash-preview",
     imageModel: asString(raw?.imageModel) ?? "gemini-3.1-flash-image-preview",
     geminiBaseUrl: asString(raw?.geminiBaseUrl) ?? env.GEMINI_BASE_URL,
+    openrouterBaseUrl:
+      asString(raw?.openrouterBaseUrl) ??
+      env.OPENROUTER_BASE_URL ??
+      "https://openrouter.ai/api/v1",
   };
 }
 

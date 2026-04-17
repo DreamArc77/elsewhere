@@ -102,7 +102,7 @@ describe("buildOnboardingGateMessage", () => {
       setupSession: null,
     });
 
-    expect(message).toContain("Gemini key");
+    expect(message).toContain("planning / 生图通道配置");
     expect(message).toContain("/travel-companion model");
     expect(message).not.toContain("/travel-companion setup");
   });

@@ -26,6 +26,7 @@ import {
 import { JsonlFileLogger } from "../infrastructure/jsonl-file-logger.js";
 import { BindingRegistryStore } from "./binding-state.js";
 import { TravelCompanionPluginConfig } from "./config.js";
+import { resolveConfiguredGeminiProvider } from "./gemini-provider-config.js";
 import { MessageCommandRunner, NoopSchedulerPort, OpenClawCliMessengerPort } from "./ports.js";
 
 export interface RuntimeBundle {
@@ -158,22 +159,24 @@ export async function createRuntimeBundle(input: {
     scheduler: new NoopSchedulerPort(),
     messenger,
     grounding: new GeminiRestGroundingAdapter({
-      apiKeyResolver: async () =>
-        (await globalConfigRepository.get()).geminiApiKey ??
-        input.pluginConfig.geminiApiKey,
+      geminiProviderResolver: async () =>
+        resolveConfiguredGeminiProvider({
+          globalConfig: await globalConfigRepository.get(),
+          pluginConfig: input.pluginConfig,
+        }),
       textProviderResolver: async () =>
         (await globalConfigRepository.get()).textProvider,
       runtime: input.runtime,
-      baseUrl: input.pluginConfig.geminiBaseUrl,
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
       logger,
     }),
     imageGeneration: new GeminiRestImageAdapter({
-      apiKeyResolver: async () =>
-        (await globalConfigRepository.get()).geminiApiKey ??
-        input.pluginConfig.geminiApiKey,
-      baseUrl: input.pluginConfig.geminiBaseUrl,
+      geminiProviderResolver: async () =>
+        resolveConfiguredGeminiProvider({
+          globalConfig: await globalConfigRepository.get(),
+          pluginConfig: input.pluginConfig,
+        }),
       imageModel: input.pluginConfig.imageModel,
       logger,
     }),
@@ -238,13 +241,14 @@ export async function createRuntimeBundle(input: {
     tripRepository,
     personaRepository,
     grounding: new GeminiRestGroundingAdapter({
-      apiKeyResolver: async () =>
-        (await globalConfigRepository.get()).geminiApiKey ??
-        input.pluginConfig.geminiApiKey,
+      geminiProviderResolver: async () =>
+        resolveConfiguredGeminiProvider({
+          globalConfig: await globalConfigRepository.get(),
+          pluginConfig: input.pluginConfig,
+        }),
       textProviderResolver: async () =>
         (await globalConfigRepository.get()).textProvider,
       runtime: input.runtime,
-      baseUrl: input.pluginConfig.geminiBaseUrl,
       planningModel: input.pluginConfig.planningModel,
       textModel: input.pluginConfig.textModel,
       logger,

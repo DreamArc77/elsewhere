@@ -37,6 +37,10 @@ export type TravelCompanionTextProviderKind =
   | "gemini"
   | "openai-compatible";
 
+export type TravelCompanionGeminiProviderKind =
+  | "google-direct"
+  | "openrouter";
+
 export interface TravelCompanionTextProviderConfig {
   kind: TravelCompanionTextProviderKind;
   baseUrl?: string;
@@ -44,8 +48,15 @@ export interface TravelCompanionTextProviderConfig {
   model?: string;
 }
 
+export interface TravelCompanionGeminiProviderConfig {
+  kind: TravelCompanionGeminiProviderKind;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
 export interface TravelCompanionGlobalConfig {
   geminiApiKey?: string;
+  geminiProvider?: TravelCompanionGeminiProviderConfig;
   textProvider?: TravelCompanionTextProviderConfig;
   updatedAt: string;
 }
@@ -322,7 +333,9 @@ export type SetupStep =
   | "openai_base_url"
   | "openai_api_key"
   | "openai_model"
+  | "gemini_provider"
   | "gemini_api_key"
+  | "openrouter_api_key"
   | "complete";
 
 export type SetupSessionKind = "persona" | "model";
@@ -341,6 +354,8 @@ export interface SetupSessionDraft {
   openaiBaseUrl?: string;
   openaiApiKey?: string;
   openaiModel?: string;
+  geminiProviderKind?: TravelCompanionGeminiProviderKind;
+  geminiProviderApiKey?: string;
 }
 
 export interface SetupSession {

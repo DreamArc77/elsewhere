@@ -6,9 +6,11 @@ import {
   SetupSessionDraft,
   SetupSessionKind,
   StoredPersonaProfile,
+  TravelCompanionGeminiProviderKind,
   TravelCompanionGlobalConfig,
   TravelCompanionTextProviderKind,
 } from "../domain/types.js";
+import { hasConfiguredGeminiProvider } from "./gemini-provider-config.js";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -68,7 +70,7 @@ function buildCurrentValuePrompt(input: {
   return [
     `当前值：${input.currentValue}`,
     ...input.body,
-    "回复新内容，或回复 0",
+    "回复新内容，或回复 0 沿用当前值",
   ].join("\n");
 }
 
@@ -125,9 +127,10 @@ function buildPersonaStepPrompt(session: SetupSession): string {
               "例如：地雷系、敏感、黏人",
             ],
           })
-        : ["用几个词描述一下 Ta 的性格特征。", "例如：地雷系、敏感、黏人"].join(
-            "\n",
-          );
+        : [
+            "用几个词描述一下 Ta 的性格特征。",
+            "例如：地雷系、敏感、黏人",
+          ].join("\n");
     case "tone":
       return editing
         ? buildCurrentValuePrompt({
@@ -169,7 +172,7 @@ function buildPersonaStepPrompt(session: SetupSession): string {
           ].join("\n");
     case "persona_review":
       return [
-        "目前资料如下：",
+        "修改后的资料如下：",
         "",
         ...buildPersonaSummary(session),
         "",
@@ -186,7 +189,7 @@ function buildPersonaStepPrompt(session: SetupSession): string {
     case "reference_photo_choice":
       if (editing && session.draft.referenceImageAsset) {
         return [
-          "当前已有参考图。",
+          "当前已经有参考图。",
           "",
           "回复：",
           "1. 上传一张新参考图",
@@ -222,12 +225,17 @@ export function evaluateOnboardingReadiness(input: {
   binding: ConversationBindingRecord;
   config: TravelCompanionGlobalConfig;
   fallbackGeminiApiKey?: string;
+  fallbackOpenRouterApiKey?: string;
 }): OnboardingReadiness {
   const hasPersona = Boolean(input.binding.defaultPersonaId);
   const hasTextProvider = Boolean(input.config.textProvider?.kind);
-  const hasGeminiKey = Boolean(
-    input.config.geminiApiKey?.trim() || input.fallbackGeminiApiKey?.trim(),
-  );
+  const hasGeminiKey = hasConfiguredGeminiProvider({
+    globalConfig: input.config,
+    pluginConfig: {
+      geminiApiKey: input.fallbackGeminiApiKey,
+      openrouterApiKey: input.fallbackOpenRouterApiKey,
+    },
+  });
 
   return {
     hasPersona,
@@ -258,6 +266,12 @@ export function buildPersonaSetupDraft(
 export function buildModelSetupDraft(
   config: TravelCompanionGlobalConfig,
 ): SetupSessionDraft {
+  const geminiProviderKind =
+    config.geminiProvider?.kind ??
+    (config.geminiApiKey?.trim() ? "google-direct" : undefined);
+  const geminiProviderApiKey =
+    config.geminiProvider?.apiKey ?? config.geminiApiKey;
+
   return {
     textProviderKind: config.textProvider?.kind,
     openaiBaseUrl:
@@ -272,6 +286,8 @@ export function buildModelSetupDraft(
       config.textProvider?.kind === "openai-compatible"
         ? config.textProvider.model
         : undefined,
+    geminiProviderKind,
+    geminiProviderApiKey,
   };
 }
 
@@ -324,11 +340,27 @@ export function parseTextProviderChoice(
   return null;
 }
 
+export function parseGeminiProviderChoice(
+  value: string,
+): TravelCompanionGeminiProviderKind | null {
+  const normalized = value.trim().toLowerCase();
+  if (
+    ["1", "google", "gemini", "google-direct", "direct"].includes(normalized)
+  ) {
+    return "google-direct";
+  }
+  if (["2", "openrouter", "or"].includes(normalized)) {
+    return "openrouter";
+  }
+  return null;
+}
+
 export function advanceSetupSessionWithText(input: {
   session: SetupSession;
   text: string;
   globalConfig: TravelCompanionGlobalConfig;
   fallbackGeminiApiKey?: string;
+  fallbackOpenRouterApiKey?: string;
 }): {
   session: SetupSession;
   completed: boolean;
@@ -337,10 +369,13 @@ export function advanceSetupSessionWithText(input: {
 } {
   const text = input.text.trim();
   const updatedAt = nowIso();
-  const hasGeminiKeyAlready = Boolean(
-    input.globalConfig.geminiApiKey?.trim() ||
-      input.fallbackGeminiApiKey?.trim(),
-  );
+  const hasGeminiKeyAlready = hasConfiguredGeminiProvider({
+    globalConfig: input.globalConfig,
+    pluginConfig: {
+      geminiApiKey: input.fallbackGeminiApiKey,
+      openrouterApiKey: input.fallbackOpenRouterApiKey,
+    },
+  });
 
   const next: SetupSession = {
     ...input.session,
@@ -402,7 +437,9 @@ export function advanceSetupSessionWithText(input: {
         return { session: next, completed: false };
       case "user_addressing":
         if (shouldKeepCurrent(text, input.session) && !next.draft.userAddressing) {
-          throw new Error("当前还没有设定 Ta 对你的称呼，这一项需要补一个。");
+          throw new Error(
+            "当前还没有设置 Ta 对你的称呼，这一项需要补一个。",
+          );
         }
         if (!shouldKeepCurrent(text, input.session)) {
           next.draft.userAddressing = text;
@@ -509,7 +546,7 @@ export function advanceSetupSessionWithText(input: {
           },
         };
       }
-      next.step = "gemini_api_key";
+      next.step = "gemini_provider";
       return {
         session: next,
         completed: false,
@@ -543,7 +580,7 @@ export function advanceSetupSessionWithText(input: {
           },
         };
       }
-      next.step = "gemini_api_key";
+      next.step = "gemini_provider";
       return {
         session: next,
         completed: false,
@@ -556,13 +593,55 @@ export function advanceSetupSessionWithText(input: {
           },
         },
       };
+    case "gemini_provider": {
+      const choice = parseGeminiProviderChoice(text);
+      if (!choice) {
+        throw new Error(
+          "没看懂这个 planning / 生图通道选项。回 1/2，或者直接回 google-direct / openrouter。",
+        );
+      }
+      next.draft.geminiProviderKind = choice;
+      next.step =
+        choice === "openrouter" ? "openrouter_api_key" : "gemini_api_key";
+      return { session: next, completed: false };
+    }
     case "gemini_api_key":
       next.step = "complete";
+      next.draft.geminiProviderKind = "google-direct";
+      next.draft.geminiProviderApiKey = text;
       return {
         session: next,
         completed: true,
         configPatch: {
           geminiApiKey: text,
+          geminiProvider: {
+            kind: "google-direct",
+            apiKey: text,
+          },
+          textProvider:
+            next.draft.textProviderKind === "openai-compatible"
+              ? {
+                  kind: "openai-compatible",
+                  baseUrl: next.draft.openaiBaseUrl,
+                  apiKey: next.draft.openaiApiKey,
+                  model: next.draft.openaiModel,
+                }
+              : { kind: next.draft.textProviderKind ?? "host-default" },
+        },
+      };
+    case "openrouter_api_key":
+      next.step = "complete";
+      next.draft.geminiProviderKind = "openrouter";
+      next.draft.geminiProviderApiKey = text;
+      return {
+        session: next,
+        completed: true,
+        configPatch: {
+          geminiApiKey: undefined,
+          geminiProvider: {
+            kind: "openrouter",
+            apiKey: text,
+          },
           textProvider:
             next.draft.textProviderKind === "openai-compatible"
               ? {
@@ -627,11 +706,25 @@ export function renderSetupStepPrompt(session: SetupSession): string {
           "回复要使用的模型名。",
           `当前：${displayValue(session.draft.openaiModel)}`,
         ].join("\n");
+      case "gemini_provider":
+        return [
+          "planning 和生图要走哪种 Gemini 通道？回复一个选项：",
+          `当前：${displayValue(session.draft.geminiProviderKind)}`,
+          "1. google-direct（Gemini API key / AI Studio）",
+          "2. openrouter（用 OpenRouter key 调 Gemini）",
+        ].join("\n");
       case "gemini_api_key":
         return [
           "还差 Gemini API key。",
-          "planning 和生图都会共用这一个 key。",
+          "planning 和生图都会共用这一个 Google Gemini key。",
           "Gemini key 获取链接：https://aistudio.google.com/app/apikey",
+          "直接把 key 发我就行。",
+        ].join("\n");
+      case "openrouter_api_key":
+        return [
+          "还差 OpenRouter API key。",
+          "planning 和生图都会共用这一个 OpenRouter key，并通过 OpenRouter 调 Gemini。",
+          "OpenRouter key 获取链接：https://openrouter.ai/settings/keys",
           "直接把 key 发我就行。",
         ].join("\n");
       case "complete":
@@ -644,7 +737,7 @@ export function renderSetupStepPrompt(session: SetupSession): string {
   return buildPersonaStepPrompt(session);
 }
 
-export function buildIdleGuideMessage(persona: StoredPersonaProfile): string {
+export function buildIdleGuideMessage(_persona: StoredPersonaProfile): string {
   return [
     "接下来你可以直接告诉我一个想去的目的地，",
     "比如：东京 / 北京 / 巴黎",
@@ -658,7 +751,9 @@ export function buildPersonaCreatedMessage(
   return `${persona.name} 创建完成。`;
 }
 
-export function buildPersonaUpdatedMessage(persona: StoredPersonaProfile): string {
+export function buildPersonaUpdatedMessage(
+  persona: StoredPersonaProfile,
+): string {
   return [
     `${persona.name} 的资料已更新。`,
     "",
@@ -691,14 +786,18 @@ export function buildOnboardingGateMessage(input: {
     missing.push("文本模型配置");
   }
   if (!input.readiness.hasGeminiKey) {
-    missing.push("Gemini key（planning 和生图共用）");
+    missing.push("planning / 生图通道配置");
   }
 
-  if (!input.readiness.hasPersona && !input.readiness.hasTextProvider && !input.readiness.hasGeminiKey) {
+  if (
+    !input.readiness.hasPersona &&
+    !input.readiness.hasTextProvider &&
+    !input.readiness.hasGeminiKey
+  ) {
     return [
       "还没完成首次配置。",
       "先运行 /travel-companion setup，完成 Ta 的资料创建。",
-      "再运行 /travel-companion model，完成文本模型和 Gemini key 配置。",
+      "再运行 /travel-companion model，完成文本模型和 planning / 生图通道配置。",
     ].join("\n");
   }
 
@@ -706,14 +805,14 @@ export function buildOnboardingGateMessage(input: {
     return [
       `还差最后几项配置：${missing.join("、")}`,
       "先运行 /travel-companion setup，我会一步步带你配完 Ta 的资料。",
-      "Ta 的资料配好后，再用 /travel-companion model 补模型和 key。",
+      "Ta 的资料配好后，再用 /travel-companion model 补模型和 planning / 生图通道。",
     ].join("\n");
   }
 
   return [
     `还差：${missing.join("、")}`,
     "Ta 的资料已经有了。",
-    "现在运行 /travel-companion model，把文本模型和 Gemini key 配完就行。",
+    "现在运行 /travel-companion model，把文本模型和 planning / 生图通道配完就行。",
   ].join("\n");
 }
 

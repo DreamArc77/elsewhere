@@ -31,6 +31,7 @@ import {
   evaluateOnboardingReadiness,
   renderSetupStepPrompt,
 } from "./onboarding.js";
+import { hasConfiguredGeminiProvider } from "./gemini-provider-config.js";
 import { materializeReferenceImage } from "./reference-image.js";
 
 interface InboundClaimEvent {
@@ -418,15 +419,19 @@ async function handleSetupSessionInbound(
         details: { kind: configPatch.textProvider.kind },
       });
     }
-    if (configPatch?.geminiApiKey) {
+    if (configPatch?.geminiApiKey || configPatch?.geminiProvider?.apiKey) {
       await logCommandBridgeEvent(deps.logger, {
         binding: input.binding,
         runId,
         event: "config.gemini_key.updated",
-        decision: "Stored Gemini API key during setup.",
+        decision:
+          "Stored planning/image provider credentials during setup.",
         provider: "setup-session",
         status: "success",
-        details: { hasGeminiKey: true },
+        details: {
+          hasGeminiKey: true,
+          providerKind: configPatch.geminiProvider?.kind ?? "google-direct",
+        },
       });
     }
   };
@@ -511,6 +516,7 @@ async function handleSetupSessionInbound(
       text: input.trimmed,
       globalConfig,
       fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+      fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
     });
   } catch (error) {
     await deps.messenger.sendTextReply({
@@ -653,6 +659,7 @@ async function finalizeSetupSession(input: {
       binding: updatedBinding,
       config: globalConfig,
       fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+      fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
     });
     const shouldSendImmediateIdleGuide =
       readiness.isComplete &&
@@ -689,9 +696,10 @@ async function finalizeSetupSession(input: {
         kind: session.kind,
         personaId: persona.personaId,
         textProvider: globalConfig.textProvider?.kind ?? "none",
-        hasGeminiKey: Boolean(
-          globalConfig.geminiApiKey?.trim() || deps.pluginConfig.geminiApiKey,
-        ),
+        hasGeminiKey: hasConfiguredGeminiProvider({
+          globalConfig,
+          pluginConfig: deps.pluginConfig,
+        }),
       },
     });
     await deps.messenger.sendTextReply({
@@ -726,6 +734,7 @@ async function finalizeSetupSession(input: {
     binding: inbound.binding,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
   });
   const shouldSendImmediateIdleGuide =
     readiness.isComplete &&
@@ -761,9 +770,10 @@ async function finalizeSetupSession(input: {
     details: {
       kind: session.kind,
       textProvider: globalConfig.textProvider?.kind ?? "none",
-      hasGeminiKey: Boolean(
-        globalConfig.geminiApiKey?.trim() || deps.pluginConfig.geminiApiKey,
-      ),
+      hasGeminiKey: hasConfiguredGeminiProvider({
+        globalConfig,
+        pluginConfig: deps.pluginConfig,
+      }),
     },
   });
 

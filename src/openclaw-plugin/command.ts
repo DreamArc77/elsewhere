@@ -33,6 +33,7 @@ import {
   formatChannelCapability,
   getChannelCapabilities,
 } from "./channel-capabilities.js";
+import { describeConfiguredGeminiProvider } from "./gemini-provider-config.js";
 
 type CommandReply = { text: string; isError?: boolean };
 
@@ -148,6 +149,7 @@ async function activateConversation(
     binding: activatedBinding,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
   });
   await deps.logger?.log({
     tripId: `conversation:${activatedBinding.key}`,
@@ -422,6 +424,7 @@ async function startTrip(
     binding: binding.record,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
   });
   await deps.logger?.log({
     tripId: `conversation:${binding.record.key}`,
@@ -603,6 +606,11 @@ async function statusTrip(
     binding: binding.record,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
+  });
+  const geminiProvider = describeConfiguredGeminiProvider({
+    globalConfig,
+    pluginConfig: deps.pluginConfig,
   });
   const pendingReplyCount = inspection.state?.pendingUserMessages.length ?? 0;
   const replyDueAt = inspection.state?.pendingReplyDispatch?.dueAt ?? "none";
@@ -633,7 +641,8 @@ async function statusTrip(
       `onboardingComplete: ${readiness.isComplete}`,
       `setupStep: ${inspection.state?.setupSession?.step ?? "none"}`,
       `textProvider: ${globalConfig.textProvider?.kind ?? "none"}`,
-      `geminiKeyConfigured: ${Boolean(globalConfig.geminiApiKey?.trim() || deps.pluginConfig.geminiApiKey)}`,
+      `geminiProvider: ${geminiProvider}`,
+      `geminiKeyConfigured: ${readiness.hasGeminiKey}`,
       `state: ${inspection.resolvedState.stage.group ?? inspection.businessSituation.state}`,
       `substate: ${inspection.resolvedState.stage.substate}`,
       `stateLocation: ${inspection.resolvedState.state.location ?? "none"}`,

@@ -31,6 +31,7 @@ import {
   PhaseGroundingResult,
   ResolvedAgentState,
   RuntimeStepContext,
+  TravelCompanionGeminiProviderConfig,
   StoredPersonaProfile,
   TravelCompanionTextProviderConfig,
   TripPhase,
@@ -48,6 +49,12 @@ import {
 interface GeminiOptions {
   apiKey?: string;
   apiKeyResolver?: () => Promise<string | undefined> | string | undefined;
+  geminiProviderResolver?:
+    | (() =>
+        | Promise<TravelCompanionGeminiProviderConfig | undefined>
+        | TravelCompanionGeminiProviderConfig
+        | undefined)
+    | undefined;
   textProviderResolver?:
     | (() =>
         | Promise<TravelCompanionTextProviderConfig | undefined>
@@ -71,6 +78,28 @@ interface GenerateContentResponse {
         inlineData?: { data?: string; mimeType?: string };
         inline_data?: { data?: string; mime_type?: string };
       }>;
+    };
+  }>;
+}
+
+interface OpenRouterChatCompletionResponse {
+  model?: string;
+  choices?: Array<{
+    message?: OpenRouterMessage;
+  }>;
+}
+
+interface OpenRouterMessage {
+  content?:
+    | string
+    | Array<{
+        type?: string;
+        text?: string;
+      }>;
+  images?: Array<{
+    type?: string;
+    image_url?: {
+      url?: string;
     };
   }>;
 }
@@ -159,6 +188,14 @@ function normalizeBaseUrl(baseUrl?: string): string {
   ).replace(/\/$/, "");
 }
 
+function normalizeOpenRouterBaseUrl(baseUrl?: string): string {
+  return (baseUrl ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
+}
+
+function normalizeOpenRouterModel(model: string): string {
+  return model.includes("/") ? model : `google/${model}`;
+}
+
 function extractText(response: GenerateContentResponse): string {
   const part = response.candidates?.[0]?.content?.parts?.find(
     (candidatePart) => typeof candidatePart.text === "string",
@@ -213,6 +250,78 @@ function extractImage(response: GenerateContentResponse): ImageGenerationResult 
     bytesBase64,
     mimeType,
     provider: "gemini",
+  };
+}
+
+function extractOpenRouterMessageText(
+  message: OpenRouterMessage | undefined,
+): string | undefined {
+  const content = message?.content;
+  if (typeof content === "string") {
+    return content.trim() || undefined;
+  }
+
+  if (Array.isArray(content)) {
+    const text = content
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join("")
+      .trim();
+    return text || undefined;
+  }
+
+  return undefined;
+}
+
+function dataUrlToInlineImage(dataUrl: string): {
+  mimeType: string;
+  bytesBase64: string;
+} | null {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/u);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    mimeType: match[1]!,
+    bytesBase64: match[2]!,
+  };
+}
+
+function convertOpenRouterResponseToGenerateContent(
+  payload: OpenRouterChatCompletionResponse,
+): GenerateContentResponse {
+  const message = payload.choices?.[0]?.message;
+  const text = extractOpenRouterMessageText(message);
+  const imageDataUrl = message?.images?.[0]?.image_url?.url;
+  const inlineImage =
+    typeof imageDataUrl === "string" ? dataUrlToInlineImage(imageDataUrl) : null;
+
+  const parts: Array<{
+    text?: string;
+    inlineData?: { data?: string; mimeType?: string };
+  }> = [];
+
+  if (text) {
+    parts.push({ text });
+  }
+
+  if (inlineImage) {
+    parts.push({
+      inlineData: {
+        data: inlineImage.bytesBase64,
+        mimeType: inlineImage.mimeType,
+      },
+    });
+  }
+
+  return {
+    candidates: [
+      {
+        content: {
+          parts,
+        },
+      },
+    ],
   };
 }
 
@@ -645,9 +754,160 @@ function elapsedMs(startedAt: string, finishedAt: string): number {
   return new Date(finishedAt).getTime() - new Date(startedAt).getTime();
 }
 
+function buildOpenRouterRequestBody(
+  model: string,
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const request: Record<string, unknown> = {
+    model: normalizeOpenRouterModel(model),
+    messages: buildOpenRouterMessages(body),
+  };
+
+  const generationConfig =
+    body.generationConfig && typeof body.generationConfig === "object"
+      ? (body.generationConfig as Record<string, unknown>)
+      : undefined;
+  const temperature =
+    typeof generationConfig?.temperature === "number"
+      ? generationConfig.temperature
+      : undefined;
+  if (temperature !== undefined) {
+    request.temperature = temperature;
+  }
+
+  const hasGoogleSearch = Array.isArray(body.tools)
+    ? body.tools.some(
+        (tool) =>
+          typeof tool === "object" &&
+          tool !== null &&
+          "google_search" in (tool as Record<string, unknown>),
+      )
+    : false;
+  if (hasGoogleSearch) {
+    request.plugins = [{ id: "web" }];
+  }
+
+  const responseMimeType =
+    typeof generationConfig?.responseMimeType === "string"
+      ? generationConfig.responseMimeType
+      : undefined;
+  if (responseMimeType === "application/json") {
+    const schema =
+      generationConfig?.responseJsonSchema &&
+      typeof generationConfig.responseJsonSchema === "object"
+        ? (generationConfig.responseJsonSchema as Record<string, unknown>)
+        : undefined;
+    request.response_format = schema
+      ? {
+          type: "json_schema",
+          json_schema: {
+            name: "travel_companion_json",
+            strict: true,
+            schema,
+          },
+        }
+      : { type: "json_object" };
+  }
+
+  const responseModalities = Array.isArray(generationConfig?.responseModalities)
+    ? generationConfig.responseModalities
+    : [];
+  if (responseModalities.includes("IMAGE")) {
+    request.modalities = ["image", "text"];
+  }
+
+  const imageConfig =
+    generationConfig?.imageConfig &&
+    typeof generationConfig.imageConfig === "object"
+      ? (generationConfig.imageConfig as Record<string, unknown>)
+      : undefined;
+  if (imageConfig) {
+    request.image_config = {
+      ...(typeof imageConfig.aspectRatio === "string"
+        ? { aspect_ratio: imageConfig.aspectRatio }
+        : {}),
+      ...(typeof imageConfig.imageSize === "string"
+        ? { image_size: imageConfig.imageSize }
+        : {}),
+    };
+  }
+
+  return request;
+}
+
+function buildOpenRouterMessages(
+  body: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  const contents = Array.isArray(body.contents) ? body.contents : [];
+  if (contents.length === 0) {
+    return [{ role: "user", content: "" }];
+  }
+
+  return contents.map((content) => {
+    const record =
+      content && typeof content === "object"
+        ? (content as Record<string, unknown>)
+        : {};
+    const role = typeof record.role === "string" ? record.role : "user";
+    const parts = Array.isArray(record.parts) ? record.parts : [];
+    const convertedParts: Array<Record<string, unknown>> = [];
+
+    for (const part of parts) {
+      const value =
+        part && typeof part === "object" ? (part as Record<string, unknown>) : {};
+      if (typeof value.text === "string") {
+        convertedParts.push({ type: "text", text: value.text });
+        continue;
+      }
+
+      const inlineData =
+        value.inline_data && typeof value.inline_data === "object"
+          ? (value.inline_data as Record<string, unknown>)
+          : value.inlineData && typeof value.inlineData === "object"
+            ? (value.inlineData as Record<string, unknown>)
+            : undefined;
+      const mimeType =
+        typeof inlineData?.mime_type === "string"
+          ? inlineData.mime_type
+          : typeof inlineData?.mimeType === "string"
+            ? inlineData.mimeType
+            : undefined;
+      const data =
+        typeof inlineData?.data === "string" ? inlineData.data : undefined;
+      if (mimeType && data) {
+        convertedParts.push({
+          type: "image_url",
+          image_url: {
+            url: `data:${mimeType};base64,${data}`,
+          },
+        });
+      }
+    }
+
+    const firstPart = convertedParts[0];
+
+    return {
+      role,
+      content:
+        convertedParts.length === 1 &&
+        firstPart &&
+        firstPart.type === "text" &&
+        typeof firstPart.text === "string"
+          ? firstPart.text
+          : convertedParts,
+    };
+  });
+}
+
 abstract class BaseGeminiAdapter {
   protected readonly apiKey?: string;
   protected readonly apiKeyResolver?: () => Promise<string | undefined> | string | undefined;
+  protected readonly geminiProviderResolver?:
+    | (() =>
+        | Promise<TravelCompanionGeminiProviderConfig | undefined>
+        | TravelCompanionGeminiProviderConfig
+        | undefined)
+    | undefined;
   protected readonly textProviderResolver?:
     | (() =>
         | Promise<TravelCompanionTextProviderConfig | undefined>
@@ -662,11 +922,32 @@ abstract class BaseGeminiAdapter {
   constructor(options: GeminiOptions) {
     this.apiKey = options.apiKey;
     this.apiKeyResolver = options.apiKeyResolver;
+    this.geminiProviderResolver = options.geminiProviderResolver;
     this.textProviderResolver = options.textProviderResolver;
     this.runtime = options.runtime;
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.logger = options.logger;
+  }
+
+  protected async resolveGeminiProvider(): Promise<TravelCompanionGeminiProviderConfig> {
+    const configured = await this.geminiProviderResolver?.();
+    if (configured?.kind) {
+      return configured;
+    }
+
+    const resolved = (await this.apiKeyResolver?.()) ?? this.apiKey;
+    if (!resolved?.trim()) {
+      throw new Error(
+        "Gemini provider is not configured. Complete onboarding and provide a Google Gemini or OpenRouter key first.",
+      );
+    }
+
+    return {
+      kind: "google-direct",
+      apiKey: resolved.trim(),
+      baseUrl: this.baseUrl,
+    };
   }
 
   protected async resolveApiKey(): Promise<string> {
@@ -683,9 +964,25 @@ abstract class BaseGeminiAdapter {
     model: string,
     body: Record<string, unknown>,
   ): Promise<GenerateContentResponse> {
-    const apiKey = await this.resolveApiKey();
+    const provider = await this.resolveGeminiProvider();
+    const apiKey = provider.apiKey?.trim();
+    if (!apiKey) {
+      throw new Error(
+        "Gemini provider key is not configured. Complete onboarding first.",
+      );
+    }
+
+    if (provider.kind === "openrouter") {
+      return await this.generateContentViaOpenRouter({
+        model,
+        body,
+        apiKey,
+        baseUrl: normalizeOpenRouterBaseUrl(provider.baseUrl),
+      });
+    }
+
     const response = await this.fetchImpl(
-      `${this.baseUrl}/models/${model}:generateContent`,
+      `${normalizeBaseUrl(provider.baseUrl ?? this.baseUrl)}/models/${model}:generateContent`,
       {
         method: "POST",
         headers: {
@@ -706,6 +1003,39 @@ abstract class BaseGeminiAdapter {
     }
 
     return (await response.json()) as GenerateContentResponse;
+  }
+
+  private async generateContentViaOpenRouter(input: {
+    model: string;
+    body: Record<string, unknown>;
+    apiKey: string;
+    baseUrl: string;
+  }): Promise<GenerateContentResponse> {
+    const requestBody = buildOpenRouterRequestBody(input.model, input.body);
+    const response = await this.fetchImpl(
+      `${input.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${input.apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `OpenRouter Gemini request failed: ${response.status} ${response.statusText}${
+          errorText ? ` - ${truncate(errorText, 600)}` : ""
+        }`,
+      );
+    }
+
+    const payload =
+      (await response.json()) as OpenRouterChatCompletionResponse;
+    return convertOpenRouterResponseToGenerateContent(payload);
   }
 }
 

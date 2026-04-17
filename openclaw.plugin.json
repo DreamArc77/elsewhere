@@ -10,6 +10,9 @@
       "geminiApiKey": {
         "type": "string"
       },
+      "openrouterApiKey": {
+        "type": "string"
+      },
       "defaultOriginCity": {
         "type": "string"
       },
@@ -29,6 +32,12 @@
       },
       "imageModel": {
         "type": "string"
+      },
+      "geminiBaseUrl": {
+        "type": "string"
+      },
+      "openrouterBaseUrl": {
+        "type": "string"
       }
     }
   },
@@ -36,6 +45,11 @@
     "geminiApiKey": {
       "label": "Gemini API Key",
       "placeholder": "AIza...",
+      "sensitive": true
+    },
+    "openrouterApiKey": {
+      "label": "OpenRouter API Key",
+      "placeholder": "sk-or-v1-...",
       "sensitive": true
     },
     "defaultOriginCity": {
@@ -61,6 +75,14 @@
     "imageModel": {
       "label": "Image Model",
       "placeholder": "gemini-3.1-flash-image-preview"
+    },
+    "geminiBaseUrl": {
+      "label": "Gemini Base URL",
+      "placeholder": "https://generativelanguage.googleapis.com/v1beta"
+    },
+    "openrouterBaseUrl": {
+      "label": "OpenRouter Base URL",
+      "placeholder": "https://openrouter.ai/api/v1"
     }
   }
 }
