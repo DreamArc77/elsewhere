@@ -692,6 +692,20 @@ export class OpenClawTravelCompanionService {
             },
           ],
           activeStateAnchor,
+          lastPostcardDelivery: {
+            channel: record.deliveryBinding?.channel ?? receipt.provider,
+            deliveryMode: receipt.deliveryMode ?? "combined",
+            fallbackUsed: receipt.fallbackUsed ?? false,
+            fallbackReason: receipt.fallbackReason,
+            sentAt,
+            auxiliaryMessageIds: receipt.auxiliaryMessageIds,
+            capabilities: {
+              combinedPostcard:
+                receipt.channelCapabilities?.combinedPostcard ?? "unknown",
+              mediaPostcard:
+                receipt.channelCapabilities?.mediaPostcard ?? "unknown",
+            },
+          },
         },
         timelineIndex: advanced.timelineIndex,
         pendingDispatch: null,
@@ -716,6 +730,11 @@ export class OpenClawTravelCompanionService {
           dedupeKey: pending.dedupeKey,
           messageId: receipt.messageId,
           shotKind: pending.shotKind,
+          deliveryMode: receipt.deliveryMode ?? "combined",
+          fallbackUsed: receipt.fallbackUsed ?? false,
+          fallbackReason: receipt.fallbackReason ?? null,
+          auxiliaryMessageIds: receipt.auxiliaryMessageIds ?? [],
+          channelCapabilities: receipt.channelCapabilities ?? null,
         },
       });
 

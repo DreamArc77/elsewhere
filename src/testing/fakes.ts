@@ -402,6 +402,8 @@ export class FakeMessenger implements HostMessengerPort {
       messageId: randomUUID(),
       deduped: false,
       provider: "fake-messenger",
+      deliveryMode: "combined",
+      fallbackUsed: false,
     };
     this.receipts.set(input.dedupeKey, receipt);
     this.sentMessages.push({

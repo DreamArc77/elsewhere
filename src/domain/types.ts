@@ -170,6 +170,7 @@ export interface TripState {
   pendingPostcard: Postcard | null;
   artifacts: ArtifactReference[];
   activeStateAnchor?: CompanionStateAnchor | null;
+  lastPostcardDelivery?: PostcardDeliveryStatus | null;
 }
 
 export interface TimelineStep {
@@ -594,10 +595,43 @@ export interface TripRecord {
   lastRunId?: string;
 }
 
+export type ChannelCapabilityLevel =
+  | "supported"
+  | "limited"
+  | "unsupported"
+  | "unknown";
+
+export type PostcardDeliveryMode = "combined" | "split" | "text-only";
+
+export interface ChannelCapabilitySummary {
+  combinedPostcard: ChannelCapabilityLevel;
+  mediaPostcard: ChannelCapabilityLevel;
+  inboundImageSetup: ChannelCapabilityLevel;
+  proactiveMessaging: ChannelCapabilityLevel;
+}
+
+export interface PostcardDeliveryStatus {
+  channel: string;
+  deliveryMode: PostcardDeliveryMode;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  sentAt: string;
+  auxiliaryMessageIds?: string[];
+  capabilities: Pick<
+    ChannelCapabilitySummary,
+    "combinedPostcard" | "mediaPostcard"
+  >;
+}
+
 export interface SendReceipt {
   messageId: string;
   deduped: boolean;
   provider: string;
+  deliveryMode?: PostcardDeliveryMode;
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
+  auxiliaryMessageIds?: string[];
+  channelCapabilities?: ChannelCapabilitySummary;
 }
 
 export interface LogEntry {

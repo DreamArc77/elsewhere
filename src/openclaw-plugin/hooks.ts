@@ -432,7 +432,9 @@ async function handleSetupSessionInbound(
   };
 
   if (session.awaitingReferencePhoto) {
-    const imageSource = extractInboundImageSource(input.event);
+    const imageSource =
+      extractInboundImageSource(input.event) ??
+      extractReferenceImageSourceFromText(input.trimmed);
     if (!imageSource) {
       await logCommandBridgeEvent(deps.logger, {
         binding: input.binding,
@@ -447,7 +449,8 @@ async function handleSetupSessionInbound(
       if (input.trimmed) {
         await deps.messenger.sendTextReply({
           binding: input.binding,
-          text: "我现在在等你的参考图，接下来发一张图片就行。",
+          text:
+            "我现在在等你的参考图。你可以直接发一张图片；如果这个平台传图不稳定，也可以直接发图片 URL，或者发 `/travel-companion setup --image 图片URL`。",
           dedupeKey: `setup-photo-reminder:${input.binding.key}:${runId}`,
         });
         return true;
@@ -819,6 +822,24 @@ function extractInboundImageSource(event: InboundClaimEvent): string | null {
   }
 
   return null;
+}
+
+function extractReferenceImageSourceFromText(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const setupImageMatch = trimmed.match(
+    /\/travel-companion\s+setup\b[\s\S]*?--image\s+(\S+)/iu,
+  );
+  const candidate =
+    setupImageMatch?.[1] ?? trimmed.match(/https?:\/\/\S+/iu)?.[0] ?? null;
+  if (!candidate) {
+    return null;
+  }
+
+  return candidate.trim().replace(/[),.;!?]+$/u, "");
 }
 
 function extractMetadataMediaCandidates(

@@ -168,6 +168,94 @@ describe("OpenClawCliMessengerPort", () => {
     expect(receipt.provider).toBe("openclaw-message-cli-timeout");
   });
 
+  it("falls back to split postcard delivery when combined send fails", async () => {
+    const argvCalls: string[][] = [];
+    const messenger = new OpenClawCliMessengerPort(buildTripRepository(), {
+      async run(argv) {
+        argvCalls.push(argv);
+        if (argvCalls.length === 1) {
+          return {
+            stdout: "",
+            stderr: "combined failed",
+            code: 1,
+          };
+        }
+        if (argvCalls.length === 2) {
+          return {
+            stdout: '{"messageId":"media-1","provider":"telegram"}',
+            stderr: "",
+            code: 0,
+          };
+        }
+        return {
+          stdout: '{"messageId":"caption-1","provider":"telegram"}',
+          stderr: "",
+          code: 0,
+        };
+      },
+    });
+
+    const receipt = await messenger.sendPostcard({
+      personaId: "persona-1",
+      dedupeKey: "trip-1:step-1",
+      postcard: {
+        tripId: "trip-1",
+        phase: "planning",
+        caption: "hello",
+        imageAsset: "/tmp/fake.png",
+        sentAt: "",
+      },
+    });
+
+    expect(receipt.deliveryMode).toBe("split");
+    expect(receipt.fallbackUsed).toBe(true);
+    expect(receipt.messageId).toBe("media-1");
+    expect(receipt.auxiliaryMessageIds).toEqual(["caption-1"]);
+    expect(argvCalls[0]).toContain("--message");
+    expect(argvCalls[0]).toContain("--media");
+    expect(argvCalls[1]).toContain("--media");
+    expect(argvCalls[1]).not.toContain("--message");
+    expect(argvCalls[2]).toContain("--message");
+  });
+
+  it("falls back to text-only postcard delivery when combined and media sends both fail", async () => {
+    let runnerCalls = 0;
+    const messenger = new OpenClawCliMessengerPort(buildTripRepository(), {
+      async run() {
+        runnerCalls += 1;
+        if (runnerCalls <= 2) {
+          return {
+            stdout: "",
+            stderr: `failed-${runnerCalls}`,
+            code: 1,
+          };
+        }
+        return {
+          stdout: '{"messageId":"text-1","provider":"telegram"}',
+          stderr: "",
+          code: 0,
+        };
+      },
+    });
+
+    const receipt = await messenger.sendPostcard({
+      personaId: "persona-1",
+      dedupeKey: "trip-1:step-1",
+      postcard: {
+        tripId: "trip-1",
+        phase: "planning",
+        caption: "hello",
+        imageAsset: "/tmp/fake.png",
+        sentAt: "",
+      },
+    });
+
+    expect(receipt.deliveryMode).toBe("text-only");
+    expect(receipt.fallbackUsed).toBe(true);
+    expect(receipt.messageId).toBe("text-1");
+    expect(runnerCalls).toBe(3);
+  });
+
   it("uses the runtime outbound adapter for text replies without invoking the CLI runner", async () => {
     let runnerCalls = 0;
     const messenger = new OpenClawCliMessengerPort(

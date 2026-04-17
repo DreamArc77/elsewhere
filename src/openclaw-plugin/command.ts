@@ -29,6 +29,10 @@ import {
   evaluateOnboardingReadiness,
   renderSetupStepPrompt,
 } from "./onboarding.js";
+import {
+  formatChannelCapability,
+  getChannelCapabilities,
+} from "./channel-capabilities.js";
 
 type CommandReply = { text: string; isError?: boolean };
 
@@ -570,10 +574,18 @@ async function statusTrip(
     return binding.reply;
   }
 
+  const channelCapabilities = getChannelCapabilities(binding.record.channel);
   const tripId = options.trip ?? binding.record.lastTripId;
   if (!tripId) {
     return {
-      text: "No recent trip is recorded for this conversation yet.",
+      text: [
+        "No recent trip is recorded for this conversation yet.",
+        `channel: ${binding.record.channel}`,
+        `channelCombinedPostcard: ${formatChannelCapability(channelCapabilities.combinedPostcard)}`,
+        `channelMediaPostcard: ${formatChannelCapability(channelCapabilities.mediaPostcard)}`,
+        `channelInboundImageSetup: ${formatChannelCapability(channelCapabilities.inboundImageSetup)}`,
+        `channelProactiveMessaging: ${formatChannelCapability(channelCapabilities.proactiveMessaging)}`,
+      ].join("\n"),
       isError: true,
     };
   }
@@ -601,10 +613,21 @@ async function statusTrip(
   return {
     text: [
       `tripId: ${trip.tripId}`,
+      `channel: ${binding.record.channel}`,
+      `channelCombinedPostcard: ${formatChannelCapability(channelCapabilities.combinedPostcard)}`,
+      `channelMediaPostcard: ${formatChannelCapability(channelCapabilities.mediaPostcard)}`,
+      `channelInboundImageSetup: ${formatChannelCapability(channelCapabilities.inboundImageSetup)}`,
+      `channelProactiveMessaging: ${formatChannelCapability(channelCapabilities.proactiveMessaging)}`,
       `status: ${trip.state.status}`,
       `phase: ${trip.state.currentPhase}`,
       `day: ${trip.state.currentDay}`,
       `nextRunAt: ${trip.state.nextRunAt ?? "none"}`,
+      `lastPostcardDeliveryMode: ${trip.state.lastPostcardDelivery?.deliveryMode ?? "none"}`,
+      `lastPostcardFallbackUsed: ${trip.state.lastPostcardDelivery?.fallbackUsed ?? false}`,
+      `lastPostcardFallbackReason: ${trip.state.lastPostcardDelivery?.fallbackReason ?? "none"}`,
+      `lastPostcardAuxiliaryMessageIds: ${(trip.state.lastPostcardDelivery?.auxiliaryMessageIds ?? []).join(",") || "none"}`,
+      `lastPostcardCapabilityCombined: ${trip.state.lastPostcardDelivery?.capabilities.combinedPostcard ?? "none"}`,
+      `lastPostcardCapabilityMedia: ${trip.state.lastPostcardDelivery?.capabilities.mediaPostcard ?? "none"}`,
       `artifacts: ${trip.state.artifacts.length}`,
       `conversationMode: ${binding.record.mode}`,
       `onboardingComplete: ${readiness.isComplete}`,
@@ -808,7 +831,7 @@ async function requireBinding(
   if (!inferred) {
     return {
       reply: {
-        text: "This conversation is not ready yet. Run /travel-companion bind in the Telegram chat where you want to receive postcards.",
+        text: "This conversation is not ready yet. Run /travel-companion bind in the chat where you want to receive postcards.",
         isError: true,
       },
     };

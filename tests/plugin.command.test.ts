@@ -542,6 +542,7 @@ describe("travel companion command UX", () => {
       createTelegramContext("/travel-companion start --to Tokyo"),
       deps,
     );
+    await runtime.service.runDueTrips();
     await runtime.conversationService.enqueueInboundMessage({
       binding: (await bindings.get(key))!,
       messageId: "msg-status",
@@ -555,6 +556,13 @@ describe("travel companion command UX", () => {
     );
 
     expect(reply.text).toContain("conversationMode: companion-exclusive");
+    expect(reply.text).toContain("channel: telegram");
+    expect(reply.text).toContain("channelCombinedPostcard: supported");
+    expect(reply.text).toContain("channelMediaPostcard: supported");
+    expect(reply.text).toContain("channelInboundImageSetup: supported");
+    expect(reply.text).toContain("channelProactiveMessaging: supported");
+    expect(reply.text).toContain("lastPostcardDeliveryMode: combined");
+    expect(reply.text).toContain("lastPostcardFallbackUsed: false");
     expect(reply.text).toContain("pendingReplyCount: 1");
     expect(reply.text).toContain("replyDueAt:");
     expect(reply.text).toContain("state:");
