@@ -81,7 +81,14 @@ async function seedSystemLocale(
   });
 }
 
-function createTelegramContext(commandBody: string): PluginCommandContext {
+function createTelegramContext(
+  commandBody: string,
+  options?: {
+    requestConversationBinding?: PluginCommandContext["requestConversationBinding"];
+    detachConversationBinding?: PluginCommandContext["detachConversationBinding"];
+    getCurrentConversationBinding?: PluginCommandContext["getCurrentConversationBinding"];
+  },
+): PluginCommandContext {
   const [, ...rest] = commandBody.trim().split(/\s+/u);
   const pluginBinding = {
     bindingId: "binding-1",
@@ -103,12 +110,18 @@ function createTelegramContext(commandBody: string): PluginCommandContext {
     from: "1459473177",
     to: "999999999",
     accountId: "default",
-    requestConversationBinding: async () => ({
-      status: "bound",
-      binding: pluginBinding,
-    }),
-    detachConversationBinding: async () => ({ removed: true }),
-    getCurrentConversationBinding: async () => pluginBinding,
+    requestConversationBinding:
+      options?.requestConversationBinding ??
+      (async () => ({
+        status: "bound" as const,
+        binding: pluginBinding,
+      })),
+    detachConversationBinding:
+      options?.detachConversationBinding ??
+      (async () => ({ removed: true })),
+    getCurrentConversationBinding:
+      options?.getCurrentConversationBinding ??
+      (async () => pluginBinding),
   };
 }
 
@@ -173,10 +186,36 @@ describe("travel companion command UX", () => {
 
     const binding = await bindings.get(keyForDefaultChat());
     expect(binding?.mode).toBe("companion-exclusive");
+    expect(binding?.bindingSource).toBe("official");
     const state = await runtime.conversationStateRepository.getByKey(
       keyForDefaultChat(),
     );
     expect(state?.setupSession?.kind).toBe("locale");
+  });
+
+  it("falls back to local soft binding when official binding approval stays pending", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/elsewhere activate", {
+        requestConversationBinding: async () => ({
+          status: "pending" as const,
+          approvalId: "pending-approval-id",
+          reply: { text: "pending approval" },
+        }),
+        getCurrentConversationBinding: async () => null,
+      }),
+      createDeps(runtime, bindings),
+    );
+
+    expect(reply.isError).toBeUndefined();
+    expect(reply.text).toContain("Choose system language");
+
+    const binding = await bindings.get(keyForDefaultChat());
+    expect(binding?.mode).toBe("companion-exclusive");
+    expect(binding?.bindingSource).toBe("local");
+    expect(binding?.bindingId).toBeUndefined();
   });
 
   it("shows onboarding gate after locale is selected", async () => {
@@ -528,6 +567,7 @@ describe("travel companion command UX", () => {
     );
 
     expect(reply.text).toContain("conversationMode: companion-exclusive");
+    expect(reply.text).toContain("bindingSource: official");
     expect(reply.text).toContain("systemLocale: zh-CN");
     expect(reply.text).toContain("pendingReplyCount: 1");
     expect(reply.text).toContain("substate:");

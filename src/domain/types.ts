@@ -276,6 +276,7 @@ export interface PendingDispatch {
 
 export interface DeliveryBinding {
   bindingId?: string;
+  bindingSource?: "official" | "local";
   channel: string;
   accountId?: string;
   target: string;

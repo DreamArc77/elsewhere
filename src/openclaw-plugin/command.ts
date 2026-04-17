@@ -281,7 +281,7 @@ async function deactivateConversation(
   };
   await deps.bindings.upsert(nextBinding);
   await deps.conversationService.deactivateConversation(binding.record.key);
-  await ctx.detachConversationBinding();
+  await detachOfficialConversationBinding(ctx, binding.record, deps.logger);
 
   return {
     text: [
@@ -689,6 +689,8 @@ async function statusTrip(
       `lastPostcardCapabilityMedia: ${trip.state.lastPostcardDelivery?.capabilities.mediaPostcard ?? "none"}`,
       `artifacts: ${trip.state.artifacts.length}`,
       `conversationMode: ${binding.record.mode}`,
+      `bindingSource: ${binding.record.bindingSource ?? (binding.record.bindingId ? "official" : "local")}`,
+      `bindingId: ${binding.record.bindingId ?? "none"}`,
       `systemLocale: ${locale}`,
       `onboardingComplete: ${readiness.isComplete}`,
       `setupStep: ${inspection.state?.setupSession?.step ?? "none"}`,
@@ -888,6 +890,7 @@ async function requireBinding(
       parentConversationId: currentBinding.parentConversationId,
       threadId: currentBinding.threadId,
       boundAt: currentBinding.boundAt,
+      bindingSource: "official" as const,
       mode: existing?.mode ?? "default",
       defaultPersonaId: existing?.defaultPersonaId,
       lastTripId: existing?.lastTripId,
@@ -1011,6 +1014,7 @@ function inferBindingRecord(
   return {
     key,
     bindingId: undefined,
+    bindingSource: "local",
     channel: ctx.channel,
     accountId: ctx.accountId,
     target,
@@ -1030,118 +1034,203 @@ async function ensurePluginConversationBinding(
   | { record: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>> }
   | { reply: CommandReply }
 > {
-  const requested = await ctx.requestConversationBinding({
-    summary:
-      "Allow elsewhere to own this conversation for travel postcards and delayed chat replies.",
-    detachHint:
-      `Run ${PRIMARY_SLASH_COMMAND} deactivate to stop the trip and return this chat to the default assistant.`,
-  });
-
-  await logBindingEvent(logger, {
-    event: "binding.requested",
-    decision:
-      "Requested official OpenClaw conversation binding for travel companion.",
-    status:
-      requested.status === "bound"
-        ? "success"
-        : requested.status === "pending"
-          ? "skipped"
-          : "failure",
+  const localRecord = await ensureLocalConversationBindingRecord(
     ctx,
-    details:
-      requested.status === "bound"
-        ? {
-            requestStatus: requested.status,
-            bindingId: requested.binding.bindingId,
-            channel: requested.binding.channel,
-            accountId: requested.binding.accountId,
-            conversationId: requested.binding.conversationId,
-            parentConversationId: requested.binding.parentConversationId,
-            threadId: requested.binding.threadId,
-            mode,
-          }
-        : requested.status === "pending"
+    bindings,
+    mode,
+    logger,
+  );
+  if ("reply" in localRecord) {
+    return localRecord;
+  }
+
+  try {
+    const requested = await ctx.requestConversationBinding({
+      summary:
+        "Allow elsewhere to own this conversation for travel postcards and delayed chat replies.",
+      detachHint:
+        `Run ${PRIMARY_SLASH_COMMAND} deactivate to stop the trip and return this chat to the default assistant.`,
+    });
+
+    await logBindingEvent(logger, {
+      event: "binding.requested",
+      decision:
+        "Requested official OpenClaw conversation binding for travel companion.",
+      status:
+        requested.status === "bound"
+          ? "success"
+          : requested.status === "pending"
+            ? "skipped"
+            : "failure",
+      ctx,
+      details:
+        requested.status === "bound"
           ? {
               requestStatus: requested.status,
-              approvalId: requested.approvalId,
+              bindingId: requested.binding.bindingId,
+              channel: requested.binding.channel,
+              accountId: requested.binding.accountId,
+              conversationId: requested.binding.conversationId,
+              parentConversationId: requested.binding.parentConversationId,
+              threadId: requested.binding.threadId,
               mode,
             }
-          : {
-              requestStatus: requested.status,
-              message: requested.message,
-              mode,
-            },
+          : requested.status === "pending"
+            ? {
+                requestStatus: requested.status,
+                approvalId: requested.approvalId,
+                mode,
+              }
+            : {
+                requestStatus: requested.status,
+                message: requested.message,
+                mode,
+              },
+    });
+
+    if (requested.status === "bound") {
+      const record = await buildOfficialConversationBindingRecord(
+        bindings,
+        ctx,
+        {
+          channel: requested.binding.channel,
+          accountId: requested.binding.accountId,
+          target: requested.binding.conversationId,
+          parentConversationId: requested.binding.parentConversationId,
+          threadId: requested.binding.threadId,
+          bindingId: requested.binding.bindingId,
+          boundAt: requested.binding.boundAt,
+        },
+        mode,
+      );
+      await bindings.upsert(record);
+      await logBindingEvent(logger, {
+        event: "binding.stored",
+        decision:
+          "Stored conversation binding metadata locally after official binding request.",
+        status: "success",
+        ctx,
+        details: {
+          key: record.key,
+          bindingId: record.bindingId,
+          bindingSource: record.bindingSource,
+          channel: record.channel,
+          accountId: record.accountId,
+          target: record.target,
+          parentConversationId: record.parentConversationId,
+          threadId: record.threadId,
+          mode: record.mode,
+        },
+      });
+      return { record };
+    }
+  } catch (error) {
+    await logBindingEvent(logger, {
+      event: "binding.request_failed",
+      decision:
+        "Official OpenClaw conversation binding request failed, so elsewhere stayed on the local soft-binding fallback.",
+      status: "failure",
+      ctx,
+      details: {
+        mode,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+
+  await logBindingEvent(logger, {
+    event: "binding.soft_activated",
+    decision:
+      "Activated elsewhere using the local soft-binding path because official plugin binding was unavailable or still pending.",
+    status: "skipped",
+    ctx,
+    details: {
+      key: localRecord.record.key,
+      bindingId: localRecord.record.bindingId,
+      bindingSource:
+        localRecord.record.bindingSource ??
+        (localRecord.record.bindingId ? "official" : "local"),
+      mode: localRecord.record.mode,
+    },
   });
 
-  if (requested.status === "pending") {
+  return localRecord;
+}
+
+async function ensureLocalConversationBindingRecord(
+  ctx: PluginCommandContext,
+  bindings: ConversationBindingStore,
+  mode: "default" | "companion-exclusive",
+  logger?: LoggerPort,
+): Promise<
+  | { record: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>> }
+  | { reply: CommandReply }
+> {
+  const currentBinding = await ctx.getCurrentConversationBinding();
+  if (currentBinding) {
+    const record = await buildOfficialConversationBindingRecord(
+      bindings,
+      ctx,
+      {
+        channel: currentBinding.channel,
+        accountId: currentBinding.accountId,
+        target: currentBinding.conversationId,
+        parentConversationId: currentBinding.parentConversationId,
+        threadId: currentBinding.threadId,
+        bindingId: currentBinding.bindingId,
+        boundAt: currentBinding.boundAt,
+      },
+      mode,
+    );
+    await bindings.upsert(record);
+    await logBindingEvent(logger, {
+      event: "binding.current",
+      decision:
+        "Resolved current official OpenClaw conversation binding before activating elsewhere.",
+      status: "success",
+      ctx,
+      details: {
+        key: record.key,
+        bindingId: record.bindingId,
+        bindingSource: record.bindingSource,
+        channel: record.channel,
+        accountId: record.accountId,
+        target: record.target,
+        parentConversationId: record.parentConversationId,
+        threadId: record.threadId,
+        mode: record.mode,
+      },
+    });
+    return { record };
+  }
+
+  const inferred = inferBindingRecord(ctx);
+  if (!inferred) {
     return {
       reply: {
-        text: getSystemCatalog(undefined).command.approvalRequired(
-          requested.approvalId,
-        ),
+        text: getSystemCatalog(undefined).command.notReadyBind,
         isError: true,
       },
     };
   }
 
-  if (requested.status === "error") {
-    return {
-      reply: {
-        text:
-          requested.message ||
-          getSystemCatalog(undefined).command.internalFailure,
-        isError: true,
-      },
-    };
-  }
-
-  const existing = await bindings.get(
-    bindingKey({
-      channel: requested.binding.channel,
-      accountId: requested.binding.accountId,
-      target: requested.binding.conversationId,
-      threadId: requested.binding.threadId,
-    }),
-  );
-  const related = await findRelatedBindingRecord(bindings, ctx, {
-    channel: requested.binding.channel,
-    accountId: requested.binding.accountId,
-    target: requested.binding.conversationId,
-    threadId: requested.binding.threadId,
-  });
-  const seed =
-    existing && (existing.defaultPersonaId || existing.lastTripId)
-      ? existing
-      : related ?? existing;
-  const record = {
-    ...(seed ?? {}),
-    key: bindingKey({
-      channel: requested.binding.channel,
-      accountId: requested.binding.accountId,
-      target: requested.binding.conversationId,
-      threadId: requested.binding.threadId,
-    }),
-    bindingId: requested.binding.bindingId,
-    channel: requested.binding.channel,
-    accountId: requested.binding.accountId,
-    target: requested.binding.conversationId,
-    parentConversationId: requested.binding.parentConversationId,
-    threadId: requested.binding.threadId,
-    boundAt: requested.binding.boundAt,
+  const record = await buildLocalConversationBindingRecord(
+    bindings,
+    ctx,
+    inferred,
     mode,
-    defaultPersonaId: seed?.defaultPersonaId,
-    lastTripId: seed?.lastTripId,
-  };
+  );
   await bindings.upsert(record);
   await logBindingEvent(logger, {
-    event: "binding.stored",
+    event: "binding.local_ready",
     decision:
-      "Stored conversation binding metadata locally after official binding request.",
+      "Prepared a local soft-binding record for elsewhere without waiting on official plugin binding approval.",
     status: "success",
     ctx,
     details: {
       key: record.key,
       bindingId: record.bindingId,
+      bindingSource: record.bindingSource,
       channel: record.channel,
       accountId: record.accountId,
       target: record.target,
@@ -1150,8 +1239,133 @@ async function ensurePluginConversationBinding(
       mode: record.mode,
     },
   });
-
   return { record };
+}
+
+async function buildOfficialConversationBindingRecord(
+  bindings: ConversationBindingStore,
+  ctx: PluginCommandContext,
+  input: {
+    channel: string;
+    accountId?: string;
+    target: string;
+    parentConversationId?: string;
+    threadId?: string | number;
+    bindingId?: string;
+    boundAt?: number;
+  },
+  mode: "default" | "companion-exclusive",
+): Promise<NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>>> {
+  const key = bindingKey({
+    channel: input.channel,
+    accountId: input.accountId,
+    target: input.target,
+    threadId: input.threadId,
+  });
+  const existing = await bindings.get(key);
+  const related = await findRelatedBindingRecord(bindings, ctx, {
+    channel: input.channel,
+    accountId: input.accountId,
+    target: input.target,
+    threadId: input.threadId,
+  });
+  const seed =
+    existing && (existing.defaultPersonaId || existing.lastTripId)
+      ? existing
+      : related ?? existing;
+
+  return {
+    ...(seed ?? {}),
+    key,
+    bindingId: input.bindingId,
+    bindingSource: "official",
+    channel: input.channel,
+    accountId: input.accountId,
+    target: input.target,
+    parentConversationId: input.parentConversationId,
+    threadId: input.threadId,
+    boundAt: input.boundAt,
+    mode,
+    defaultPersonaId: seed?.defaultPersonaId,
+    lastTripId: seed?.lastTripId,
+  };
+}
+
+async function buildLocalConversationBindingRecord(
+  bindings: ConversationBindingStore,
+  ctx: PluginCommandContext,
+  inferred: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>>,
+  mode: "default" | "companion-exclusive",
+): Promise<NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>>> {
+  const existing = await bindings.get(inferred.key);
+  if (existing) {
+    return {
+      ...existing,
+      ...inferred,
+      bindingId: undefined,
+      bindingSource: "local",
+      mode,
+      defaultPersonaId: existing.defaultPersonaId,
+      lastTripId: existing.lastTripId,
+    };
+  }
+
+  const related = await findRelatedBindingRecord(bindings, ctx, {
+    channel: inferred.channel,
+    accountId: inferred.accountId,
+    target: inferred.target,
+    threadId: inferred.threadId,
+  });
+
+  return {
+    ...(related ?? {}),
+    ...inferred,
+    bindingId: undefined,
+    bindingSource: "local",
+    mode,
+    defaultPersonaId: related?.defaultPersonaId,
+    lastTripId: related?.lastTripId,
+  };
+}
+
+async function detachOfficialConversationBinding(
+  ctx: PluginCommandContext,
+  binding: ConversationBindingRecord,
+  logger?: LoggerPort,
+): Promise<void> {
+  if (!binding.bindingId) {
+    return;
+  }
+
+  try {
+    await ctx.detachConversationBinding();
+    await logBindingEvent(logger, {
+      event: "binding.detached",
+      decision:
+        "Detached the official OpenClaw conversation binding while leaving elsewhere's local state shutdown to the plugin runtime.",
+      status: "success",
+      ctx,
+      details: {
+        key: binding.key,
+        bindingId: binding.bindingId,
+        bindingSource: binding.bindingSource ?? "official",
+      },
+    });
+  } catch (error) {
+    await logBindingEvent(logger, {
+      event: "binding.detach_failed",
+      decision:
+        "Failed to detach the official OpenClaw conversation binding, but elsewhere still completed the local deactivate flow.",
+      status: "failure",
+      ctx,
+      details: {
+        key: binding.key,
+        bindingId: binding.bindingId,
+        bindingSource: binding.bindingSource ?? "official",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
 }
 
 async function findRelatedBindingRecord(
