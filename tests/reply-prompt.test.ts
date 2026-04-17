@@ -20,19 +20,18 @@ describe("reply prompt", () => {
       conversationKey: "telegram::1::1::main",
       pendingUserMessages: "[]",
       recentTurns: "[]",
-      recentPhotoContext:
-        '{"available":true,"imageSummary":{"scene":"car interior","otherPeopleVisible":"blurred_background_only"}}',
-      activeTripSummary: '{"tripId":"trip-1"}',
-      currentStateSummary: '{"substate":"before_departure"}',
-      currentStateGrounding: '{"location":"自己的房间中"}',
-      destinationLoopContext:
-        '{"awaitingDestination":false,"idleEnteredAt":null,"idleGuideSentAt":null,"pendingDestinationCandidate":null}',
-      currentTransportDetails:
-        '{"relevant":true,"identifier":"MU5478","departure":{"time":"09:15"}}',
+      recentPhotoBlock:
+        'Recent photo you sent (hidden context only, do not quote verbatim):\n{"available":true,"imageSummary":{"scene":"car interior","otherPeopleVisible":"blurred_background_only"}}',
+      currentSituation: "当前阶段：before_departure\n当前地点：自己的房间中",
+      destinationLoopBlock: "",
+      destinationLoopTaskBlock: "",
+      currentTransportBlock:
+        'Current transport details:\n{"relevant":true,"identifier":"MU5478","departure":{"time":"09:15"}}',
       now: "2026-04-14T08:00:00.000Z",
       latestUserMessageAt: "2026-04-14T07:58:00.000Z",
     });
 
+    expect(prompt).toContain("当前情况：");
     expect(prompt).toContain("Current transport details:");
     expect(prompt).toContain('"identifier":"MU5478"');
     expect(prompt).toContain('"time":"09:15"');
@@ -40,5 +39,7 @@ describe("reply prompt", () => {
       "Recent photo you sent (hidden context only, do not quote verbatim):",
     );
     expect(prompt).toContain('"scene":"car interior"');
+    expect(prompt).not.toContain("Conversation key:");
+    expect(prompt).not.toContain("Active trip snapshot:");
   });
 });

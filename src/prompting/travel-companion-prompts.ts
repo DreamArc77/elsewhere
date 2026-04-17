@@ -132,12 +132,11 @@ export async function renderCompanionReplyPrompt(input: {
   conversationKey: string;
   pendingUserMessages: string;
   recentTurns: string;
-  recentPhotoContext: string;
-  activeTripSummary: string;
-  currentStateSummary: string;
-  currentStateGrounding: string;
-  currentTransportDetails: string;
-  destinationLoopContext: string;
+  currentSituation: string;
+  currentTransportBlock: string;
+  recentPhotoBlock: string;
+  destinationLoopBlock: string;
+  destinationLoopTaskBlock: string;
   now: string;
   latestUserMessageAt: string;
 }): Promise<string> {
@@ -147,14 +146,13 @@ export async function renderCompanionReplyPrompt(input: {
       ? buildPersonaSummary(input.persona)
       : "No persona is configured yet.",
     conversationKey: input.conversationKey,
-      pendingUserMessages: input.pendingUserMessages,
-      recentTurns: input.recentTurns,
-      recentPhotoContext: input.recentPhotoContext,
-      activeTripSummary: input.activeTripSummary,
-      currentStateSummary: input.currentStateSummary,
-      currentStateGrounding: input.currentStateGrounding,
-      destinationLoopContext: input.destinationLoopContext,
-    currentTransportDetails: input.currentTransportDetails,
+    pendingUserMessages: input.pendingUserMessages,
+    recentTurns: input.recentTurns,
+    currentSituation: input.currentSituation,
+    currentTransportBlock: input.currentTransportBlock,
+    recentPhotoBlock: input.recentPhotoBlock,
+    destinationLoopBlock: input.destinationLoopBlock,
+    destinationLoopTaskBlock: input.destinationLoopTaskBlock,
     now: input.now,
     latestUserMessageAt: input.latestUserMessageAt,
   });

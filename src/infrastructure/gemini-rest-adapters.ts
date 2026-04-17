@@ -375,6 +375,12 @@ function buildCaptionRecentImageSummary(imageSummary?: string): string {
   }
 }
 
+function buildReplyCurrentSituation(
+  resolvedState: ResolvedAgentState,
+): string {
+  return buildCaptionCurrentSituation(resolvedState);
+}
+
 function buildCurrentStateGrounding(
   resolvedState: ResolvedAgentState,
 ): string {
@@ -531,6 +537,26 @@ function buildRecentPhotoContext(input: {
   );
 }
 
+function buildReplyRecentPhotoBlock(input: {
+  latestPostcardPhoto?: {
+    tripId: string;
+    sentAt: string;
+    shotKind: string;
+    caption: string;
+    imageSummary?: string;
+  };
+}): string {
+  const context = buildRecentPhotoContext(input);
+  if (context.includes('"available": false')) {
+    return "";
+  }
+
+  return [
+    "Recent photo you sent (hidden context only, do not quote verbatim):",
+    context,
+  ].join("\n");
+}
+
 function buildDestinationLoopContext(input: {
   awaitingDestination: boolean;
   idleEnteredAt?: string | null;
@@ -547,6 +573,53 @@ function buildDestinationLoopContext(input: {
     null,
     2,
   );
+}
+
+function buildReplyDestinationLoopBlock(input: {
+  awaitingDestination: boolean;
+  idleEnteredAt?: string | null;
+  idleGuideSentAt?: string | null;
+  pendingDestinationCandidate?: string | null;
+}): string {
+  if (!input.awaitingDestination) {
+    return "";
+  }
+
+  return [
+    "Idle destination loop context:",
+    buildDestinationLoopContext(input),
+  ].join("\n");
+}
+
+function buildReplyDestinationLoopTaskBlock(input: {
+  awaitingDestination: boolean;
+}): string {
+  if (!input.awaitingDestination) {
+    return "";
+  }
+
+  return [
+    "Extra task when `awaitingDestination` is true in the hidden context:",
+    "- Silently judge whether the latest user message contains a concrete destination suggestion.",
+    "- If the latest user message is only confirming a pending candidate, you may resolve it using `pendingDestinationCandidate`.",
+    "- If confidence is high, use `start_trip`.",
+    "- If there is a likely destination but you still need one more confirmation, use `confirm_candidate`.",
+    "- If the user is rejecting the pending candidate, use `reject_candidate`.",
+    "- Otherwise use `none`.",
+    "- The reply text itself should still sound like a normal human message.",
+  ].join("\n");
+}
+
+function buildReplyTransportBlock(input: {
+  activeTrip: TripRecord | null;
+  resolvedState: ResolvedAgentState;
+}): string {
+  const details = buildCurrentTransportDetails(input);
+  if (details.includes('"relevant": false')) {
+    return "";
+  }
+
+  return ["Current transport details:", details].join("\n");
 }
 
 function mimeTypeFromPath(path: string): string {
@@ -1175,11 +1248,8 @@ export class GeminiRestGroundingAdapter
   }): Promise<CompanionReplyPlan> {
     const startedAt = nowIso();
     const promptProvider = await this.describeTextProvider();
-    const currentStateSummary = buildCurrentStateSummary({
-      resolvedState: input.resolvedState,
-    });
-    const currentStateGrounding = buildCurrentStateGrounding(input.resolvedState);
-    const currentTransportDetails = buildCurrentTransportDetails({
+    const currentSituation = buildReplyCurrentSituation(input.resolvedState);
+    const currentTransportBlock = buildReplyTransportBlock({
       activeTrip: input.activeTrip,
       resolvedState: input.resolvedState,
     });
@@ -1188,35 +1258,17 @@ export class GeminiRestGroundingAdapter
       conversationKey: input.conversationKey,
       pendingUserMessages: JSON.stringify(input.pendingUserMessages, null, 2),
       recentTurns: JSON.stringify(input.recentTurns, null, 2),
-      recentPhotoContext: buildRecentPhotoContext({
+      recentPhotoBlock: buildReplyRecentPhotoBlock({
         latestPostcardPhoto: input.latestPostcardPhoto,
       }),
-      activeTripSummary: JSON.stringify(
-        input.activeTrip
-          ? {
-              tripId: input.activeTrip.tripId,
-              destination: input.activeTrip.request.destinationCity,
-              phase: input.activeTrip.state.currentPhase,
-              day: input.activeTrip.state.currentDay,
-              nextRunAt: input.activeTrip.state.nextRunAt,
-              stage: input.resolvedState.stage,
-              state: input.resolvedState.state,
-            }
-          : {
-              status: "idle",
-              note: "No active trip right now.",
-              stage: input.resolvedState.stage,
-              state: input.resolvedState.state,
-            },
-        null,
-        2,
-      ),
-      currentStateSummary,
-      currentStateGrounding,
-      destinationLoopContext: buildDestinationLoopContext(
+      currentSituation,
+      destinationLoopBlock: buildReplyDestinationLoopBlock(
         input.destinationLoopContext,
       ),
-      currentTransportDetails,
+      destinationLoopTaskBlock: buildReplyDestinationLoopTaskBlock(
+        input.destinationLoopContext,
+      ),
+      currentTransportBlock,
       now: input.now,
       latestUserMessageAt: latestPendingUserMessageAt(input.pendingUserMessages),
     });
