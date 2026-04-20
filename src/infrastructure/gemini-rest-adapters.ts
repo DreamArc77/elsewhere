@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { extname } from "node:path";
 import {
   completeWithPreparedSimpleCompletionModel,
   extractAssistantText,
@@ -45,6 +43,7 @@ import {
   renderIdleDestinationGuidePrompt,
   renderTripPlanPrompt,
 } from "../prompting/travel-companion-prompts.js";
+import { readInlineImageFromFile } from "./image-file.js";
 
 interface GeminiOptions {
   apiKey?: string;
@@ -729,21 +728,6 @@ function buildReplyTransportBlock(input: {
   }
 
   return ["Current transport details:", details].join("\n");
-}
-
-function mimeTypeFromPath(path: string): string {
-  const extension = extname(path).toLowerCase();
-  switch (extension) {
-    case ".png":
-      return "image/png";
-    case ".webp":
-      return "image/webp";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    default:
-      return "application/octet-stream";
-  }
 }
 
 function nowIso(): string {
@@ -1746,12 +1730,13 @@ export class GeminiRestImageAdapter
     });
 
     if (input.usesReferenceImage) {
-      const imageBytes = await readFile(input.persona.referenceImageAsset);
-      const mimeType = mimeTypeFromPath(input.persona.referenceImageAsset);
+      const inlineImage = await readInlineImageFromFile(
+        input.persona.referenceImageAsset,
+      );
       parts.push({
         inline_data: {
-          mime_type: mimeType,
-          data: imageBytes.toString("base64"),
+          mime_type: inlineImage.mimeType,
+          data: inlineImage.bytesBase64,
         },
       });
     }
