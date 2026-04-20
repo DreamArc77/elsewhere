@@ -11,6 +11,7 @@ import { createRuntimeBundle, startPollingService } from "./src/openclaw-plugin/
 import {
   handleTravelCompanionBeforeDispatch,
   handleTravelCompanionInboundClaim,
+  handleTravelCompanionReplyDispatch,
 } from "./src/openclaw-plugin/hooks.js";
 
 export default definePluginEntry({
@@ -123,6 +124,32 @@ export default definePluginEntry({
       } catch (error) {
         api.logger.warn(
           `Travel companion before-dispatch takeover failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+    });
+
+    api.on("reply_dispatch", async (event, ctx) => {
+      try {
+        const runtimeBundle = await getRuntimeBundle();
+        return await handleTravelCompanionReplyDispatch(event, ctx, {
+          bindings,
+          conversationService: runtimeBundle.conversationService,
+          service: runtimeBundle.service,
+          tripRepository: runtimeBundle.tripRepository,
+          personaRepository: runtimeBundle.personaRepository,
+          conversationStates: runtimeBundle.conversationStateRepository,
+          globalConfigRepository: runtimeBundle.globalConfigRepository,
+          messenger: runtimeBundle.messenger,
+          pluginConfig,
+          runtimeDataPaths: runtimeBundle.runtimeDataPaths,
+          logger: runtimeBundle.logger,
+        });
+      } catch (error) {
+        api.logger.warn(
+          `Travel companion reply-dispatch takeover failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );

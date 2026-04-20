@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   handleTravelCompanionBeforeDispatch,
   handleTravelCompanionInboundClaim,
+  handleTravelCompanionReplyDispatch,
   setConversationBindingInternalsForTests,
 } from "../src/openclaw-plugin/hooks.js";
 import { bindingKey } from "../src/openclaw-plugin/binding-state.js";
@@ -989,6 +990,91 @@ describe("travel companion inbound takeover hook", () => {
     );
 
     expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.setupSession?.kind).toBe("model");
+    const savedPersona = await runtime.personaRepository.getById(
+      (await runtime.bindings.get(key))!.defaultPersonaId!,
+    );
+    expect(savedPersona?.referenceImageAsset).toBe(runtime.referenceImagePath);
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Mori 创建完成");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("请确认旅伴聊天时要用的文本模型");
+  });
+
+  it("claims a weixin reply_dispatch media image before it reaches the default agent", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "openclaw-weixin",
+      accountId: "6f6bb13b44e3-im-bot",
+      target: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "openclaw-weixin",
+      accountId: "6f6bb13b44e3-im-bot",
+      target: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "persona",
+        step: "reference_photo",
+        awaitingReferencePhoto: true,
+        draft: {
+          name: "Mori",
+          originCity: "Hong Kong",
+          traits: ["gentle"],
+          toneStyle: "warm",
+          relationship: "travel soulmate",
+          userAddressing: "baby",
+        },
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionReplyDispatch(
+      {
+        ctx: {
+          Body: "",
+          From: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+          To: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+          OriginatingTo: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+          AccountId: "6f6bb13b44e3-im-bot",
+          OriginatingChannel: "openclaw-weixin",
+          Provider: "openclaw-weixin",
+          ChatType: "direct",
+          MessageSid: "weixin-media-only",
+          MediaPath: runtime.referenceImagePath,
+          MediaType: "image/jpeg",
+        },
+      },
+      {
+        dispatcher: {
+          getQueuedCounts: () => ({ final: 0, block: 0, tool: 0 }),
+        },
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({
+      handled: true,
+      queuedFinal: true,
+      counts: { final: 0, block: 0, tool: 0 },
+    });
     const state = await runtime.conversationStateRepository.getByKey(key);
     expect(state?.setupSession?.kind).toBe("model");
     const savedPersona = await runtime.personaRepository.getById(

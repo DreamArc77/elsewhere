@@ -116,6 +116,40 @@ interface BeforeDispatchResult {
   text?: string;
 }
 
+interface ReplyDispatchEvent {
+  ctx?: {
+    Body?: string;
+    From?: string;
+    To?: string;
+    AccountId?: string;
+    OriginatingChannel?: string;
+    OriginatingTo?: string;
+    MessageSid?: string;
+    Provider?: string;
+    ChatType?: string;
+    MediaPath?: string;
+    MediaUrl?: string;
+    MediaPaths?: string[];
+    MediaUrls?: string[];
+    MediaType?: string;
+    MediaTypes?: string[];
+  };
+  runId?: string;
+  sessionKey?: string;
+}
+
+interface ReplyDispatchContext {
+  dispatcher?: {
+    getQueuedCounts?: () => Record<string, number>;
+  };
+}
+
+interface ReplyDispatchResult {
+  handled: boolean;
+  queuedFinal: boolean;
+  counts: Record<string, number>;
+}
+
 interface InboundClaimDependencies {
   bindings: ConversationBindingStore;
   conversationService: CompanionConversationService;
@@ -194,6 +228,108 @@ export async function handleTravelCompanionInboundClaim(
     },
     deps,
   );
+}
+
+export async function handleTravelCompanionReplyDispatch(
+  event: ReplyDispatchEvent,
+  ctx: ReplyDispatchContext,
+  deps: InboundClaimDependencies,
+): Promise<ReplyDispatchResult | void> {
+  const inboundContext = event.ctx;
+  const mediaPath = normalizeOptionalString(inboundContext?.MediaPath);
+  const mediaUrl = normalizeOptionalString(inboundContext?.MediaUrl);
+  const mediaPaths = Array.isArray(inboundContext?.MediaPaths)
+    ? inboundContext.MediaPaths.filter((value): value is string => typeof value === "string")
+    : [];
+  const mediaUrls = Array.isArray(inboundContext?.MediaUrls)
+    ? inboundContext.MediaUrls.filter((value): value is string => typeof value === "string")
+    : [];
+  if (!mediaPath && !mediaUrl && mediaPaths.length === 0 && mediaUrls.length === 0) {
+    return;
+  }
+
+  const channel =
+    normalizeOptionalString(inboundContext?.OriginatingChannel) ??
+    normalizeOptionalString(inboundContext?.Provider);
+  if (!channel) {
+    return;
+  }
+
+  const syntheticEvent: InboundClaimEvent = {
+    content: inboundContext?.Body ?? "",
+    body: inboundContext?.Body ?? "",
+    bodyForAgent: inboundContext?.Body ?? "",
+    channel,
+    accountId: normalizeOptionalString(inboundContext?.AccountId),
+    conversationId:
+      normalizeOptionalString(inboundContext?.OriginatingTo) ??
+      normalizeOptionalString(inboundContext?.To) ??
+      normalizeOptionalString(inboundContext?.From),
+    senderId: normalizeOptionalString(inboundContext?.From),
+    messageId: normalizeOptionalString(inboundContext?.MessageSid),
+    isGroup: inboundContext?.ChatType === "group",
+    mediaUrl,
+    mediaUrls,
+    metadata: {
+      mediaPath,
+      mediaUrl,
+      mediaPaths,
+      mediaUrls,
+      mediaType: inboundContext?.MediaType,
+      mediaTypes: inboundContext?.MediaTypes,
+    },
+    attachments: [
+      ...[mediaPath, ...mediaPaths].filter(Boolean).map((path) => ({
+        path,
+        contentType: inboundContext?.MediaType,
+        kind: "image",
+      })),
+      ...[mediaUrl, ...mediaUrls].filter(Boolean).map((url) => ({
+        url,
+        contentType: inboundContext?.MediaType,
+        kind: "image",
+      })),
+    ],
+  };
+  const syntheticContext: InboundClaimContext = {
+    channelId: channel,
+    accountId: syntheticEvent.accountId,
+    conversationId: syntheticEvent.conversationId,
+    senderId: syntheticEvent.senderId,
+    messageId: syntheticEvent.messageId,
+  };
+  const binding = await resolveConversationBindingForHandling(
+    syntheticEvent,
+    syntheticContext,
+    deps,
+  );
+  if (!binding) {
+    await logBindingLookupMiss(syntheticEvent, syntheticContext, deps.logger);
+    return;
+  }
+
+  const state = await deps.conversationStates.getByKey(binding.key);
+  if (!state?.setupSession?.awaitingReferencePhoto) {
+    return;
+  }
+
+  const handled = await handleResolvedInboundTakeover(
+    {
+      event: syntheticEvent,
+      ctx: syntheticContext,
+      binding,
+      trimmed: (inboundContext?.Body ?? "").trim(),
+      state,
+    },
+    deps,
+  );
+  if (handled?.handled) {
+    return {
+      handled: true,
+      queuedFinal: true,
+      counts: ctx.dispatcher?.getQueuedCounts?.() ?? {},
+    };
+  }
 }
 
 export async function handleTravelCompanionBeforeDispatch(
@@ -1481,6 +1617,11 @@ function normalizeRoutePart(value: string | number | undefined): string | null {
   }
   const normalized = String(value).trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  const normalized = normalizeRoutePart(value);
+  return normalized ?? undefined;
 }
 
 function isOfficialConversationBinding(
