@@ -517,6 +517,71 @@ describe("travel companion inbound takeover hook", () => {
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("旅伴");
   });
 
+  it("continues locale setup on qqbot c2c after the user selects a language", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER123",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER123",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "locale",
+        step: "locale_select",
+        awaitingReferencePhoto: false,
+        draft: {},
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "1",
+        body: "1",
+        channel: "qqbot",
+        accountId: "default",
+        senderId: "USER123",
+        messageId: "qqbot-locale-1",
+        isGroup: false,
+      },
+      {
+        channelId: "qqbot",
+        accountId: "default",
+        senderId: "USER123",
+        messageId: "qqbot-locale-1",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.systemLocale).toBe("zh-CN");
+    expect(state?.setupSession).toBeUndefined();
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("/elsewhere setup");
+  });
+
   it("accepts the next inbound image from inbound metadata as setup reference photo", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

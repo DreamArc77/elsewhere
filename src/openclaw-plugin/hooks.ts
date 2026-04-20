@@ -1209,6 +1209,14 @@ function buildTargetCandidates(
     candidates.add(`telegram:${conversationId}`);
   }
 
+  if (
+    event.channel === "qqbot" &&
+    !event.isGroup &&
+    senderId
+  ) {
+    candidates.add(`qqbot:c2c:${senderId}`);
+  }
+
   return [...candidates];
 }
 
