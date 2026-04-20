@@ -149,6 +149,7 @@ export async function handleTravelCompanionInboundClaim(
     (await resolveBindingForInbound(event, ctx, deps.bindings)) ??
     (await recoverBindingForInbound(event, ctx, deps));
   if (!binding) {
+    await logBindingLookupMiss(event, ctx, deps.logger);
     return;
   }
 
@@ -1135,11 +1136,15 @@ async function resolveBindingForInbound(
   const accountCandidates = [
     normalizeRoutePart(ctx.accountId),
     normalizeRoutePart(event.accountId),
-  ].filter((value): value is string => Boolean(value));
+    "default",
+  ].filter(
+    (value, index, array): value is string =>
+      Boolean(value) && array.indexOf(value) === index,
+  );
   const targetCandidates = buildTargetCandidates(event, ctx);
   const threadCandidates = buildThreadCandidates(event.threadId);
 
-  for (const accountId of accountCandidates.length > 0 ? accountCandidates : ["default"]) {
+  for (const accountId of accountCandidates) {
     for (const target of targetCandidates) {
       for (const threadId of threadCandidates) {
         const key = bindingKey({
@@ -1179,6 +1184,48 @@ async function resolveBindingForInbound(
       return targetCandidates.includes(binding.target);
     }) ?? null
   );
+}
+
+async function logBindingLookupMiss(
+  event: InboundClaimEvent,
+  ctx: InboundClaimContext,
+  logger: LoggerPort,
+): Promise<void> {
+  const targetCandidates = buildTargetCandidates(event, ctx);
+  const accountCandidates = [
+    normalizeRoutePart(ctx.accountId),
+    normalizeRoutePart(event.accountId),
+    "default",
+  ].filter(
+    (value, index, array): value is string =>
+      Boolean(value) && array.indexOf(value) === index,
+  );
+  const threadCandidates = buildThreadCandidates(event.threadId).map((value) =>
+    value === undefined || value === null ? "main" : String(value),
+  );
+
+  await logCommandBridgeEvent(logger, {
+    binding: {
+      key: `lookup-miss:${event.channel}:${event.accountId ?? ctx.accountId ?? "default"}`,
+    },
+    runId: `binding-miss:${String(event.messageId ?? randomUUID())}`,
+    event: "binding.lookup_miss",
+    decision:
+      "Skipped inbound takeover because no local or recoverable binding matched the incoming conversation envelope.",
+    provider: "inbound-claim",
+    status: "skipped",
+    details: {
+      channel: event.channel,
+      accountId: event.accountId ?? ctx.accountId ?? null,
+      conversationId: event.conversationId ?? ctx.conversationId ?? null,
+      senderId: event.senderId ?? ctx.senderId ?? null,
+      threadId: event.threadId ?? null,
+      isGroup: event.isGroup ?? null,
+      targetCandidates,
+      accountCandidates,
+      threadCandidates,
+    },
+  });
 }
 
 function buildTargetCandidates(

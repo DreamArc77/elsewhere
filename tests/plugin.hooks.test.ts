@@ -582,6 +582,70 @@ describe("travel companion inbound takeover hook", () => {
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("/elsewhere setup");
   });
 
+  it("continues qqbot locale setup even when the inbound account id differs from the stored local binding", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER456",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER456",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "locale",
+        step: "locale_select",
+        awaitingReferencePhoto: false,
+        draft: {},
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "1",
+        body: "1",
+        channel: "qqbot",
+        accountId: "other-account-shape",
+        senderId: "USER456",
+        messageId: "qqbot-locale-2",
+        isGroup: false,
+      },
+      {
+        channelId: "qqbot",
+        accountId: "other-account-shape",
+        senderId: "USER456",
+        messageId: "qqbot-locale-2",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.systemLocale).toBe("zh-CN");
+    expect(state?.setupSession).toBeUndefined();
+  });
+
   it("accepts the next inbound image from inbound metadata as setup reference photo", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({
