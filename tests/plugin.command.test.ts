@@ -450,6 +450,7 @@ describe("travel companion command UX", () => {
       keyForDefaultChat(),
     );
     expect(state?.setupSession?.kind).toBe("model");
+    expect(state?.setupSession?.forceGeminiReconfigure).toBe(true);
     expect(state?.setupSession?.step).toBe("text_provider");
   });
 

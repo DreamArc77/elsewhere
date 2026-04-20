@@ -280,6 +280,7 @@ export function createSetupSession(input?: {
   draft?: SetupSessionDraft;
   step?: SetupSession["step"];
   personaTargetId?: string;
+  forceGeminiReconfigure?: boolean;
 }): SetupSession {
   const timestamp = nowIso();
   const kind = input?.kind ?? "persona";
@@ -294,6 +295,7 @@ export function createSetupSession(input?: {
   return {
     kind,
     personaTargetId: input?.personaTargetId,
+    forceGeminiReconfigure: input?.forceGeminiReconfigure,
     step: input?.step ?? defaultStep,
     awaitingReferencePhoto: false,
     returnToReview: false,
@@ -364,6 +366,8 @@ export function advanceSetupSessionWithText(input: {
       openrouterApiKey: input.fallbackOpenRouterApiKey,
     },
   });
+  const shouldForceGeminiReconfigure =
+    input.session.kind === "model" && Boolean(input.session.forceGeminiReconfigure);
 
   const next: SetupSession = {
     ...input.session,
@@ -531,7 +535,7 @@ export function advanceSetupSessionWithText(input: {
         next.step = "openai_base_url";
         return { session: next, completed: false };
       }
-      if (hasGeminiKeyAlready) {
+      if (hasGeminiKeyAlready && !shouldForceGeminiReconfigure) {
         next.step = "complete";
         return {
           session: next,
@@ -556,7 +560,7 @@ export function advanceSetupSessionWithText(input: {
       return { session: next, completed: false };
     case "openai_model":
       next.draft.openaiModel = text;
-      if (hasGeminiKeyAlready) {
+      if (hasGeminiKeyAlready && !shouldForceGeminiReconfigure) {
         next.step = "complete";
         return {
           session: next,

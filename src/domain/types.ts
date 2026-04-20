@@ -365,6 +365,7 @@ export interface SetupSessionDraft {
 export interface SetupSession {
   kind: SetupSessionKind;
   personaTargetId?: string;
+  forceGeminiReconfigure?: boolean;
   step: SetupStep;
   awaitingReferencePhoto: boolean;
   returnToReview?: boolean;

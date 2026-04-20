@@ -460,6 +460,7 @@ async function setupModel(
     setupSession: createSetupSession({
       kind: "model",
       draft: buildModelSetupDraft(globalConfig),
+      forceGeminiReconfigure: true,
     }),
     updatedAt: new Date().toISOString(),
   };
