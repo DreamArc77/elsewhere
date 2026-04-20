@@ -40,6 +40,7 @@ import {
 import {
   renderCaptionPrompt,
   renderCompanionReplyPrompt,
+  renderDestinationAcknowledgementPrompt,
   renderIdleDestinationGuidePrompt,
   renderTripPlanPrompt,
 } from "../prompting/travel-companion-prompts.js";
@@ -398,7 +399,7 @@ function buildCaptionCurrentActivity(
 
   switch (resolvedState.stage.substate) {
     case "planning":
-      return "正在自己的房间中做旅行计划";
+      return "正在自己的房间里查机票/车票、比较路线，并制定旅行计划";
     case "packing":
       return "正在自己的房间中整理行李，准备出发";
     case "before_departure":
@@ -1669,6 +1670,59 @@ export class GeminiRestGroundingAdapter
       response.text,
       companionReplyPlanSchema,
       "Gemini idle destination guide",
+    );
+
+    return {
+      segments: parsed.segments,
+      provider: response.provider,
+    };
+  }
+
+  async composeDestinationAcknowledgement(input: {
+    conversationKey: string;
+    persona: StoredPersonaProfile;
+    destination: string;
+    recentTurns: CompanionTurn[];
+    now: string;
+  }): Promise<{ segments: string[]; provider: string }> {
+    const startedAt = nowIso();
+    const promptProvider = await this.describeTextProvider();
+    const prompt = await renderDestinationAcknowledgementPrompt({
+      persona: input.persona,
+      destination: input.destination,
+      recentTurns: JSON.stringify(input.recentTurns, null, 2),
+      now: input.now,
+    });
+
+    await this.logPromptEntry({
+      tripId: `conversation:${input.conversationKey}`,
+      runId: `destination-ack:${input.conversationKey}:${startedAt}`,
+      phase: "system",
+      event: "destination.ack.prompt.rendered",
+      decision: "Rendered the destination acknowledgement prompt before sending it to the selected text provider.",
+      provider: promptProvider,
+      status: "success",
+      startedAt,
+      finishedAt: startedAt,
+      latencyMs: 0,
+      details: {
+        conversationKey: input.conversationKey,
+        destination: input.destination,
+        promptLength: prompt.length,
+        renderedPrompt: prompt,
+      },
+    });
+
+    const response = await this.completeTextPrompt(prompt, {
+      kind: "json",
+      temperature: 0.8,
+      jsonSchema: companionReplyPlanJsonSchema,
+    });
+
+    const parsed = parseModelJson(
+      response.text,
+      companionReplyPlanSchema,
+      "Gemini destination acknowledgement",
     );
 
     return {

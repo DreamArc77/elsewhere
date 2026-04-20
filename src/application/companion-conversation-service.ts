@@ -63,27 +63,6 @@ function filterReplyTurnsForActiveTrip(
 
 const IDLE_GUIDE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
-function buildDestinationPlanningAckSegments(input: {
-  destination: string;
-  locale: ReturnType<typeof getSystemLocale>;
-}): string[] {
-  switch (input.locale) {
-    case "ja-JP":
-      return [
-        `わかった。まず${input.destination}の予定と行き方を調べてくるね。まとまったら送るね。`,
-      ];
-    case "en":
-      return [
-        `Got it. I’ll plan the ${input.destination} trip first and send you the route once it’s ready.`,
-      ];
-    case "zh-CN":
-    default:
-      return [
-        `知道了，我先去做${input.destination}的计划和攻略。等我把路线整理好，再发给你看。`,
-      ];
-  }
-}
-
 function emptyConversationState(
   conversationKey: string,
   mode: ConversationBindingRecord["mode"],
@@ -979,27 +958,62 @@ export class CompanionConversationService {
           confidence: intent.confidence ?? null,
         },
       });
-      input.replyPlan.segments = buildDestinationPlanningAckSegments({
-        destination,
-        locale: getSystemLocale(input.state),
-      });
-      await this.log({
-        tripId: trip.tripId,
-        runId: input.runId,
-        phase: "planning",
-        event: "idle.destination.reply_overridden",
-        decision:
-          "Replaced free-form idle destination reply with a deterministic planning acknowledgement.",
-        provider: "conversation-service",
-        status: "success",
-        startedAt: nowIso(this.dependencies.clock),
-        finishedAt: nowIso(this.dependencies.clock),
-        details: {
-          conversationKey: input.binding.key,
-          destination,
-          segmentCount: input.replyPlan.segments.length,
-        },
-      });
+      if (input.persona) {
+        try {
+          const acknowledgement =
+            await this.dependencies.grounding.composeDestinationAcknowledgement({
+              conversationKey: input.binding.key,
+              persona: input.persona,
+              destination,
+              recentTurns: filterReplyTurnsForActiveTrip(
+                input.state.recentTurns,
+                input.activeTrip,
+              ),
+              now: nowIso(this.dependencies.clock),
+            });
+          input.replyPlan.segments = acknowledgement.segments;
+          input.replyPlan.provider = acknowledgement.provider;
+          await this.log({
+            tripId: trip.tripId,
+            runId: input.runId,
+            phase: "planning",
+            event: "idle.destination.ack_generated",
+            decision:
+              "Generated a dedicated destination acknowledgement after starting trip planning.",
+            provider: acknowledgement.provider,
+            status: "success",
+            startedAt: nowIso(this.dependencies.clock),
+            finishedAt: nowIso(this.dependencies.clock),
+            details: {
+              conversationKey: input.binding.key,
+              destination,
+              segmentCount: acknowledgement.segments.length,
+            },
+          });
+        } catch (error) {
+          await this.log({
+            tripId: trip.tripId,
+            runId: input.runId,
+            phase: "planning",
+            event: "idle.destination.ack_failed",
+            decision:
+              "Dedicated destination acknowledgement failed; preserving the original reply plan.",
+            provider: input.replyPlan.provider,
+            status: "failure",
+            startedAt: nowIso(this.dependencies.clock),
+            finishedAt: nowIso(this.dependencies.clock),
+            errorCode:
+              error instanceof Error
+                ? error.name
+                : "destination_ack_generation_failed",
+            details: {
+              conversationKey: input.binding.key,
+              destination,
+              message: error instanceof Error ? error.message : String(error),
+            },
+          });
+        }
+      }
       return {
         ...baseState,
         idleEnteredAt: null,

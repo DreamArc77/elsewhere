@@ -27,10 +27,10 @@ describe("state machine", () => {
     expect(timeline[0]?.phase).toBe("planning");
     expect(timeline[0]?.day).toBe(0);
     expect(timeline[0]?.context?.activity.description).toContain(
-      "Before leaving Hong Kong for Tokyo",
+      "checking tickets and routes",
     );
     expect(timeline[0]?.context?.activity.location).toBe(
-      "Final packing in Hong Kong",
+      "Planning trip in Hong Kong",
     );
     expect(timeline.at(-1)?.phase).toBe("returning");
     expect(

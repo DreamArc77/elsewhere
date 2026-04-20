@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { renderCompanionReplyPrompt } from "../src/prompting/travel-companion-prompts.js";
+import {
+  renderCompanionReplyPrompt,
+  renderDestinationAcknowledgementPrompt,
+} from "../src/prompting/travel-companion-prompts.js";
 
 const persona = {
   personaId: "persona-1",
@@ -41,5 +44,21 @@ describe("reply prompt", () => {
     expect(prompt).toContain('"scene":"car interior"');
     expect(prompt).not.toContain("Conversation key:");
     expect(prompt).not.toContain("Active trip snapshot:");
+    expect(prompt).not.toContain("checking tickets/routes");
+    expect(prompt).not.toContain("not packing");
+  });
+
+  it("keeps the destination acknowledgement rules in a dedicated prompt", async () => {
+    const prompt = await renderDestinationAcknowledgementPrompt({
+      persona,
+      destination: "Tokyo",
+      recentTurns: "[]",
+      now: "2026-04-14T08:00:00.000Z",
+    });
+
+    expect(prompt).toContain("Destination:");
+    expect(prompt).toContain("Tokyo");
+    expect(prompt).toContain("checking tickets/routes");
+    expect(prompt).toContain("Do not say you are packing");
   });
 });

@@ -723,6 +723,13 @@ export interface GroundingPort {
     resolvedState: ResolvedAgentState;
     now: string;
   }): Promise<IdleDestinationGuidePlan>;
+  composeDestinationAcknowledgement(input: {
+    conversationKey: string;
+    persona: StoredPersonaProfile;
+    destination: string;
+    recentTurns: CompanionTurn[];
+    now: string;
+  }): Promise<IdleDestinationGuidePlan>;
 }
 
 export interface ImageGenerationPort {

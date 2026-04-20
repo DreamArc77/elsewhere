@@ -453,10 +453,10 @@ function buildPlanningActivity(plan: TripPlan): ItineraryActivity {
   const firstDayWeather = plan.daily_itinerary[0]?.weather_forecast ?? "";
   return {
     time_slot: "00:00 - 00:30",
-    location: `Final packing in ${origin}`,
+    location: `Planning trip in ${origin}`,
     address: origin,
-    type: "transport",
-    description: `Before leaving ${origin} for ${plan.metadata.destination}, review the plan, pack the essentials, and finish the last round of departure prep.`,
+    type: "accommodation",
+    description: `At home in ${origin}, checking tickets and routes, comparing transport options, and making the travel plan for ${plan.metadata.destination}.`,
     arrival_context: {
       from_location: origin,
       transport_mode: "walk",

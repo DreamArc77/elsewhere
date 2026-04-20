@@ -524,6 +524,21 @@ export class FakeGroundingPort implements GroundingPort {
       provider: "fake-grounding",
     };
   }
+
+  async composeDestinationAcknowledgement(input: {
+    conversationKey: string;
+    persona: StoredPersonaProfile;
+    destination: string;
+    recentTurns: CompanionTurn[];
+    now: string;
+  }): Promise<{ segments: string[]; provider: string }> {
+    return {
+      segments: [
+        `${input.persona.name} will plan ${input.destination} before leaving.`,
+      ],
+      provider: "fake-grounding",
+    };
+  }
 }
 
 export class FakeImageGenerationPort implements ImageGenerationPort {

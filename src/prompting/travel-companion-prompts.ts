@@ -177,6 +177,21 @@ export async function renderIdleDestinationGuidePrompt(input: {
   });
 }
 
+export async function renderDestinationAcknowledgementPrompt(input: {
+  persona: StoredPersonaProfile;
+  destination: string;
+  recentTurns: string;
+  now: string;
+}): Promise<string> {
+  const template = await loadTemplate("compose-destination-ack.md");
+  return renderTemplate(template, {
+    personaSummary: buildPersonaSummary(input.persona),
+    destination: input.destination,
+    recentTurns: input.recentTurns,
+    now: input.now,
+  });
+}
+
 export async function renderImageGenerationPrompt(input: {
   persona: StoredPersonaProfile;
   request: TripRequest;
