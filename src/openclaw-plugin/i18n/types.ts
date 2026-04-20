@@ -95,6 +95,12 @@ export interface SystemLocaleCatalog {
     relationshipExample: string;
     userAddressingExample: string;
     reviewTitle: string;
+    reviewFieldName: string;
+    reviewFieldOriginCity: string;
+    reviewFieldTraits: string;
+    reviewFieldTone: string;
+    reviewFieldRelationship: string;
+    reviewFieldUserAddressing: string;
     reviewConfirmEdit: string;
     reviewConfirmCreate: string;
     reviewEditName: string;

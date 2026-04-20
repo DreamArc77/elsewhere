@@ -75,6 +75,21 @@ function buildPersonaSummary(
   ];
 }
 
+function buildPersonaReviewLines(
+  session: SetupSession,
+  locale: SystemLocale,
+): string[] {
+  const catalog = getSystemCatalog(locale);
+  return [
+    `${catalog.setup.reviewFieldName}：${displayValue(session.draft.name, locale)}`,
+    `${catalog.setup.reviewFieldOriginCity}：${displayValue(session.draft.originCity || session.draft.homeCity, locale)}`,
+    `${catalog.setup.reviewFieldTraits}：${displayList(session.draft.traits, locale)}`,
+    `${catalog.setup.reviewFieldTone}：${displayValue(session.draft.toneStyle, locale)}`,
+    `${catalog.setup.reviewFieldRelationship}：${displayValue(session.draft.relationship, locale)}`,
+    `${catalog.setup.reviewFieldUserAddressing}：${displayValue(session.draft.userAddressing, locale)}`,
+  ];
+}
+
 function buildCurrentValuePrompt(input: {
   locale: SystemLocale;
   currentValue: string;
@@ -157,9 +172,9 @@ function buildPersonaStepPrompt(
       return [
         catalog.setup.reviewTitle,
         "",
-        ...buildPersonaSummary(session, locale),
+        ...buildPersonaReviewLines(session, locale),
         "",
-        catalog.setup.reviewConfirmCreate,
+        editing ? catalog.setup.reviewConfirmEdit : catalog.setup.reviewConfirmCreate,
         catalog.setup.reviewEditName,
         catalog.setup.reviewEditOriginCity,
         catalog.setup.reviewEditTraits,
