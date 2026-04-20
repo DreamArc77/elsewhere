@@ -920,6 +920,85 @@ describe("travel companion inbound takeover hook", () => {
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("请确认旅伴聊天时要用的文本模型");
   });
 
+  it("accepts a weixin media-only before_dispatch image while waiting for a reference photo", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "openclaw-weixin",
+      accountId: "6f6bb13b44e3-im-bot",
+      target: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "openclaw-weixin",
+      accountId: "6f6bb13b44e3-im-bot",
+      target: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "persona",
+        step: "reference_photo",
+        awaitingReferencePhoto: true,
+        draft: {
+          name: "Mori",
+          originCity: "Hong Kong",
+          traits: ["gentle"],
+          toneStyle: "warm",
+          relationship: "travel soulmate",
+          userAddressing: "baby",
+        },
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionBeforeDispatch(
+      {
+        content: "",
+        body: "",
+        channel: "openclaw-weixin",
+        senderId: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+        isGroup: false,
+        hasMedia: true,
+        metadata: {
+          mediaPath: runtime.referenceImagePath,
+          mediaType: "image/jpeg",
+        },
+      },
+      {
+        channelId: "openclaw-weixin",
+        accountId: "6f6bb13b44e3-im-bot",
+        conversationId: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+        senderId: "o9cq80-5zV01PX86pL_GsVZ5pT6k@im.wechat",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.setupSession?.kind).toBe("model");
+    const savedPersona = await runtime.personaRepository.getById(
+      (await runtime.bindings.get(key))!.defaultPersonaId!,
+    );
+    expect(savedPersona?.referenceImageAsset).toBe(runtime.referenceImagePath);
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Mori 创建完成");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("请确认旅伴聊天时要用的文本模型");
+  });
+
   it("updates the current persona instead of creating a new one when setup completes", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

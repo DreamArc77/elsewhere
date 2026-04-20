@@ -90,6 +90,18 @@ interface BeforeDispatchEvent {
   channel?: string;
   senderId?: string;
   isGroup?: boolean;
+  mediaUrl?: string;
+  mediaUrls?: string[];
+  hasMedia?: boolean;
+  metadata?: Record<string, unknown>;
+  attachments?: Array<{
+    path?: string;
+    url?: string;
+    mediaUrl?: string;
+    contentType?: string;
+    mimeType?: string;
+    kind?: string;
+  }>;
 }
 
 interface BeforeDispatchContext {
@@ -196,7 +208,7 @@ export async function handleTravelCompanionBeforeDispatch(
 
   const rawText = event.body ?? event.content ?? "";
   const trimmed = rawText.trim();
-  if (!trimmed || trimmed.startsWith("/")) {
+  if (trimmed.startsWith("/")) {
     return;
   }
 
@@ -209,7 +221,15 @@ export async function handleTravelCompanionBeforeDispatch(
     conversationId: ctx.conversationId,
     senderId: event.senderId ?? ctx.senderId,
     isGroup: event.isGroup ?? false,
+    mediaUrl: event.mediaUrl,
+    mediaUrls: event.mediaUrls,
+    metadata: event.metadata,
+    attachments: event.attachments,
   };
+  const imageSource = extractInboundImageSource(syntheticEvent);
+  if (!trimmed && !imageSource && !event.hasMedia) {
+    return;
+  }
   const syntheticContext: InboundClaimContext = {
     channelId: channel,
     accountId: ctx.accountId,
@@ -227,6 +247,15 @@ export async function handleTravelCompanionBeforeDispatch(
 
   const state = await deps.conversationStates.getByKey(binding.key);
   if (!state?.setupSession && binding.mode !== "companion-exclusive") {
+    return;
+  }
+  if (
+    !trimmed &&
+    !(
+      state?.setupSession?.awaitingReferencePhoto &&
+      (imageSource || event.hasMedia)
+    )
+  ) {
     return;
   }
 
