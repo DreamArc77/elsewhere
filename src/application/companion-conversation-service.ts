@@ -24,6 +24,7 @@ import {
   resolveAgentState,
 } from "../domain/business-situation.js";
 import { getSystemCatalog, getSystemLocale } from "../openclaw-plugin/i18n/catalog.js";
+import { buildIdleGuideMessage } from "../openclaw-plugin/onboarding.js";
 
 function nowIso(clock: ClockPort): string {
   return clock.now().toISOString();
@@ -1009,13 +1010,20 @@ export class CompanionConversationService {
       conversationState: state,
       now: this.dependencies.clock.now(),
     });
-    const guide = await this.dependencies.grounding.composeIdleDestinationGuide({
-      conversationKey: binding.key,
-      persona,
-      recentTurns: trimTurns(state.recentTurns, 12),
-      resolvedState,
-      now: nowIso(this.dependencies.clock),
-    });
+    const locale = getSystemLocale(state);
+    const guide =
+      reason === "first_onboarding_complete"
+        ? {
+            segments: [buildIdleGuideMessage(persona, locale)],
+            provider: "system",
+          }
+        : await this.dependencies.grounding.composeIdleDestinationGuide({
+            conversationKey: binding.key,
+            persona,
+            recentTurns: trimTurns(state.recentTurns, 12),
+            resolvedState,
+            now: nowIso(this.dependencies.clock),
+          });
 
     const sentAt = nowIso(this.dependencies.clock);
     for (const [index, segment] of guide.segments.entries()) {

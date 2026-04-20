@@ -61,6 +61,10 @@ export class OpenClawTravelCompanionService {
     private readonly dependencies: OpenClawTravelCompanionServiceDependencies,
   ) {}
 
+  isTripInFlight(tripId: string): boolean {
+    return this.inFlightTripIds.has(tripId);
+  }
+
   async createPersona(profile: PersonaProfile): Promise<StoredPersonaProfile> {
     const originCity = profile.originCity || profile.homeCity;
     if (!originCity) {

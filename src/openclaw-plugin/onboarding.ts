@@ -141,33 +141,33 @@ function buildPersonaStepPrompt(
         ? buildCurrentValuePrompt({
             locale,
             currentValue: displayList(session.draft.traits, locale),
-            body: [catalog.setup.askTraits, catalog.setup.traitsExample],
+            body: [catalog.setup.askTraits],
           })
-        : [catalog.setup.askTraits, catalog.setup.traitsExample].join("\n");
+        : catalog.setup.askTraits;
     case "tone":
       return editing
         ? buildCurrentValuePrompt({
             locale,
             currentValue: displayValue(session.draft.toneStyle, locale),
-            body: [catalog.setup.askTone, catalog.setup.toneExample],
+            body: [catalog.setup.askTone],
           })
-        : [catalog.setup.askTone, catalog.setup.toneExample].join("\n");
+        : catalog.setup.askTone;
     case "relationship":
       return editing
         ? buildCurrentValuePrompt({
             locale,
             currentValue: displayValue(session.draft.relationship, locale),
-            body: [catalog.setup.askRelationship, catalog.setup.relationshipExample],
+            body: [catalog.setup.askRelationship],
           })
-        : [catalog.setup.askRelationship, catalog.setup.relationshipExample].join("\n");
+        : catalog.setup.askRelationship;
     case "user_addressing":
       return editing
         ? buildCurrentValuePrompt({
             locale,
             currentValue: displayValue(session.draft.userAddressing, locale),
-            body: [catalog.setup.askUserAddressing, catalog.setup.userAddressingExample],
+            body: [catalog.setup.askUserAddressing],
           })
-        : [catalog.setup.askUserAddressing, catalog.setup.userAddressingExample].join("\n");
+        : catalog.setup.askUserAddressing;
     case "persona_review":
       return [
         catalog.setup.reviewTitle,
@@ -762,17 +762,6 @@ export function buildOnboardingGateMessage(input: {
     return catalog.onboarding.gateContinueModel;
   }
 
-  const missing: string[] = [];
-  if (!input.readiness.hasPersona) {
-    missing.push(catalog.onboarding.gateMissingPersona);
-  }
-  if (!input.readiness.hasTextProvider) {
-    missing.push(catalog.onboarding.gateMissingModel);
-  }
-  if (!input.readiness.hasGeminiKey) {
-    missing.push(catalog.onboarding.gateMissingGemini);
-  }
-
   if (
     !input.readiness.hasPersona &&
     !input.readiness.hasTextProvider &&
@@ -781,19 +770,7 @@ export function buildOnboardingGateMessage(input: {
     return catalog.onboarding.gateFirstTime;
   }
 
-  if (!input.readiness.hasPersona) {
-    return [
-      catalog.onboarding.gateMissingSummary(missing),
-      catalog.onboarding.gatePersonaFirstSetup,
-      catalog.onboarding.gatePersonaFirstModel,
-    ].join("\n");
-  }
-
-  return [
-    catalog.onboarding.gateMissingSummary(missing),
-    catalog.onboarding.gateModelOnlyIntro,
-    catalog.onboarding.gateModelOnlyAction,
-  ].join("\n");
+  return catalog.onboarding.gateFirstTime;
 }
 
 export function createCompletedPersonaProfile(input: {

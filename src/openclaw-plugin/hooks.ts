@@ -30,10 +30,12 @@ import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 import {
   advanceSetupSessionWithPhoto,
   advanceSetupSessionWithText,
+  buildModelSetupDraft,
   buildOnboardingGateMessage,
   buildPersonaCreatedMessage,
   buildPersonaUpdatedMessage,
   createCompletedPersonaProfile,
+  createSetupSession,
   evaluateOnboardingReadiness,
   renderSetupStepPrompt,
 } from "./onboarding.js";
@@ -844,12 +846,7 @@ async function finalizeSetupSession(input: {
         selectedCatalog.command.activateEnabled,
         readiness.isComplete
           ? selectedCatalog.command.activateReady
-          : buildOnboardingGateMessage({
-              binding: inbound.binding,
-              readiness,
-              setupSession: null,
-              locale: localeToPersist,
-            }),
+          : selectedCatalog.onboarding.gateFirstTime,
       ].join("\n"),
       dedupeKey: `setup-complete:${inbound.binding.key}:locale`,
     });
@@ -922,23 +919,56 @@ async function finalizeSetupSession(input: {
         }),
       },
     });
+
+    if (!readiness.isComplete) {
+      const modelSession = createSetupSession({
+        kind: "model",
+        draft: buildModelSetupDraft(globalConfig),
+      });
+      const continuedState = {
+        ...nextState,
+        setupSession: modelSession,
+        updatedAt: new Date().toISOString(),
+      };
+      await deps.conversationStates.save(continuedState);
+      await deps.logger?.log({
+        tripId: `conversation:${updatedBinding.key}`,
+        runId: `setup-model-continue:${Date.now()}`,
+        phase: "system",
+        event: "setup.session.started",
+        decision:
+          "Continued directly into model setup after persona setup completed during onboarding.",
+        provider: "setup-session",
+        status: "success",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        latencyMs: 0,
+        details: {
+          conversationKey: updatedBinding.key,
+          kind: "model",
+          step: modelSession.step,
+          trigger: "persona-complete-onboarding",
+        },
+      });
+      await deps.messenger.sendTextReply({
+        binding: updatedBinding,
+        text: [
+          isEditingExistingPersona
+            ? buildPersonaUpdatedMessage(persona, locale)
+            : buildPersonaCreatedMessage(persona, locale),
+          catalog.onboarding.setupContinueModel,
+          renderSetupStepPrompt(modelSession, locale),
+        ].join("\n\n"),
+        dedupeKey: `setup-complete:${updatedBinding.key}:${persona.personaId}:continue-model`,
+      });
+      return;
+    }
+
     await deps.messenger.sendTextReply({
       binding: updatedBinding,
-      text: readiness.isComplete
-        ? isEditingExistingPersona
-          ? buildPersonaUpdatedMessage(persona, locale)
-          : buildPersonaCreatedMessage(persona, locale)
-        : [
-            isEditingExistingPersona
-              ? buildPersonaUpdatedMessage(persona, locale)
-              : buildPersonaCreatedMessage(persona, locale),
-            buildOnboardingGateMessage({
-              binding: updatedBinding,
-              readiness,
-              setupSession: null,
-              locale,
-            }),
-          ].join("\n"),
+      text: isEditingExistingPersona
+        ? buildPersonaUpdatedMessage(persona, locale)
+        : buildPersonaCreatedMessage(persona, locale),
       dedupeKey: `setup-complete:${updatedBinding.key}:${persona.personaId}`,
     });
     if (shouldSendImmediateIdleGuide) {

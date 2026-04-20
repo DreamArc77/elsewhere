@@ -515,7 +515,7 @@ describe("travel companion inbound takeover hook", () => {
     const state = await runtime.conversationStateRepository.getByKey(key);
     expect(state?.setupSession?.step).toBe("origin_city");
     expect(state?.setupSession?.draft.name).toBe("Mori");
-    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("旅伴");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("默认出发地");
   });
 
   it("continues locale setup on qqbot c2c after the user selects a language", async () => {
@@ -581,6 +581,7 @@ describe("travel companion inbound takeover hook", () => {
     expect(state?.systemLocale).toBe("zh-CN");
     expect(state?.setupSession).toBeUndefined();
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("/elsewhere setup");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).not.toContain("/elsewhere model");
   });
 
   it("continues qqbot locale setup even when the inbound account id differs from the stored local binding", async () => {
@@ -831,7 +832,7 @@ describe("travel companion inbound takeover hook", () => {
 
     expect(result).toEqual({ handled: true });
     const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.setupSession).toBeUndefined();
+    expect(state?.setupSession?.kind).toBe("model");
     expect(state?.awaitingDestination).toBe(false);
     const savedPersona = await runtime.personaRepository.getById(
       (await runtime.bindings.get(key))!.defaultPersonaId!,
@@ -842,7 +843,8 @@ describe("travel companion inbound takeover hook", () => {
     ).resolves.toBeTruthy();
     expect(runtime.messenger.sentReplies).toHaveLength(1);
     expect(runtime.messenger.sentReplies[0]?.text).toContain("Mori 创建完成");
-    expect(runtime.messenger.sentReplies[0]?.text).toContain("/elsewhere model");
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("好的，旅伴资料已经创建好了");
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("请确认旅伴聊天时要用的文本模型");
   });
 
   it("accepts a qqbot downloaded local image path embedded in the inbound body while waiting for a reference photo", async () => {
@@ -909,12 +911,13 @@ describe("travel companion inbound takeover hook", () => {
 
     expect(result).toEqual({ handled: true });
     const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.setupSession).toBeUndefined();
+    expect(state?.setupSession?.kind).toBe("model");
     const savedPersona = await runtime.personaRepository.getById(
       (await runtime.bindings.get(key))!.defaultPersonaId!,
     );
     expect(savedPersona?.referenceImageAsset).toBe(runtime.referenceImagePath);
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Mori 创建完成");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("请确认旅伴聊天时要用的文本模型");
   });
 
   it("updates the current persona instead of creating a new one when setup completes", async () => {

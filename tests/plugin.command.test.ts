@@ -236,8 +236,8 @@ describe("travel companion command UX", () => {
 
     expect(reply.isError).toBeUndefined();
     expect(reply.text).toContain("旅伴模式已开启");
+    expect(reply.text).toContain("欢迎来到 elsewhere");
     expect(reply.text).toContain("/elsewhere setup");
-    expect(reply.text).toContain("/elsewhere model");
   });
 
   it("sends the idle destination guide immediately on activate after onboarding is complete", async () => {
@@ -345,7 +345,7 @@ describe("travel companion command UX", () => {
       deps,
     );
 
-    expect(reply.text).toContain("我们先来设定旅伴");
+    expect(reply.text).toContain("我们先来创建您的旅伴");
     expect(reply.text).toContain("准备好了就回复 1");
     const state = await runtime.conversationStateRepository.getByKey(
       keyForDefaultChat(),
@@ -353,7 +353,45 @@ describe("travel companion command UX", () => {
     expect(state?.setupSession?.step).toBe("persona_intro");
   });
 
-  it("reuses the current persona draft when setup is called again", async () => {
+  it("uses /elsewhere setup as the unified first-time entry and continues with model setup when persona already exists", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const deps = createDeps(runtime, bindings);
+
+    await handleTravelCompanionCommand(
+      createTelegramContext("/elsewhere activate"),
+      deps,
+    );
+    await seedSystemLocale(runtime, keyForDefaultChat());
+
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      originCity: "Osaka",
+      traits: ["gentle", "curious"],
+      relationship: "soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const binding = await bindings.get(keyForDefaultChat());
+    await bindings.upsert({
+      ...binding!,
+      defaultPersonaId: persona.personaId,
+    });
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/elsewhere setup"),
+      deps,
+    );
+
+    expect(reply.text).toContain("OpenClaw");
+    const state = await runtime.conversationStateRepository.getByKey(
+      keyForDefaultChat(),
+    );
+    expect(state?.setupSession?.kind).toBe("model");
+    expect(state?.setupSession?.step).toBe("text_provider");
+  });
+
+  it("continues onboarding with model setup when setup is called again and only model config is missing", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
     const deps = createDeps(runtime, bindings);
@@ -386,11 +424,9 @@ describe("travel companion command UX", () => {
     const state = await runtime.conversationStateRepository.getByKey(
       keyForDefaultChat(),
     );
-    expect(state?.setupSession?.kind).toBe("persona");
-    expect(state?.setupSession?.step).toBe("existing_persona_confirm");
-    expect(state?.setupSession?.draft.name).toBe("Mori");
-    expect(state?.setupSession?.draft.originCity).toBe("Osaka");
-    expect(reply.text).toContain("当前已经有一位旅伴了");
+    expect(state?.setupSession?.kind).toBe("model");
+    expect(state?.setupSession?.step).toBe("text_provider");
+    expect(reply.text).toContain("OpenClaw");
   });
 
   it("starts model-only setup flow", async () => {
@@ -520,6 +556,77 @@ describe("travel companion command UX", () => {
     expect(tripAfter?.timelineIndex).toBe(1);
   });
 
+  it("reports that tick is already in progress instead of echoing a stale planned state", async () => {
+    const bindings = new BindingRegistryStore("C:\\temp");
+    await bindings.upsert({
+      key: bindingKey({
+        channel: "telegram",
+        accountId: "default",
+        target: "1459473177",
+      }),
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      lastTripId: "trip-in-flight",
+      mode: "companion-exclusive",
+    });
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/elsewhere tick"),
+      {
+        service: {
+          isTripInFlight() {
+            return true;
+          },
+          async runTrip() {
+            throw new Error("runTrip should not be called while trip is in flight");
+          },
+        } as never,
+        conversationService: {
+          async runConversation() {},
+        } as never,
+        tripRepository: {
+          async getById() {
+            return {
+              tripId: "trip-in-flight",
+              state: {
+                status: "planned",
+                currentPhase: "planning",
+                currentDay: 1,
+                nextRunAt: "2026-04-20T04:02:07.299Z",
+                pendingPostcard: null,
+                artifacts: [],
+                activeStateAnchor: null,
+              },
+            };
+          },
+        } as never,
+        personaRepository: {} as never,
+        conversationStates: {} as never,
+        globalConfigRepository: {} as never,
+        messenger: {} as never,
+        bindings,
+        pluginConfig: createStaticPluginConfig(),
+        runtimeDataPaths: {
+          rootDir: "C:\\temp",
+          personasDir: "C:\\temp\\personas",
+          tripsDir: "C:\\temp\\trips",
+          conversationsDir: "C:\\temp\\conversations",
+          artifactsDir: "C:\\temp\\artifacts",
+          logsDir: "C:\\temp\\logs",
+          configPath: "C:\\temp\\config.json",
+        },
+      },
+    );
+
+    expect(reply.isError).toBeUndefined();
+    expect(reply.text).toContain("已收到 tick：trip-in-flight");
+    expect(reply.text).toContain("trip: 当前步骤已在处理中");
+    expect(reply.text).toContain("phase: planning");
+    expect(reply.text).not.toContain("status: planned");
+  });
+
   it("shows conversation reply debug info in status", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
@@ -643,6 +750,9 @@ describe("travel companion command UX", () => {
       createTelegramContext("/elsewhere tick"),
       {
         service: {
+          isTripInFlight() {
+            return false;
+          },
           async runTrip() {
             throw new Error(
               "openclaw message send failed | code=null | Config warnings: ...",

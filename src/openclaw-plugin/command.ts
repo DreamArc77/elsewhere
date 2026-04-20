@@ -230,12 +230,7 @@ async function activateConversation(
     return {
       text: [
         catalog.command.activateEnabled,
-        buildOnboardingGateMessage({
-          binding: activatedBinding,
-          readiness,
-          setupSession: state.setupSession,
-          locale,
-        }),
+        catalog.onboarding.gateFirstTime,
       ].join("\n"),
     };
   }
@@ -310,6 +305,13 @@ async function setupPersona(
   const currentPersona = binding.record.defaultPersonaId
     ? await deps.personaRepository.getById(binding.record.defaultPersonaId)
     : null;
+  const globalConfig = await deps.globalConfigRepository.get();
+  const readiness = evaluateOnboardingReadiness({
+    binding: binding.record,
+    config: globalConfig,
+    fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
+  });
 
   if (hasLegacySetupOptions(options, ctx.commandBody)) {
     const referenceImageInput = extractReferenceImageInput(
@@ -356,6 +358,45 @@ async function setupPersona(
           : catalog.onboarding.personaCreated(persona.name),
         `personaId: ${persona.personaId}`,
       ].join("\n"),
+    };
+  }
+
+  if (
+    input.mode === "edit" &&
+    readiness.hasPersona &&
+    (!readiness.hasTextProvider || !readiness.hasGeminiKey)
+  ) {
+    const nextState = {
+      ...(state ??
+        (await deps.conversationService.activateConversation(binding.record))),
+      setupSession: createSetupSession({
+        kind: "model",
+        draft: buildModelSetupDraft(globalConfig),
+      }),
+      updatedAt: new Date().toISOString(),
+    };
+    await deps.conversationStates.save(nextState);
+    await deps.logger?.log({
+      tripId: `conversation:${binding.record.key}`,
+      runId: `setup-start:${Date.now()}`,
+      phase: "system",
+      event: "setup.session.started",
+      decision: "Started unified onboarding by continuing directly into model setup.",
+      provider: "command",
+      status: "success",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: {
+        conversationKey: binding.record.key,
+        kind: "model",
+        step: nextState.setupSession?.step,
+        trigger: "setup-command-onboarding",
+      },
+    });
+
+    return {
+      text: renderSetupStepPrompt(nextState.setupSession, locale),
     };
   }
 
@@ -739,6 +780,17 @@ async function tickTrip(
     if (!tripId) {
       return {
         text: catalog.command.tickSuccess({ id: binding.record.key }),
+      };
+    }
+
+    if (deps.service.isTripInFlight(tripId)) {
+      const currentTrip = await deps.tripRepository.getById(tripId);
+      return {
+        text: catalog.command.tickInProgress({
+          id: tripId,
+          phase: currentTrip?.state.currentPhase,
+          nextRunAt: currentTrip?.state.nextRunAt ?? undefined,
+        }),
       };
     }
 

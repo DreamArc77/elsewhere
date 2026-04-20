@@ -95,6 +95,16 @@ export const zhCN: SystemLocaleCatalog = {
       if (nextRunAt) lines.push(`nextRunAt: ${nextRunAt}`);
       return lines.join("\n");
     },
+    tickInProgress({ id, phase, nextRunAt }): string {
+      const lines = [
+        `已收到 tick：${id}`,
+        "reply: 已处理待发送回复",
+        "trip: 当前步骤已在处理中，无需重复 tick",
+      ];
+      if (phase) lines.push(`phase: ${phase}`);
+      if (nextRunAt) lines.push(`nextRunAt: ${nextRunAt}`);
+      return lines.join("\n");
+    },
     tickFailure(id: string): string {
       return [
         `已尝试 tick：${id}`,
@@ -144,30 +154,18 @@ export const zhCN: SystemLocaleCatalog = {
   },
   onboarding: {
     gateContinueSetup:
-      "旅伴资料还没配完。继续运行 /elsewhere setup，然后按提示一步步回复就行。",
+      "首次设置还没完成。继续运行 /elsewhere setup，我会从上次停下的地方继续。",
     gateContinueModel:
-      "模型配置还没配完。继续运行 /elsewhere model，然后按提示一步步回复就行。",
+      "首次设置还没完成。继续运行 /elsewhere setup，我会直接接着配置模型这一步。",
     gateFirstTime: [
       "欢迎来到 elsewhere。",
-      "你将在这里拥有一位属于自己的旅伴，陪你聊天，也替你去远方看看。",
-      "接下来，我们先把旅伴设定好。",
-      "",
-      "先运行 /elsewhere setup，完成旅伴资料。",
-      "再运行 /elsewhere model，完成文本模型和 planning / 生图配置。",
+      "你会在这里拥有一位属于自己的旅伴，陪你聊天，也替你去远方看看。",
+      "您需要先创建您的专属旅伴，运行 /elsewhere setup，我会一步步带你完成首次设置。",
     ].join("\n"),
-    gateMissingPersona: "旅伴资料",
-    gateMissingModel: "文本模型配置",
-    gateMissingGemini: "planning / 生图通道配置",
-    gateMissingSummary(items: string[]): string {
-      return `还差：${items.join("、")}`;
-    },
-    gatePersonaFirstSetup:
-      "先运行 /elsewhere setup，我会一步步带你配完旅伴资料。",
-    gatePersonaFirstModel:
-      "旅伴资料配好后，再用 /elsewhere model 补文本模型和 planning / 生图通道。",
-    gateModelOnlyIntro: "旅伴资料已经有了。",
-    gateModelOnlyAction:
-      "现在运行 /elsewhere model，把文本模型和 planning / 生图通道配完就行。",
+    setupContinueModel: [
+      "好的，旅伴资料已经创建好了。",
+      "接下来您还需要配置Gemini API Key来获取旅行规划和自拍生成能力",
+    ].join("\n"),
     personaCreated(name: string): string {
       return `${name} 创建完成。`;
     },
@@ -183,9 +181,9 @@ export const zhCN: SystemLocaleCatalog = {
     ].join("\n"),
     modelUpdated: "模型配置已更新。",
     idleGuideHint: [
-      "接下来你可以直接告诉旅伴一个想去的目的地，",
+      "接下来你可以直接告诉Ta一个想去的目的地，",
       "比如：东京 / 北京 / 巴黎",
-      "旅伴就会开始准备这次旅行。",
+      "Ta就会开始准备这次旅行。",
     ].join("\n"),
   },
   setup: {
@@ -194,11 +192,11 @@ export const zhCN: SystemLocaleCatalog = {
     readyReplyOne: "准备好了就回复 1。",
     keepCurrentHint: "回复新内容，或回复 0 沿用当前值。",
     personaIntro: [
-      "我们先来设定旅伴。",
+      "我们先来创建您的旅伴。",
       "",
-      "接下来我会依次确认：",
+      "接下来我会依次向您确认Ta的：",
       "1. 名字",
-      "2. 旅伴居住的城市",
+      "2. 居住的城市",
       "3. 性格特征",
       "4. 说话风格",
       "5. 和你的关系",
@@ -218,19 +216,19 @@ export const zhCN: SystemLocaleCatalog = {
     currentValue(value: string): string {
       return `当前值：${value}`;
     },
-    askName: "先给旅伴起个名字吧。",
-    askOriginCity: "旅伴现在居住在哪座城市？这会作为默认出发地。",
-    askTraits: "用几个词写下旅伴的性格特征。",
-    askTone: "旅伴平时说话是什么感觉？",
-    askRelationship: "旅伴和你是什么关系？",
-    askUserAddressing: "旅伴平时怎么称呼你？",
-    traitsExample: "例如：地雷系、敏感、黏人",
-    toneExample: "例如：病娇、撒娇、冷淡、元气",
-    relationshipExample: "例如：异地恋对象、暧昧对象、旅行搭子",
+    askName: "先给Ta起个名字吧。",
+    askOriginCity: "Ta现在居住在哪座城市？这会作为她的默认出发地。",
+    askTraits: "用一句话或几个词写下Ta的性格特征。",
+    askTone: "Ta平时说话是什么感觉？",
+    askRelationship: "Ta和你是什么关系？",
+    askUserAddressing: "Ta平时怎么称呼你？",
+    traitsExample: "例如：热情、傲娇、敏感、黏人、地雷系",
+    toneExample: "",
+    relationshipExample: "例如：爱人、朋友、旅行搭子",
     userAddressingExample: "例如：哥哥、宝宝、宝、名字里的称呼",
     reviewTitle: "当前资料如下：",
     reviewFieldName: "名字",
-    reviewFieldOriginCity: "旅伴居住的城市",
+    reviewFieldOriginCity: "Ta居住的城市",
     reviewFieldTraits: "性格特征",
     reviewFieldTone: "说话风格",
     reviewFieldRelationship: "和你的关系",
@@ -247,7 +245,7 @@ export const zhCN: SystemLocaleCatalog = {
     reviewCancelCreate: "8. 取消本次设置",
     referencePhotoChoiceWithCurrent: [
       "当前已经有参考图了。",
-      "参考图会用于后续自拍生成，主要决定旅伴的长相和气质。",
+      "参考图会用于后续自拍生成，主要影响旅伴的长相和气质。",
       "",
       "回复：",
       "1. 上传一张新参考图",
@@ -256,22 +254,22 @@ export const zhCN: SystemLocaleCatalog = {
     ].join("\n"),
     referencePhotoChoiceWithoutCurrent: [
       "最后一步是参考图。",
-      "它会用于后续自拍生成，主要决定旅伴的长相和气质。",
-      "建议发送一张单人、正脸清楚、无遮挡、光线自然的照片。",
+      "它会用于后续自拍生成，主要影响旅伴的长相和气质。",
+      "建议发送一张单人、正脸清楚、无遮挡、光线自然的照片，尽量不要用合照或滤镜太重的图。",
       "",
       "回复：",
       "1. 上传参考图",
       "2. 返回资料确认",
     ].join("\n"),
     referencePhotoAwaiting:
-      "现在直接发一张图片就行。建议单人、正脸清楚、无遮挡、光线自然，尽量不要用多人合照、过度滤镜或表情包。",
+      "现在直接发一张图片就行。最好是单人、正脸清楚、无遮挡、光线自然的照片，尽量不要用多人合照、过度滤镜或表情包。",
     completePersonaCreated: "旅伴创建完成。",
     completePersonaUpdated: "旅伴资料已更新。",
     completeModel: "模型配置已完成。",
     completeGeneric: "继续完成设置。",
     textProviderChoice(current: string): string {
       return [
-        "文本模型怎么配？回复一个选项：",
+        "请确认旅伴聊天时要用的文本模型。大多数情况下直接选 1 就够了：",
         `当前：${current}`,
         "1. default（使用当前 OpenClaw 默认模型）",
         "2. gemini",
@@ -279,36 +277,36 @@ export const zhCN: SystemLocaleCatalog = {
       ].join("\n");
     },
     askOpenAiBaseUrl(current: string): string {
-      return [`回复 OpenAI-compatible 的 base URL。`, `当前：${current}`].join(
+      return [`请输入 OpenAI-compatible 的 base URL。`, `当前：${current}`].join(
         "\n",
       );
     },
-    askOpenAiApiKey: "回复这个 OpenAI-compatible provider 的 API key。",
+    askOpenAiApiKey: "请输入这个 OpenAI-compatible provider 的 API key。",
     askOpenAiModel(current: string): string {
-      return [`回复要使用的模型名。`, `当前：${current}`].join("\n");
+      return [`请输入要使用的模型名。`, `当前：${current}`].join("\n");
     },
     geminiProviderChoice(current: string): string {
       return [
-        "planning 和生图要走哪种 Gemini 通道？回复一个选项：",
+        "最后一步，给 旅行规划 和 生图 选一个 Gemini 通道：",
         `当前：${current}`,
         "1. google-direct（Gemini API key / AI Studio）",
         "2. openrouter（用 OpenRouter key 调 Gemini）",
       ].join("\n");
     },
     askGeminiApiKey: [
-      "还差 Gemini API key。",
-      "planning 和生图都会共用这一个 Google Gemini key。",
+      "还需要一个 Gemini API key。",
+      "旅行规划 和生图都会共用这一个 Google Gemini key。",
       "Gemini key 获取链接：https://aistudio.google.com/app/apikey",
       "直接把 key 发我就行。",
     ].join("\n"),
     askOpenRouterApiKey: [
-      "还差 OpenRouter API key。",
-      "planning 和生图都会共用这一个 OpenRouter key，并通过 OpenRouter 调 Gemini。",
+      "还需要一个 OpenRouter API key。",
+      "旅行规划 和生图都会共用这一个 OpenRouter key，并通过 OpenRouter 调 Gemini。",
       "OpenRouter key 获取链接：https://openrouter.ai/settings/keys",
       "直接把 key 发我就行。",
     ].join("\n"),
     localeSelectionPersisted(localeLabel: string): string {
-      return `系统语言已设置为：${localeLabel}`;
+      return `已切换为：${localeLabel}`;
     },
     errorReplyOne: "准备好了就回复 1。",
     errorContinueOrCancel: "请回复 1 继续修改，或回复 2 取消。",
@@ -316,14 +314,14 @@ export const zhCN: SystemLocaleCatalog = {
     errorReferencePhotoChoiceWithCurrent: "请回复 1、2 或 3。",
     errorReferencePhotoChoiceWithoutCurrent: "请回复 1 或 2。",
     errorModelChoice:
-      "没看懂这个模型选项。回复 1 / 2 / 3，或者直接回复 default / gemini / openai-compatible。",
+      "请直接回复 1 / 2 / 3",
     errorGeminiProviderChoice:
-      "没看懂这个 planning / 生图通道选项。回复 1 / 2，或者直接回复 google-direct / openrouter。",
+      "请直接回复 1 / 2",
     errorNeedUserAddressing:
       "当前还没有设置旅伴对你的称呼，这一项需要补一个。",
     errorWaitingForPhoto: "当前 setup 步骤不在等待照片。",
     errorWaitingForPhotoWithFallback:
-      "我现在在等你的参考图。你可以直接发一张图片；如果这个平台传图不稳定，也可以直接发图片 URL，或者发 `/elsewhere setup --image 图片URL`。",
+      "我现在在等你的参考图。你可以直接发一张图片；如果这个平台传图不稳定，也可以尝试直接发一个可访问的图片 URL。",
     errorUnsupportedImage:
       "这张图片现在还不能用作参考图，请换一张常见格式的图片试试。",
     errorImageDownloadFailed:
@@ -332,11 +330,11 @@ export const zhCN: SystemLocaleCatalog = {
   },
   replyErrors: {
     personaRequired:
-      "我还没准备好出发呢，先用 /elsewhere setup 帮我设定形象和性格吧，然后我就能认真回你了。",
+      "人设还没准备好呢，先用 /elsewhere setup 帮我设定形象和性格吧。",
     idleDestinationStartFailed:
-      "我刚刚想把这趟行程接起来，不过这边卡住了。你晚一点再跟我说一次目的地，我会继续试。",
+      "行程规划失败。你晚一点再跟我说一次目的地，我会继续试。",
     planningFailed: "这次行程生成失败了，请稍后再试。",
-    postcardFailed: "这次 postcard 发送没确认成功，请稍后再试。",
+    postcardFailed: "这次 消息 发送没确认成功，请稍后再试。",
     replyFailed: "这次回复发送没确认成功，请稍后再试。",
   },
 };

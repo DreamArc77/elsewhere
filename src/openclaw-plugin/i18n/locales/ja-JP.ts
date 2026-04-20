@@ -97,6 +97,16 @@ export const jaJP: SystemLocaleCatalog = {
       if (nextRunAt) lines.push(`nextRunAt: ${nextRunAt}`);
       return lines.join("\n");
     },
+    tickInProgress: ({ id, phase, nextRunAt }) => {
+      const lines = [
+        `tick を受け付けました: ${id}`,
+        "reply: 保留中の返信を処理しました",
+        "trip: 現在のステップはすでに処理中です",
+      ];
+      if (phase) lines.push(`phase: ${phase}`);
+      if (nextRunAt) lines.push(`nextRunAt: ${nextRunAt}`);
+      return lines.join("\n");
+    },
     tickFailure: (id) =>
       [
         `tick を試しました: ${id}`,
@@ -142,28 +152,18 @@ export const jaJP: SystemLocaleCatalog = {
   },
   onboarding: {
     gateContinueSetup:
-      "相棒のプロフィールはまだ未完成です。/elsewhere setup を続けて、案内どおりに返信してください。",
+      "初回設定はまだ終わっていません。/elsewhere setup をもう一度実行すれば、前回の続きから案内します。",
     gateContinueModel:
-      "モデル設定はまだ未完成です。/elsewhere model を続けて、案内どおりに返信してください。",
+      "初回設定はまだ終わっていません。/elsewhere setup をもう一度実行すれば、モデル設定の続きから案内します。",
     gateFirstTime: [
       "elsewhere へようこそ。",
       "ここでは、あなたと話したり、代わりに遠くを見に行ってくれる相棒を持てます。",
-      "まずは相棒を設定しましょう。",
-      "",
-      "/elsewhere setup で相棒のプロフィールを整えてください。",
-      "そのあと /elsewhere model でテキストモデルと planning / 画像設定を終えてください。",
+      "まずはあなただけの相棒を作る必要があります。/elsewhere setup を実行すれば、初回設定を順番に案内します。",
     ].join("\n"),
-    gateMissingPersona: "相棒のプロフィール",
-    gateMissingModel: "テキストモデル設定",
-    gateMissingGemini: "planning / 画像チャンネル設定",
-    gateMissingSummary: (items) => `不足している項目: ${items.join("、")}`,
-    gatePersonaFirstSetup:
-      "まず /elsewhere setup を実行すると、順番に相棒のプロフィールを設定できます。",
-    gatePersonaFirstModel:
-      "相棒のプロフィールが終わったら、/elsewhere model でテキストモデルと planning / 画像設定をしてください。",
-    gateModelOnlyIntro: "相棒のプロフィールはすでにあります。",
-    gateModelOnlyAction:
-      "次は /elsewhere model を実行して、テキストモデルと planning / 画像設定をしてください。",
+    setupContinueModel: [
+      "相棒のプロフィールは作成できました。",
+      "次に、旅行計画と自撮り生成のために Gemini API key を設定する必要があります。",
+    ].join("\n"),
     personaCreated: (name) => `${name} を作成しました。`,
     personaUpdated: (name) => `${name} のプロフィールを更新しました。`,
     personaUpdatedReactivateHint: [
@@ -175,9 +175,9 @@ export const jaJP: SystemLocaleCatalog = {
     ].join("\n"),
     modelUpdated: "モデル設定を更新しました。",
     idleGuideHint: [
-      "次は相棒に行きたい行き先をそのまま伝えてください。",
+      "次は行きたい行き先をそのまま伝えてください。",
       "たとえば: 東京 / 北京 / パリ",
-      "相棒が旅行の準備を始めます。",
+      "そうすると相棒が旅行の準備を始めます。",
     ].join("\n"),
   },
   setup: {
@@ -187,11 +187,11 @@ export const jaJP: SystemLocaleCatalog = {
     keepCurrentHint:
       "新しい内容を返信するか、0 で現在の値をそのまま使ってください。",
     personaIntro: [
-      "まずは相棒を設定しましょう。",
+      "まずは相棒を作りましょう。",
       "",
-      "次の順で確認します:",
+      "これから次の順で確認します:",
       "1. 名前",
-      "2. 相棒が住んでいる都市",
+      "2. 住んでいる都市",
       "3. 性格特性",
       "4. 話し方",
       "5. あなたとの関係",
@@ -209,20 +209,20 @@ export const jaJP: SystemLocaleCatalog = {
       "2. キャンセル",
     ].join("\n"),
     currentValue: (value) => `現在の値: ${value}`,
-    askName: "まずは相棒の名前を決めましょう。",
+    askName: "まずは名前を決めましょう。",
     askOriginCity:
-      "相棒は今どの都市に住んでいますか？ ここが既定の出発地になります。",
-    askTraits: "相棒の性格をいくつかの言葉で教えてください。",
-    askTone: "相棒の普段の話し方はどんな感じですか？",
-    askRelationship: "相棒とあなたの関係は？",
-    askUserAddressing: "相棒はあなたをどう呼びますか？",
+      "今どの都市に住んでいますか？ ここが既定の出発地になります。",
+    askTraits: "性格の特徴を一文またはいくつかの言葉で教えてください。",
+    askTone: "普段の話し方はどんな感じですか？",
+    askRelationship: "あなたとの関係は？",
+    askUserAddressing: "あなたをどう呼びますか？",
     traitsExample: "例: 繊細、甘えん坊、重め",
     toneExample: "例: 病み系、甘え系、クール、元気",
     relationshipExample: "例: 遠距離の恋人、曖昧な相手、旅の相棒",
     userAddressingExample: "例: お兄ちゃん、ベイビー、名前、あだ名",
     reviewTitle: "現在の資料：",
     reviewFieldName: "名前",
-    reviewFieldOriginCity: "住んでいる都市",
+    reviewFieldOriginCity: "Taが住んでいる都市",
     reviewFieldTraits: "性格特徴",
     reviewFieldTone: "話し方",
     reviewFieldRelationship: "あなたとの関係",
@@ -249,7 +249,7 @@ export const jaJP: SystemLocaleCatalog = {
     referencePhotoChoiceWithoutCurrent: [
       "最後のステップは参考画像です。",
       "この画像は後で自撮り生成に使われ、相棒の見た目や雰囲気に強く影響します。",
-      "顔がはっきり見える単独写真で、自然光・遮蔽物なしの画像がおすすめです。",
+      "顔がはっきり見える単独写真で、自然光・遮蔽物なしの画像がおすすめです。集合写真や強いフィルターはできるだけ避けてください。",
       "",
       "返信:",
       "1. 参考画像をアップロード",
@@ -263,7 +263,7 @@ export const jaJP: SystemLocaleCatalog = {
     completeGeneric: "設定を続けてください。",
     textProviderChoice: (current) =>
       [
-        "テキストモデルをどう設定しますか？ 番号で返信してください。",
+        "まず、相棒との会話に使うテキストモデルを選んでください。通常は 1 で十分です。",
         `現在: ${current}`,
         "1. default（現在の OpenClaw デフォルトモデルを使う）",
         "2. gemini",
@@ -279,25 +279,25 @@ export const jaJP: SystemLocaleCatalog = {
       [`使いたいモデル名を返信してください。`, `現在: ${current}`].join("\n"),
     geminiProviderChoice: (current) =>
       [
-        "planning と画像生成で使う Gemini チャンネルを選んでください。",
+        "最後に、旅行計画と画像生成で使う Gemini チャンネルを選んでください。",
         `現在: ${current}`,
         "1. google-direct（Gemini API key / AI Studio）",
         "2. openrouter（OpenRouter key で Gemini を使う）",
       ].join("\n"),
     askGeminiApiKey: [
       "Gemini API key がまだ必要です。",
-      "planning と画像生成でこの Google Gemini key を共用します。",
+      "旅行計画と画像生成でこの Google Gemini key を共用します。",
       "取得先: https://aistudio.google.com/app/apikey",
       "そのまま key を送ってください。",
     ].join("\n"),
     askOpenRouterApiKey: [
       "OpenRouter API key がまだ必要です。",
-      "planning と画像生成でこの OpenRouter key を共用し、OpenRouter 経由で Gemini を使います。",
+      "旅行計画と画像生成でこの OpenRouter key を共用し、OpenRouter 経由で Gemini を使います。",
       "取得先: https://openrouter.ai/settings/keys",
       "そのまま key を送ってください。",
     ].join("\n"),
     localeSelectionPersisted: (localeLabel) =>
-      `システム言語を ${localeLabel} に設定しました。`,
+      `${localeLabel} に切り替えました。`,
     errorReplyOne: "準備できたら 1 で返信してください。",
     errorContinueOrCancel: "1 で続行、2 でキャンセルしてください。",
     errorReviewOption: "1-8 のいずれかで返信してください。",
@@ -306,14 +306,14 @@ export const jaJP: SystemLocaleCatalog = {
     errorReferencePhotoChoiceWithoutCurrent:
       "1 または 2 で返信してください。",
     errorModelChoice:
-      "そのモデル選択は理解できませんでした。1 / 2 / 3、または default / gemini / openai-compatible で返信してください。",
+      "1 / 2 / 3 で返信してください。",
     errorGeminiProviderChoice:
-      "その planning / 画像チャンネル選択は理解できませんでした。1 / 2、または google-direct / openrouter で返信してください。",
+      "1 / 2 で返信してください。",
     errorNeedUserAddressing:
       "相棒のあなたへの呼び方がまだ設定されていません。この項目は入力が必要です。",
     errorWaitingForPhoto: "現在の setup ステップは写真待ちではありません。",
     errorWaitingForPhotoWithFallback:
-      "今は参考画像を待っています。画像をそのまま送ってください。もしこのプラットフォームで画像送信が不安定なら、画像 URL を送るか、`/elsewhere setup --image 画像URL` を送ってください。",
+      "今は参考画像を待っています。画像をそのまま送ってください。もしこのプラットフォームで画像送信が不安定なら、公開アクセスできる画像 URL を送ってみてください。",
     errorUnsupportedImage:
       "この画像は今は参考画像として使えません。一般的な画像形式で別の画像を試してください。",
     errorImageDownloadFailed:
@@ -323,13 +323,13 @@ export const jaJP: SystemLocaleCatalog = {
   },
   replyErrors: {
     personaRequired:
-      "まだ出発の準備ができていません。まず /elsewhere setup で私の人格を設定してくれたら、ちゃんと返事できるようになります。",
+      "まだ相棒の設定が終わっていません。まず /elsewhere setup を使ってください。",
     idleDestinationStartFailed:
-      "今その行き先で旅行を始めようとしたけど、こちらで詰まってしまいました。少しあとでもう一度行き先を教えてくれたら、また試します。",
+      "旅行計画に失敗しました。少しあとでもう一度行き先を教えてくれたら、また試します。",
     planningFailed:
       "今回の旅行計画は失敗しました。少し待ってからもう一度試してください。",
     postcardFailed:
-      "今回の postcard は送信確認ができませんでした。少し待ってからもう一度試してください。",
+      "今回のメッセージは送信確認ができませんでした。少し待ってからもう一度試してください。",
     replyFailed:
       "今回の返信は送信確認ができませんでした。少し待ってからもう一度試してください。",
   },

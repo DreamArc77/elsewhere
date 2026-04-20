@@ -45,6 +45,7 @@ export interface SystemLocaleCatalog {
     }): string;
     tripNotFound(tripId: string): string;
     tickSuccess(input: { id: string; status?: string; phase?: string; nextRunAt?: string }): string;
+    tickInProgress(input: { id: string; phase?: string; nextRunAt?: string }): string;
     tickFailure(id: string): string;
     tickReplySuccess(id: string): string;
     tickReplyFailure(id: string): string;
@@ -62,14 +63,7 @@ export interface SystemLocaleCatalog {
     gateContinueSetup: string;
     gateContinueModel: string;
     gateFirstTime: string;
-    gateMissingPersona: string;
-    gateMissingModel: string;
-    gateMissingGemini: string;
-    gateMissingSummary(items: string[]): string;
-    gatePersonaFirstSetup: string;
-    gatePersonaFirstModel: string;
-    gateModelOnlyIntro: string;
-    gateModelOnlyAction: string;
+    setupContinueModel: string;
     personaCreated(name: string): string;
     personaUpdated(name: string): string;
     personaUpdatedReactivateHint: string;

@@ -102,6 +102,16 @@ export const en: SystemLocaleCatalog = {
       if (nextRunAt) lines.push(`nextRunAt: ${nextRunAt}`);
       return lines.join("\n");
     },
+    tickInProgress({ id, phase, nextRunAt }): string {
+      const lines = [
+        `Tick received: ${id}`,
+        "reply: processed pending conversation replies",
+        "trip: the current step is already being processed",
+      ];
+      if (phase) lines.push(`phase: ${phase}`);
+      if (nextRunAt) lines.push(`nextRunAt: ${nextRunAt}`);
+      return lines.join("\n");
+    },
     tickFailure(id: string): string {
       return [
         `Tick attempted: ${id}`,
@@ -152,30 +162,18 @@ export const en: SystemLocaleCatalog = {
   },
   onboarding: {
     gateContinueSetup:
-      "Your companion profile is not finished yet. Continue with /elsewhere setup and follow the prompts.",
+      "First-time setup is not finished yet. Run /elsewhere setup again and I'll continue from where we left off.",
     gateContinueModel:
-      "The model configuration is not finished yet. Continue with /elsewhere model and follow the prompts.",
+      "First-time setup is not finished yet. Run /elsewhere setup again and I'll continue from the model step.",
     gateFirstTime: [
       "Welcome to elsewhere.",
       "You'll have a companion here who can chat with you and go see faraway places for you.",
-      "Let's set your companion up first.",
-      "",
-      "Run /elsewhere setup to finish the companion profile.",
-      "Then run /elsewhere model to finish the text model and the planning / image setup.",
+      "You need to create your own companion first. Run /elsewhere setup and I'll guide you through the first-time setup step by step.",
     ].join("\n"),
-    gateMissingPersona: "companion profile",
-    gateMissingModel: "text model configuration",
-    gateMissingGemini: "planning / image channel configuration",
-    gateMissingSummary(items: string[]): string {
-      return `Still missing: ${items.join(", ")}`;
-    },
-    gatePersonaFirstSetup:
-      "Run /elsewhere setup first and I'll guide you through your companion profile step by step.",
-    gatePersonaFirstModel:
-      "After the companion profile is ready, use /elsewhere model to finish the text model and planning / image setup.",
-    gateModelOnlyIntro: "Your companion profile is already set.",
-    gateModelOnlyAction:
-      "Now run /elsewhere model to finish the text model and planning / image setup.",
+    setupContinueModel: [
+      "Great, your companion profile has been created.",
+      "Next, you still need to connect a Gemini API key for trip planning and selfie generation.",
+    ].join("\n"),
     personaCreated: (name) => `${name} has been created.`,
     personaUpdated: (name) => `${name}'s profile has been updated.`,
     personaUpdatedReactivateHint: [
@@ -187,9 +185,9 @@ export const en: SystemLocaleCatalog = {
     ].join("\n"),
     modelUpdated: "Model settings have been updated.",
     idleGuideHint: [
-      "Next, you can directly tell your companion a destination you want,",
+      "Next, just tell them a destination you want to go to,",
       "for example: Tokyo / Beijing / Paris",
-      "and your companion will start preparing the trip.",
+      "and they will start preparing the trip.",
     ].join("\n"),
   },
   setup: {
@@ -199,11 +197,11 @@ export const en: SystemLocaleCatalog = {
     keepCurrentHint:
       "Reply with a new value, or reply with 0 to keep the current one.",
     personaIntro: [
-      "Let's set up your companion.",
+      "Let's create your companion first.",
       "",
-      "I'll ask for these in order:",
+      "I'll ask you about these in order:",
       "1. Name",
-      "2. City where your companion lives",
+      "2. City where they live",
       "3. Personality traits",
       "4. Speaking style",
       "5. Relationship with you",
@@ -221,13 +219,13 @@ export const en: SystemLocaleCatalog = {
       "2. Cancel",
     ].join("\n"),
     currentValue: (value) => `Current value: ${value}`,
-    askName: "Let's start with a name for your companion.",
+    askName: "Let's start with their name.",
     askOriginCity:
-      "Which city does your companion live in right now? This will be used as the default departure city.",
-    askTraits: "Use a few words to describe your companion's personality.",
-    askTone: "What does your companion's usual speaking style feel like?",
-    askRelationship: "What is your companion's relationship with you?",
-    askUserAddressing: "How does your companion usually address you?",
+      "Which city do they live in right now? This will be used as the default departure city.",
+    askTraits: "Use one sentence or a few words to describe their personality.",
+    askTone: "What does their usual speaking style feel like?",
+    askRelationship: "What is their relationship with you?",
+    askUserAddressing: "How do they usually address you?",
     traitsExample: "For example: clingy, sensitive, moody",
     toneExample: "For example: teasing, soft, distant, cheerful",
     relationshipExample:
@@ -236,7 +234,7 @@ export const en: SystemLocaleCatalog = {
       "For example: babe, dear, your name, a nickname",
     reviewTitle: "Current profile:",
     reviewFieldName: "Name",
-    reviewFieldOriginCity: "City where your companion lives",
+    reviewFieldOriginCity: "City where they live",
     reviewFieldTraits: "Personality traits",
     reviewFieldTone: "Speaking style",
     reviewFieldRelationship: "Relationship with you",
@@ -262,8 +260,8 @@ export const en: SystemLocaleCatalog = {
     ].join("\n"),
     referencePhotoChoiceWithoutCurrent: [
       "Last step: reference photo.",
-      "This photo is used later for selfie generation and mainly shapes your companion's look and vibe.",
-      "A clear solo photo with a visible face, no obstruction, and natural lighting works best.",
+      "This photo is used later for selfie generation and mainly shapes your companion's look and overall vibe.",
+      "A clear solo photo with a visible face, no obstruction, and natural lighting works best. Try to avoid group shots or heavy filters.",
       "",
       "Reply:",
       "1. Upload a reference photo",
@@ -277,43 +275,43 @@ export const en: SystemLocaleCatalog = {
     completeGeneric: "Continue the setup.",
     textProviderChoice: (current) =>
       [
-        "How should the text model be configured? Reply with one option:",
+        "Please choose the text model your companion should use for chatting. In most cases, option 1 is enough:",
         `Current: ${current}`,
         "1. default (use the current OpenClaw default model)",
         "2. gemini",
         "3. openai-compatible",
       ].join("\n"),
     askOpenAiBaseUrl: (current) =>
-      [`Reply with the OpenAI-compatible base URL.`, `Current: ${current}`].join(
+      [`Enter the OpenAI-compatible base URL.`, `Current: ${current}`].join(
         "\n",
       ),
     askOpenAiApiKey:
-      "Reply with the API key for this OpenAI-compatible provider.",
+      "Enter the API key for this OpenAI-compatible provider.",
     askOpenAiModel: (current) =>
-      [`Reply with the model name to use.`, `Current: ${current}`].join(
+      [`Enter the model name to use.`, `Current: ${current}`].join(
         "\n",
       ),
     geminiProviderChoice: (current) =>
       [
-        "Which Gemini channel should planning and image generation use? Reply with one option:",
+        "Last step: choose a Gemini channel for trip planning and image generation:",
         `Current: ${current}`,
         "1. google-direct (Gemini API key / AI Studio)",
         "2. openrouter (use an OpenRouter key to call Gemini)",
       ].join("\n"),
     askGeminiApiKey: [
       "A Gemini API key is still needed.",
-      "Planning and image generation will share this Google Gemini key.",
+      "Trip planning and image generation will share this Google Gemini key.",
       "Get a Gemini key here: https://aistudio.google.com/app/apikey",
       "Just send me the key directly.",
     ].join("\n"),
     askOpenRouterApiKey: [
       "An OpenRouter API key is still needed.",
-      "Planning and image generation will share this OpenRouter key and call Gemini through OpenRouter.",
+      "Trip planning and image generation will share this OpenRouter key and call Gemini through OpenRouter.",
       "Get an OpenRouter key here: https://openrouter.ai/settings/keys",
       "Just send me the key directly.",
     ].join("\n"),
     localeSelectionPersisted: (localeLabel) =>
-      `System language has been set to: ${localeLabel}`,
+      `Switched to: ${localeLabel}`,
     errorReplyOne: "Reply with 1 when you're ready.",
     errorContinueOrCancel:
       "Reply with 1 to continue editing, or 2 to cancel.",
@@ -321,14 +319,14 @@ export const en: SystemLocaleCatalog = {
     errorReferencePhotoChoiceWithCurrent: "Reply with 1, 2, or 3.",
     errorReferencePhotoChoiceWithoutCurrent: "Reply with 1 or 2.",
     errorModelChoice:
-      "I couldn't understand that model option. Reply with 1 / 2 / 3, or directly with default / gemini / openai-compatible.",
+      "Please reply with 1 / 2 / 3.",
     errorGeminiProviderChoice:
-      "I couldn't understand that planning / image channel option. Reply with 1 / 2, or directly with google-direct / openrouter.",
+      "Please reply with 1 / 2.",
     errorNeedUserAddressing:
       "Your companion still does not have a way to address you. This field needs to be filled in.",
     errorWaitingForPhoto: "The current setup step is not waiting for a photo.",
     errorWaitingForPhotoWithFallback:
-      "I'm currently waiting for your reference photo. You can send an image directly. If image delivery is unstable on this platform, you can also send an image URL, or send `/elsewhere setup --image IMAGE_URL`.",
+      "I'm currently waiting for your reference photo. You can send an image directly. If image delivery is unstable on this platform, you can also try sending a publicly accessible image URL.",
     errorUnsupportedImage:
       "This image cannot be used as a reference photo right now. Please try another common image format.",
     errorImageDownloadFailed:
@@ -337,12 +335,12 @@ export const en: SystemLocaleCatalog = {
   },
   replyErrors: {
     personaRequired:
-      "I'm not ready to head out yet. Please use /elsewhere setup to define my persona first, then I'll be able to reply properly.",
+      "The companion setup is not ready yet. Use /elsewhere setup first.",
     idleDestinationStartFailed:
-      "I just tried to turn that into a trip, but it got stuck on my side. Tell me the destination again a bit later and I'll keep trying.",
+      "Trip planning failed. Tell me the destination again a bit later and I'll keep trying.",
     planningFailed: "Trip planning failed this time. Please try again later.",
     postcardFailed:
-      "This postcard could not be confirmed just now. Please try again later.",
+      "This message could not be confirmed just now. Please try again later.",
     replyFailed:
       "This reply could not be confirmed just now. Please try again later.",
   },
