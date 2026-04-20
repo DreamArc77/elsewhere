@@ -261,7 +261,8 @@ describe("reply seen strategy", () => {
     const state = await runtime.conversationStateRepository.getByKey(key);
     expect(state?.awaitingDestination).toBe(false);
     expect(state?.pendingDestinationCandidate).toBeNull();
-    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("东京");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Tokyo");
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("计划");
   });
 
   it("sends the idle destination guide after the 12-hour cooldown", async () => {
