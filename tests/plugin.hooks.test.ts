@@ -845,6 +845,78 @@ describe("travel companion inbound takeover hook", () => {
     expect(runtime.messenger.sentReplies[0]?.text).toContain("/elsewhere model");
   });
 
+  it("accepts a qqbot downloaded local image path embedded in the inbound body while waiting for a reference photo", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USERIMG1",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USERIMG1",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "persona",
+        step: "reference_photo",
+        awaitingReferencePhoto: true,
+        draft: {
+          name: "Mori",
+          originCity: "Hong Kong",
+          traits: ["gentle"],
+          toneStyle: "warm",
+          relationship: "travel soulmate",
+          userAddressing: "baby",
+        },
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionBeforeDispatch(
+      {
+        content: "",
+        body: `- 图片: ${runtime.referenceImagePath}`,
+        channel: "qqbot",
+        senderId: "USERIMG1",
+        isGroup: false,
+      },
+      {
+        channelId: "qqbot",
+        accountId: "default",
+        senderId: "USERIMG1",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.setupSession).toBeUndefined();
+    const savedPersona = await runtime.personaRepository.getById(
+      (await runtime.bindings.get(key))!.defaultPersonaId!,
+    );
+    expect(savedPersona?.referenceImageAsset).toBe(runtime.referenceImagePath);
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("Mori 创建完成");
+  });
+
   it("updates the current persona instead of creating a new one when setup completes", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

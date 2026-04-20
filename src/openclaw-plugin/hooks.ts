@@ -1066,12 +1066,27 @@ function extractReferenceImageSourceFromText(text: string): string | null {
   const candidate =
     extractSetupImageCommandUrl(trimmed) ??
     trimmed.match(/https?:\/\/\S+/iu)?.[0] ??
+    extractEmbeddedLocalImagePath(trimmed) ??
     null;
   if (!candidate) {
     return null;
   }
 
   return candidate.trim().replace(/[),.;!?]+$/u, "");
+}
+
+function extractEmbeddedLocalImagePath(text: string): string | null {
+  const explicitLabelMatch = text.match(
+    /(?:^|\n)\s*-\s*(?:图片|image)\s*:\s*((?:[A-Za-z]:[\\/]|\/)\S+)/iu,
+  );
+  if (explicitLabelMatch?.[1]) {
+    return explicitLabelMatch[1];
+  }
+
+  const absolutePathMatch = text.match(
+    /((?:[A-Za-z]:[\\/]|\/)\S+\.(?:png|jpe?g|webp|gif|bmp))/iu,
+  );
+  return absolutePathMatch?.[1] ?? null;
 }
 
 function extractMetadataMediaCandidates(
