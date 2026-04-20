@@ -759,6 +759,121 @@ describe("travel companion inbound takeover hook", () => {
     expect(state?.pendingUserMessages[0]?.content).toBe("在吗");
   });
 
+  it("continues feishu locale setup when the inbound sender id needs user: normalization", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU123",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU123",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "locale",
+        step: "locale_select",
+        awaitingReferencePhoto: false,
+        draft: {},
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "1",
+        body: "1",
+        channel: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_1",
+        senderId: "ou_FEISHU123",
+        messageId: "feishu-locale-1",
+        isGroup: false,
+      },
+      {
+        channelId: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_1",
+        senderId: "ou_FEISHU123",
+        messageId: "feishu-locale-1",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.systemLocale).toBe("zh-CN");
+    expect(state?.setupSession).toBeUndefined();
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("/elsewhere setup");
+  });
+
+  it("queues feishu direct messages through before_dispatch using the normalized user target", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU456",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU456",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationService.activateConversation({
+      key,
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU456",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+
+    const result = await handleTravelCompanionBeforeDispatch(
+      {
+        content: "在吗",
+        body: "在吗",
+        channel: "feishu",
+        senderId: "ou_FEISHU456",
+        isGroup: false,
+      },
+      {
+        channelId: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_2",
+        senderId: "ou_FEISHU456",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.pendingUserMessages).toHaveLength(1);
+    expect(state?.pendingUserMessages[0]?.content).toBe("在吗");
+  });
+
   it("accepts the next inbound image from inbound metadata as setup reference photo", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

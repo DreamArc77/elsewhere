@@ -38,6 +38,18 @@ const CHANNEL_CAPABILITY_MAP: Record<string, ChannelCapabilitySummary> = {
   qqbot: {
     combinedPostcard: "unsupported",
     mediaPostcard: "limited",
+    inboundImageSetup: "supported",
+    proactiveMessaging: "limited",
+  },
+  "openclaw-weixin": {
+    combinedPostcard: "unsupported",
+    mediaPostcard: "limited",
+    inboundImageSetup: "supported",
+    proactiveMessaging: "limited",
+  },
+  feishu: {
+    combinedPostcard: "limited",
+    mediaPostcard: "supported",
     inboundImageSetup: "unknown",
     proactiveMessaging: "limited",
   },

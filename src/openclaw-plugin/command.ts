@@ -16,6 +16,7 @@ import type {
 } from "../domain/types.js";
 import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 import { bindingKey } from "./binding-state.js";
+import { inferConversationTargetForCommand } from "./channel-compatibility.js";
 import { PRIMARY_SLASH_COMMAND } from "./command-alias.js";
 import {
   buildLocaleSelectionMenu,
@@ -1494,17 +1495,12 @@ async function logBindingEvent(
 }
 
 function inferConversationTarget(ctx: PluginCommandContext): string | null {
-  const from = normalizeRoutePart(ctx.from ?? ctx.senderId);
-  const to = normalizeRoutePart(ctx.to);
-
-  if (ctx.channel === "telegram") {
-    if (to?.startsWith("-")) {
-      return to;
-    }
-    return from ?? to;
-  }
-
-  return to ?? from;
+  return inferConversationTargetForCommand({
+    channel: ctx.channel,
+    from: ctx.from,
+    to: ctx.to,
+    senderId: ctx.senderId,
+  });
 }
 
 function normalizeRoutePart(value: string | null | undefined): string | null {

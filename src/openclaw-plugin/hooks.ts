@@ -19,6 +19,7 @@ import {
   TripRepository,
 } from "../domain/types.js";
 import { bindingKey } from "./binding-state.js";
+import { buildInboundTargetCandidates } from "./channel-compatibility.js";
 import { handleTravelCompanionCommand } from "./command.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import {
@@ -1636,39 +1637,12 @@ function buildTargetCandidates(
   event: InboundClaimEvent,
   ctx: InboundClaimContext,
 ): string[] {
-  const conversationId = normalizeRoutePart(
-    event.conversationId ?? ctx.conversationId,
-  );
-  const senderId = normalizeRoutePart(event.senderId ?? ctx.senderId);
-  const rawCandidates = [conversationId, senderId].filter(
-    (value): value is string => Boolean(value),
-  );
-  const candidates = new Set<string>();
-
-  for (const candidate of rawCandidates) {
-    candidates.add(candidate);
-    if (!candidate.includes(":")) {
-      candidates.add(`${event.channel}:${candidate}`);
-    }
-  }
-
-  if (
-    event.channel === "telegram" &&
-    conversationId?.startsWith("-")
-  ) {
-    candidates.add(conversationId);
-    candidates.add(`telegram:${conversationId}`);
-  }
-
-  if (
-    event.channel === "qqbot" &&
-    !event.isGroup &&
-    senderId
-  ) {
-    candidates.add(`qqbot:c2c:${senderId}`);
-  }
-
-  return [...candidates];
+  return buildInboundTargetCandidates({
+    channel: event.channel,
+    conversationId: normalizeRoutePart(event.conversationId ?? ctx.conversationId),
+    senderId: normalizeRoutePart(event.senderId ?? ctx.senderId),
+    isGroup: event.isGroup,
+  });
 }
 
 function buildThreadCandidates(
