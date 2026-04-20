@@ -150,7 +150,7 @@ interface ReplyDispatchResult {
   counts: Record<string, number>;
 }
 
-interface InboundClaimDependencies {
+export interface InboundClaimDependencies {
   bindings: ConversationBindingStore;
   conversationService: CompanionConversationService;
   service: OpenClawTravelCompanionService;
@@ -765,47 +765,14 @@ async function handleSetupSessionInbound(
       return false;
     }
 
-    await logCommandBridgeEvent(deps.logger, {
+    return await completeSetupReferencePhotoFromSource({
       binding: input.binding,
+      state: input.state,
+      deps,
       runId,
-      event: "setup.photo.received",
-      decision: "Received the next inbound image as the setup reference photo.",
-      provider: "setup-session",
-      status: "success",
-      details: { source: imageSource },
+      imageSource,
+      sourceKind: "inbound-hook",
     });
-    const referenceImageAsset = await materializeReferenceImage({
-      source: imageSource,
-      personasDir: deps.runtimeDataPaths.personasDir,
-    });
-    const nextSession = advanceSetupSessionWithPhoto({
-      session,
-      referenceImageAsset,
-      locale,
-    });
-    if (nextSession.step === "complete") {
-      await finalizeSetupSession({
-        input,
-        deps,
-        runId,
-        session: nextSession,
-        globalConfig: await deps.globalConfigRepository.get(),
-        selectedLocale: undefined,
-      });
-      return true;
-    }
-
-    await deps.conversationStates.save({
-      ...input.state,
-      setupSession: nextSession,
-      updatedAt: new Date().toISOString(),
-    });
-    await deps.messenger.sendTextReply({
-      binding: input.binding,
-      text: renderSetupStepPrompt(nextSession, locale),
-      dedupeKey: `setup-step:${input.binding.key}:${runId}`,
-    });
-    return true;
   }
 
   if (!input.trimmed) {
@@ -930,6 +897,108 @@ async function handleSetupSessionInbound(
     session: advanced.session,
     globalConfig: mergedConfig,
     selectedLocale: advanced.selectedLocale,
+  });
+  return true;
+}
+
+export async function completeSetupReferencePhotoFromSource(input: {
+  binding: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>>;
+  state: NonNullable<Awaited<ReturnType<ConversationStateRepository["getByKey"]>>>;
+  deps: InboundClaimDependencies;
+  runId: string;
+  imageSource: string;
+  sourceKind: "inbound-hook" | "media-inbound-fallback";
+}): Promise<boolean> {
+  const session = input.state.setupSession;
+  if (!session?.awaitingReferencePhoto) {
+    return false;
+  }
+
+  const locale = getSystemLocale(input.state);
+  await logCommandBridgeEvent(input.deps.logger, {
+    binding: input.binding,
+    runId: input.runId,
+    event: "setup.photo.received",
+    decision: "Received the next inbound image as the setup reference photo.",
+    provider: "setup-session",
+    status: "success",
+    details: {
+      source: input.imageSource,
+      sourceKind: input.sourceKind,
+    },
+  });
+
+  let referenceImageAsset: string;
+  try {
+    referenceImageAsset = await materializeReferenceImage({
+      source: input.imageSource,
+      personasDir: input.deps.runtimeDataPaths.personasDir,
+    });
+  } catch (error) {
+    await logCommandBridgeEvent(input.deps.logger, {
+      binding: input.binding,
+      runId: input.runId,
+      event: "setup.photo.materialize_failed",
+      decision: "Failed to materialize the inbound setup reference photo.",
+      provider: "setup-session",
+      status: "failure",
+      errorCode: "setup_reference_photo_materialize_failed",
+      details: {
+        sourceKind: input.sourceKind,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    });
+    await input.deps.messenger.sendTextReply({
+      binding: input.binding,
+      text: getSystemCatalog(locale).setup.errorImageDownloadFailed,
+      dedupeKey: `setup-photo-error:${input.binding.key}:${input.runId}`,
+    });
+    return true;
+  }
+
+  const nextSession = advanceSetupSessionWithPhoto({
+    session,
+    referenceImageAsset,
+    locale,
+  });
+  if (nextSession.step === "complete") {
+    await finalizeSetupSession({
+      input: {
+        event: {
+          content: "",
+          channel: input.binding.channel,
+          accountId: input.binding.accountId,
+          conversationId: input.binding.target,
+          parentConversationId: input.binding.parentConversationId,
+          threadId: input.binding.threadId,
+        },
+        ctx: {
+          channelId: input.binding.channel,
+          accountId: input.binding.accountId,
+          conversationId: input.binding.target,
+        },
+        binding: input.binding,
+        state: input.state,
+        trimmed: "",
+      },
+      deps: input.deps,
+      runId: input.runId,
+      session: nextSession,
+      globalConfig: await input.deps.globalConfigRepository.get(),
+      selectedLocale: undefined,
+    });
+    return true;
+  }
+
+  await input.deps.conversationStates.save({
+    ...input.state,
+    setupSession: nextSession,
+    updatedAt: new Date().toISOString(),
+  });
+  await input.deps.messenger.sendTextReply({
+    binding: input.binding,
+    text: renderSetupStepPrompt(nextSession, locale),
+    dedupeKey: `setup-step:${input.binding.key}:${input.runId}`,
   });
   return true;
 }

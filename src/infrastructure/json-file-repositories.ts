@@ -154,7 +154,7 @@ export class JsonConversationStateRepository implements ConversationStateReposit
     );
   }
 
-  async listDueConversations(now: Date): Promise<ConversationCompanionState[]> {
+  async listAll(): Promise<ConversationCompanionState[]> {
     const entries = await readdir(this.conversationsDir, { withFileTypes: true });
     const records = await Promise.all(
       entries
@@ -166,8 +166,13 @@ export class JsonConversationStateRepository implements ConversationStateReposit
         ),
     );
 
-    return records
-      .filter((record): record is ConversationCompanionState => Boolean(record))
+    return records.filter(
+      (record): record is ConversationCompanionState => Boolean(record),
+    );
+  }
+
+  async listDueConversations(now: Date): Promise<ConversationCompanionState[]> {
+    return (await this.listAll())
       .filter((record) => {
         if (record.mode !== "companion-exclusive") {
           return false;

@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { readdir, stat } from "node:fs/promises";
+import { extname, join } from "node:path";
 
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
 import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
@@ -7,6 +8,7 @@ import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
 import {
   ClockPort,
+  ConversationBindingStore,
   GlobalConfigRepository,
   HostMessengerPort,
   LoggerPort,
@@ -27,6 +29,7 @@ import { JsonlFileLogger } from "../infrastructure/jsonl-file-logger.js";
 import { BindingRegistryStore } from "./binding-state.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import { resolveConfiguredGeminiProvider } from "./gemini-provider-config.js";
+import { completeSetupReferencePhotoFromSource } from "./hooks.js";
 import { MessageCommandRunner, NoopSchedulerPort, OpenClawCliMessengerPort } from "./ports.js";
 
 export interface RuntimeBundle {
@@ -36,8 +39,10 @@ export interface RuntimeBundle {
   personaRepository: PersonaRepository;
   globalConfigRepository: GlobalConfigRepository;
   conversationStateRepository: JsonConversationStateRepository;
+  bindings: ConversationBindingStore;
   messenger: HostMessengerPort;
   runtimeDataPaths: RuntimeDataPaths;
+  pluginConfig: TravelCompanionPluginConfig;
   logger: LoggerPort;
 }
 
@@ -272,8 +277,10 @@ export async function createRuntimeBundle(input: {
     personaRepository,
     globalConfigRepository,
     conversationStateRepository,
+    bindings,
     messenger,
     runtimeDataPaths,
+    pluginConfig: input.pluginConfig,
     logger,
   };
 }
@@ -302,6 +309,10 @@ export function startPollingService(input: {
         try {
           await bundle.service.runDueTrips();
           await bundle.conversationService.runDueConversations();
+          await runPendingReferencePhotoFallback({
+            bundle,
+            stateDir: input.stateDir,
+          });
           await bundle.conversationService.runDueIdleGuides();
         } catch (error) {
           input.logger.error(
@@ -336,4 +347,128 @@ export function startPollingService(input: {
       }
     },
   };
+}
+
+type InboundMediaCandidate = {
+  path: string;
+  mtimeMs: number;
+};
+
+const IMAGE_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+
+async function runPendingReferencePhotoFallback(input: {
+  bundle: RuntimeBundle;
+  stateDir: string;
+}): Promise<void> {
+  const states = await input.bundle.conversationStateRepository.listAll();
+  const pendingStates = states.filter(
+    (state) =>
+      state.mode === "companion-exclusive" &&
+      state.setupSession?.kind === "persona" &&
+      state.setupSession.step === "reference_photo" &&
+      state.setupSession.awaitingReferencePhoto,
+  );
+  if (pendingStates.length === 0) {
+    return;
+  }
+
+  const mediaDir = join(input.stateDir, "media", "inbound");
+  const mediaCandidates = await listInboundMediaCandidates(mediaDir);
+  if (mediaCandidates.length === 0) {
+    return;
+  }
+
+  const claimed = new Set<string>();
+  for (const state of pendingStates) {
+    const binding = await input.bundle.bindings.get(state.conversationKey);
+    if (!binding) {
+      continue;
+    }
+
+    const sessionUpdatedAt = new Date(
+      state.setupSession?.updatedAt ?? state.updatedAt,
+    ).getTime();
+    const eligible = mediaCandidates
+      .filter((candidate) => !claimed.has(candidate.path))
+      .filter((candidate) => candidate.mtimeMs >= sessionUpdatedAt - 5_000)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    const candidate = eligible[0];
+    if (!candidate) {
+      continue;
+    }
+
+    claimed.add(candidate.path);
+    await input.bundle.logger.log({
+      tripId: `conversation:${binding.key}`,
+      runId: `setup-photo-fallback:${Date.now()}`,
+      phase: "system",
+      event: "setup.photo.media_fallback.detected",
+      decision:
+        "Detected a newly saved inbound media file while setup was waiting for a reference photo.",
+      provider: "setup-session",
+      status: "success",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: {
+        conversationKey: binding.key,
+        source: candidate.path,
+        mediaAgeMs: Math.max(0, Date.now() - candidate.mtimeMs),
+      },
+    });
+
+    await completeSetupReferencePhotoFromSource({
+      binding,
+      state,
+      deps: {
+        bindings: input.bundle.bindings,
+        conversationService: input.bundle.conversationService,
+        service: input.bundle.service,
+        tripRepository: input.bundle.tripRepository,
+        personaRepository: input.bundle.personaRepository,
+        conversationStates: input.bundle.conversationStateRepository,
+        globalConfigRepository: input.bundle.globalConfigRepository,
+        messenger: input.bundle.messenger,
+        pluginConfig: input.bundle.pluginConfig,
+        runtimeDataPaths: input.bundle.runtimeDataPaths,
+        logger: input.bundle.logger,
+      },
+      runId: `setup-photo-fallback:${Date.now()}`,
+      imageSource: candidate.path,
+      sourceKind: "media-inbound-fallback",
+    });
+  }
+}
+
+async function listInboundMediaCandidates(
+  mediaDir: string,
+): Promise<InboundMediaCandidate[]> {
+  let entries;
+  try {
+    entries = await readdir(mediaDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const candidates = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile())
+      .filter((entry) =>
+        IMAGE_FILE_EXTENSIONS.has(extname(entry.name).toLowerCase()),
+      )
+      .map(async (entry) => {
+        const path = join(mediaDir, entry.name);
+        const fileStat = await stat(path);
+        return {
+          path,
+          mtimeMs: fileStat.mtimeMs,
+        };
+      }),
+  );
+
+  return candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
