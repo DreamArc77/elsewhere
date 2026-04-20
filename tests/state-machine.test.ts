@@ -103,6 +103,48 @@ describe("state machine", () => {
     expect(firstActivityStep?.context?.timing.timeZone).toBe("Asia/Shanghai");
   });
 
+  it("uses Chinese city names when resolving transport time zones", () => {
+    const plan = buildFixtureTripPlan({
+      tripId: "trip-beijing",
+      originCity: "成都",
+      destinationCity: "北京",
+      days: 3,
+    });
+
+    const timeline = buildTimeline(
+      plan,
+      new Date("2026-04-11T08:00:00.000Z"),
+    );
+    const departureStep = timeline.find(
+      (step) => step.stepId === "departing:1:main_departing",
+    );
+
+    expect(departureStep?.scheduledAt).toBe("2026-04-12T00:15:00.000Z");
+    expect(departureStep?.context?.timing.timeZone).toBe("Asia/Shanghai");
+  });
+
+  it("does not queue overdue non-planning steps before a new trip planning step", () => {
+    const plan = buildFixtureTripPlan({
+      tripId: "trip-overdue",
+      originCity: "成都",
+      destinationCity: "北京",
+      days: 3,
+    });
+    const now = new Date("2026-04-12T01:00:00.000Z");
+
+    const timeline = buildTimeline(plan, now);
+
+    expect(timeline[0]?.stepId).toBe("planning:0:planning");
+    expect(
+      timeline
+        .slice(1)
+        .every((step) => new Date(step.scheduledAt).getTime() > now.getTime()),
+    ).toBe(true);
+    expect(
+      timeline.some((step) => step.stepId === "departing:1:main_departing"),
+    ).toBe(false);
+  });
+
   it("creates at least one postcard step per activity", () => {
     const plan = buildPlan(5);
     const activityCount = plan.daily_itinerary.reduce(

@@ -48,7 +48,10 @@ const DEFAULT_SINGLE_SLOT_MINUTES = 30;
 const TIME_ZONE_MAP: Array<[RegExp, string]> = [
   [/tokyo|東京/u, "Asia/Tokyo"],
   [/osaka|kyoto|京都|大阪/u, "Asia/Tokyo"],
-  [/shanghai|上海|beijing|北京|tianjin|天津/u, "Asia/Shanghai"],
+  [
+    /shanghai|上海|beijing|北京|tianjin|天津|qingdao|青岛|chengdu|成都|guangzhou|广州|shenzhen|深圳|hangzhou|杭州|nanjing|南京|xiamen|厦门/u,
+    "Asia/Shanghai",
+  ],
   [/hong\s*kong|香港/u, "Asia/Hong_Kong"],
   [/taipei|台北/u, "Asia/Taipei"],
   [/seoul|首爾|首尔/u, "Asia/Seoul"],
@@ -141,9 +144,6 @@ const STATE_STRATEGIES: Record<string, StateStrategy> = {
 
 function inferTimeZoneFromText(text: string): string {
   const normalized = text.trim().toLowerCase();
-  if (normalized.includes("qingdao")) {
-    return "Asia/Shanghai";
-  }
   for (const [pattern, timeZone] of TIME_ZONE_MAP) {
     if (pattern.test(normalized)) {
       return timeZone;

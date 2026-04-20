@@ -18,7 +18,10 @@ const DEFAULT_SINGLE_SLOT_MINUTES = 30;
 const DESTINATION_TIME_ZONE_MAP: Array<[RegExp, string]> = [
   [/tokyo|東京/u, "Asia/Tokyo"],
   [/osaka|kyoto|京都|大阪/u, "Asia/Tokyo"],
-  [/shanghai|上海|beijing|北京|tianjin|天津|qingdao|青岛/u, "Asia/Shanghai"],
+  [
+    /shanghai|上海|beijing|北京|tianjin|天津|qingdao|青岛|chengdu|成都|guangzhou|广州|shenzhen|深圳|hangzhou|杭州|nanjing|南京|xiamen|厦门/u,
+    "Asia/Shanghai",
+  ],
   [/hong\s*kong|香港/u, "Asia/Hong_Kong"],
   [/taipei|台北/u, "Asia/Taipei"],
   [/seoul|首尔|首爾/u, "Asia/Seoul"],
@@ -1309,9 +1312,23 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
     }),
   );
 
-  return [...syntheticSteps, ...activitySteps].sort((left, right) => {
+  const sortedTimeline = [...syntheticSteps, ...activitySteps].sort((left, right) => {
     const delta =
       new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime();
     return delta !== 0 ? delta : left.stepId.localeCompare(right.stepId);
   });
+  const planningStep = syntheticSteps.find(
+    (step) => step.stepId === toId("planning", 0, "planning"),
+  );
+  if (!planningStep) {
+    return sortedTimeline;
+  }
+
+  const nowMs = now.getTime();
+  const futureSteps = sortedTimeline.filter(
+    (step) =>
+      step.stepId !== planningStep.stepId &&
+      new Date(step.scheduledAt).getTime() > nowMs,
+  );
+  return [planningStep, ...futureSteps];
 }
