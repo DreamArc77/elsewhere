@@ -826,6 +826,73 @@ describe("travel companion inbound takeover hook", () => {
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("/elsewhere setup");
   });
 
+  it("parses feishu locale input from wrapped transcript text", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU789",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU789",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "locale",
+        step: "locale_select",
+        awaitingReferencePhoto: false,
+        draft: {},
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "[message_id: om_xxx]\n梦醒: 1",
+        body: "[message_id: om_xxx]\n梦醒: 1",
+        bodyForAgent: "[message_id: om_xxx]\n梦醒: 1",
+        channel: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_3",
+        senderId: "ou_FEISHU789",
+        messageId: "feishu-locale-wrapped",
+        isGroup: false,
+      },
+      {
+        channelId: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_3",
+        senderId: "ou_FEISHU789",
+        messageId: "feishu-locale-wrapped",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.systemLocale).toBe("zh-CN");
+    expect(state?.setupSession).toBeUndefined();
+  });
+
   it("queues feishu direct messages through before_dispatch using the normalized user target", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

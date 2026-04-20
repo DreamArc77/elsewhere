@@ -219,7 +219,7 @@ export async function handleTravelCompanionInboundClaim(
 
   const rawText =
     event.bodyForAgent ?? event.body ?? event.transcript ?? event.content ?? "";
-  const trimmed = rawText.trim();
+  const trimmed = sanitizeInboundText(rawText);
   return await handleResolvedInboundTakeover(
     {
       event,
@@ -344,7 +344,7 @@ export async function handleTravelCompanionBeforeDispatch(
   }
 
   const rawText = event.body ?? event.content ?? "";
-  const trimmed = rawText.trim();
+  const trimmed = sanitizeInboundText(rawText);
   if (trimmed.startsWith("/")) {
     return;
   }
@@ -1665,6 +1665,24 @@ function normalizeRoutePart(value: string | number | undefined): string | null {
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const normalized = normalizeRoutePart(value);
   return normalized ?? undefined;
+}
+
+function sanitizeInboundText(value: string): string {
+  const lines = value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^\[message_id:\s*[^\]]+\]$/iu.test(line));
+
+  const candidate = lines.length > 0 ? lines.at(-1)! : value.trim();
+  const speakerPrefixMatch = candidate.match(/^([^\s:：]{1,32})[:：]\s*(.+)$/u);
+  if (speakerPrefixMatch) {
+    const messageText = speakerPrefixMatch[2];
+    if (messageText) {
+      return messageText.trim();
+    }
+  }
+  return candidate.trim();
 }
 
 function isOfficialConversationBinding(
