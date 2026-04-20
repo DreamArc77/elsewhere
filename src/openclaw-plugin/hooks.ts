@@ -82,6 +82,26 @@ interface InboundClaimResult {
   handled: boolean;
 }
 
+interface BeforeDispatchEvent {
+  content: string;
+  body?: string;
+  channel?: string;
+  senderId?: string;
+  isGroup?: boolean;
+}
+
+interface BeforeDispatchContext {
+  channelId?: string;
+  accountId?: string;
+  conversationId?: string;
+  senderId?: string;
+}
+
+interface BeforeDispatchResult {
+  handled: boolean;
+  text?: string;
+}
+
 interface InboundClaimDependencies {
   bindings: ConversationBindingStore;
   conversationService: CompanionConversationService;
@@ -142,27 +162,122 @@ export async function handleTravelCompanionInboundClaim(
   ctx: InboundClaimContext,
   deps: InboundClaimDependencies,
 ): Promise<InboundClaimResult | void> {
-  const rawText =
-    event.bodyForAgent ?? event.body ?? event.transcript ?? event.content ?? "";
-  const trimmed = rawText.trim();
-  const binding =
-    (await resolveBindingForInbound(event, ctx, deps.bindings)) ??
-    (await recoverBindingForInbound(event, ctx, deps));
+  const binding = await resolveConversationBindingForHandling(event, ctx, deps);
   if (!binding) {
     await logBindingLookupMiss(event, ctx, deps.logger);
     return;
   }
 
+  const rawText =
+    event.bodyForAgent ?? event.body ?? event.transcript ?? event.content ?? "";
+  const trimmed = rawText.trim();
+  return await handleResolvedInboundTakeover(
+    {
+      event,
+      ctx,
+      binding,
+      trimmed,
+    },
+    deps,
+  );
+}
+
+export async function handleTravelCompanionBeforeDispatch(
+  event: BeforeDispatchEvent,
+  ctx: BeforeDispatchContext,
+  deps: InboundClaimDependencies,
+): Promise<BeforeDispatchResult | void> {
+  const channel = event.channel ?? ctx.channelId;
+  if (!channel) {
+    return;
+  }
+
+  const rawText = event.body ?? event.content ?? "";
+  const trimmed = rawText.trim();
+  if (!trimmed || trimmed.startsWith("/")) {
+    return;
+  }
+
+  const syntheticEvent: InboundClaimEvent = {
+    content: event.content,
+    body: event.body,
+    bodyForAgent: event.body,
+    channel,
+    accountId: ctx.accountId,
+    conversationId: ctx.conversationId,
+    senderId: event.senderId ?? ctx.senderId,
+    isGroup: event.isGroup ?? false,
+  };
+  const syntheticContext: InboundClaimContext = {
+    channelId: channel,
+    accountId: ctx.accountId,
+    conversationId: ctx.conversationId,
+    senderId: event.senderId ?? ctx.senderId,
+  };
+  const binding = await resolveConversationBindingForHandling(
+    syntheticEvent,
+    syntheticContext,
+    deps,
+  );
+  if (!binding) {
+    return;
+  }
+
   const state = await deps.conversationStates.getByKey(binding.key);
+  if (!state?.setupSession && binding.mode !== "companion-exclusive") {
+    return;
+  }
+
+  const handled = await handleResolvedInboundTakeover(
+    {
+      event: syntheticEvent,
+      ctx: syntheticContext,
+      binding,
+      trimmed,
+      state,
+    },
+    deps,
+  );
+  if (handled?.handled) {
+    return { handled: true };
+  }
+}
+
+async function resolveConversationBindingForHandling(
+  event: InboundClaimEvent,
+  ctx: InboundClaimContext,
+  deps: Pick<
+    InboundClaimDependencies,
+    "bindings" | "conversationStates" | "logger"
+  >,
+): Promise<ConversationBindingRecord | null> {
+  return (
+    (await resolveBindingForInbound(event, ctx, deps.bindings)) ??
+    (await recoverBindingForInbound(event, ctx, deps))
+  );
+}
+
+async function handleResolvedInboundTakeover(
+  input: {
+    event: InboundClaimEvent;
+    ctx: InboundClaimContext;
+    binding: ConversationBindingRecord;
+    trimmed: string;
+    state?: Awaited<ReturnType<ConversationStateRepository["getByKey"]>>;
+  },
+  deps: InboundClaimDependencies,
+): Promise<InboundClaimResult | void> {
+  const state =
+    input.state ?? (await deps.conversationStates.getByKey(input.binding.key));
 
   if (state?.setupSession) {
     const handled = await handleSetupSessionInbound(
       {
-        event,
-        ctx,
-        binding,
+        event: input.event,
+        ctx: input.ctx,
+        binding: input.binding,
         state,
-        trimmed,
+        trimmed: input.trimmed,
       },
       deps,
     );
@@ -171,24 +286,30 @@ export async function handleTravelCompanionInboundClaim(
     }
   }
 
-  if (isSupportedSlashCommand(trimmed)) {
-    const normalizedCommandBody = normalizeSupportedSlashCommand(rawText);
-    const messageId = String(event.messageId ?? "");
+  if (isSupportedSlashCommand(input.trimmed)) {
+    const normalizedCommandBody = normalizeSupportedSlashCommand(
+      input.event.bodyForAgent ??
+        input.event.body ??
+        input.event.transcript ??
+        input.event.content ??
+        "",
+    );
+    const messageId = String(input.event.messageId ?? "");
     const duplicateByMessageId =
       messageId.length > 0
         ? await deps.conversationService.isInboundCommandDuplicate({
-            conversationKey: binding.key,
+            conversationKey: input.binding.key,
             messageId,
           })
         : false;
     const inFlightKey =
       messageId.length > 0
-        ? `${binding.key}:${messageId}`
-        : `${binding.key}:${normalizedCommandBody}`;
-    const inFlightBodyKey = `${binding.key}:${normalizedCommandBody}`;
+        ? `${input.binding.key}:${messageId}`
+        : `${input.binding.key}:${normalizedCommandBody}`;
+    const inFlightBodyKey = `${input.binding.key}:${normalizedCommandBody}`;
     if (duplicateByMessageId || inFlightCommandKeys.has(inFlightKey) || inFlightCommandBodies.has(inFlightBodyKey)) {
       await logCommandBridgeEvent(deps.logger, {
-        binding,
+        binding: input.binding,
         runId: `command:${messageId || randomUUID()}`,
         event: "command.bridge.duplicate",
         decision:
@@ -198,7 +319,7 @@ export async function handleTravelCompanionInboundClaim(
         details: {
           commandBody: normalizedCommandBody,
           messageId,
-          mode: binding.mode,
+          mode: input.binding.mode,
           duplicateByMessageId,
         },
       });
@@ -207,10 +328,10 @@ export async function handleTravelCompanionInboundClaim(
 
     inFlightCommandKeys.add(inFlightKey);
     inFlightCommandBodies.add(inFlightBodyKey);
-    const commandRunId = `command:${String(event.messageId ?? randomUUID())}`;
+    const commandRunId = `command:${String(input.event.messageId ?? randomUUID())}`;
     try {
       await logCommandBridgeEvent(deps.logger, {
-        binding,
+        binding: input.binding,
         runId: commandRunId,
         event: "command.bridge.received",
         decision: "Received a companion slash command inside a companion-exclusive conversation.",
@@ -219,13 +340,17 @@ export async function handleTravelCompanionInboundClaim(
         details: {
           commandBody: normalizedCommandBody,
           messageId,
-          mode: binding.mode,
+          mode: input.binding.mode,
         },
       });
 
       const commandStartedAt = Date.now();
       const reply = await handleTravelCompanionCommand(
-        buildSyntheticCommandContext(event, ctx, normalizedCommandBody),
+        buildSyntheticCommandContext(
+          input.event,
+          input.ctx,
+          normalizedCommandBody,
+        ),
         {
           service: deps.service,
           conversationService: deps.conversationService,
@@ -241,7 +366,7 @@ export async function handleTravelCompanionInboundClaim(
         },
       );
       await logCommandBridgeEvent(deps.logger, {
-        binding,
+        binding: input.binding,
         runId: commandRunId,
         event: "command.bridge.executed",
         decision: "Executed the bridged companion slash command.",
@@ -257,12 +382,12 @@ export async function handleTravelCompanionInboundClaim(
 
       const replyStartedAt = Date.now();
       await deps.messenger.sendTextReply({
-        binding,
+        binding: input.binding,
         text: reply.text,
-        dedupeKey: `command:${binding.key}:${String(event.messageId ?? randomUUID())}`,
+        dedupeKey: `command:${input.binding.key}:${String(input.event.messageId ?? randomUUID())}`,
       });
       await logCommandBridgeEvent(deps.logger, {
-        binding,
+        binding: input.binding,
         runId: commandRunId,
         event: "command.bridge.replied",
         decision: "Delivered bridged slash-command output back into the bound conversation.",
@@ -276,12 +401,12 @@ export async function handleTravelCompanionInboundClaim(
         },
       });
       await deps.conversationService.rememberHandledInboundCommand({
-        conversationKey: binding.key,
+        conversationKey: input.binding.key,
         messageId: messageId || undefined,
       });
     } catch (error) {
       await logCommandBridgeEvent(deps.logger, {
-        binding,
+        binding: input.binding,
         runId: commandRunId,
         event: "command.bridge.reply_failed",
         decision: "Failed to deliver bridged slash-command output back into the bound conversation.",
@@ -304,21 +429,21 @@ export async function handleTravelCompanionInboundClaim(
     return { handled: true };
   }
 
-  if (binding.mode !== "companion-exclusive") {
+  if (input.binding.mode !== "companion-exclusive") {
     return;
   }
 
-  if (trimmed.startsWith("/")) {
+  if (input.trimmed.startsWith("/")) {
     return;
   }
 
   await deps.conversationService.claimInboundMessage({
-    binding,
-    messageId: String(event.messageId ?? randomUUID()),
-    content: trimmed,
-    senderId: event.senderId ?? ctx.senderId,
-    senderName: event.senderName,
-    senderUsername: event.senderUsername,
+    binding: input.binding,
+    messageId: String(input.event.messageId ?? randomUUID()),
+    content: input.trimmed,
+    senderId: input.event.senderId ?? input.ctx.senderId,
+    senderName: input.event.senderName,
+    senderUsername: input.event.senderUsername,
   });
 
   return { handled: true };

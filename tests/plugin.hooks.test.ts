@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  handleTravelCompanionBeforeDispatch,
   handleTravelCompanionInboundClaim,
   setConversationBindingInternalsForTests,
 } from "../src/openclaw-plugin/hooks.js";
@@ -644,6 +645,116 @@ describe("travel companion inbound takeover hook", () => {
     const state = await runtime.conversationStateRepository.getByKey(key);
     expect(state?.systemLocale).toBe("zh-CN");
     expect(state?.setupSession).toBeUndefined();
+  });
+
+  it("continues qqbot locale setup through before_dispatch when soft binding is local-only", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER789",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER789",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "locale",
+        step: "locale_select",
+        awaitingReferencePhoto: false,
+        draft: {},
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionBeforeDispatch(
+      {
+        content: "1",
+        body: "1",
+        channel: "qqbot",
+        senderId: "USER789",
+        isGroup: false,
+      },
+      {
+        channelId: "qqbot",
+        accountId: "default",
+        conversationId: undefined,
+        senderId: "USER789",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.systemLocale).toBe("zh-CN");
+    expect(state?.setupSession).toBeUndefined();
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("/elsewhere setup");
+  });
+
+  it("queues qqbot companion text through before_dispatch when the conversation is soft-bound", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER999",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER999",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationService.activateConversation({
+      key,
+      channel: "qqbot",
+      accountId: "default",
+      target: "qqbot:c2c:USER999",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+
+    const result = await handleTravelCompanionBeforeDispatch(
+      {
+        content: "在吗",
+        body: "在吗",
+        channel: "qqbot",
+        senderId: "USER999",
+        isGroup: false,
+      },
+      {
+        channelId: "qqbot",
+        accountId: "default",
+        senderId: "USER999",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.pendingUserMessages).toHaveLength(1);
+    expect(state?.pendingUserMessages[0]?.content).toBe("在吗");
   });
 
   it("accepts the next inbound image from inbound metadata as setup reference photo", async () => {
