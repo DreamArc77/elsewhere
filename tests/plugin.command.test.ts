@@ -218,6 +218,39 @@ describe("travel companion command UX", () => {
     expect(binding?.bindingId).toBeUndefined();
   });
 
+  it("uses telegram senderId as the local binding target when command routing points at the bot", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+    const [, ...rest] = "/elsewhere activate".trim().split(/\s+/u);
+
+    const reply = await handleTravelCompanionCommand(
+      {
+        senderId: "1459473177",
+        channel: "telegram",
+        isAuthorizedSender: true,
+        args: rest.join(" "),
+        commandBody: "/elsewhere activate",
+        config: {} as PluginCommandContext["config"],
+        from: "telegram:8571518412",
+        to: "telegram:8571518412",
+        accountId: "default",
+        requestConversationBinding: async () => ({
+          status: "pending" as const,
+          approvalId: "pending-approval-id",
+          reply: { text: "pending approval" },
+        }),
+        detachConversationBinding: async () => ({ removed: true }),
+        getCurrentConversationBinding: async () => null,
+      },
+      createDeps(runtime, bindings),
+    );
+
+    expect(reply.isError).toBeUndefined();
+    const binding = await bindings.get(keyForDefaultChat());
+    expect(binding?.target).toBe("1459473177");
+    expect(binding?.mode).toBe("companion-exclusive");
+  });
+
   it("shows onboarding gate after locale is selected", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);

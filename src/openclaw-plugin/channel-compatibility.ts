@@ -4,14 +4,15 @@ export function inferConversationTargetForCommand(input: {
   to?: string | null;
   senderId?: string | null;
 }): string | null {
-  const from = normalizeRoutePart(input.from ?? input.senderId);
+  const senderId = normalizeRoutePart(input.senderId);
+  const from = normalizeRoutePart(input.from);
   const to = normalizeRoutePart(input.to);
 
   if (input.channel === "telegram") {
     if (to?.startsWith("-")) {
       return to;
     }
-    return from ?? to;
+    return senderId ?? from ?? to;
   }
 
   if (input.channel === "feishu") {
@@ -23,10 +24,10 @@ export function inferConversationTargetForCommand(input: {
     if (openId) {
       return `user:${openId}`;
     }
-    return from ?? to;
+    return from ?? to ?? senderId;
   }
 
-  return to ?? from;
+  return to ?? from ?? senderId;
 }
 
 export function buildInboundTargetCandidates(input: {
