@@ -220,9 +220,10 @@ export async function handleTravelCompanionInboundClaim(
     return;
   }
 
+  const channel = event.channel ?? ctx.channelId;
   const rawText =
     event.bodyForAgent ?? event.body ?? event.transcript ?? event.content ?? "";
-  const trimmed = sanitizeInboundText(rawText);
+  const trimmed = sanitizeInboundText(channel, rawText);
   return await handleResolvedInboundTakeover(
     {
       event,
@@ -347,7 +348,7 @@ export async function handleTravelCompanionBeforeDispatch(
   }
 
   const rawText = event.body ?? event.content ?? "";
-  const trimmed = sanitizeInboundText(rawText);
+  const trimmed = sanitizeInboundText(channel, rawText);
   if (trimmed.startsWith("/")) {
     return;
   }
@@ -1391,7 +1392,7 @@ function shouldStartReferencePhotoProbe(
     return true;
   }
 
-  if (/^<media:[^>]+>$/iu.test(trimmedText)) {
+  if (shouldPreserveMediaPlaceholder(event.channel, trimmedText)) {
     return true;
   }
 
@@ -1743,7 +1744,10 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return normalized ?? undefined;
 }
 
-function sanitizeInboundText(value: string): string {
+function sanitizeInboundText(
+  channel: string | undefined,
+  value: string,
+): string {
   const lines = value
     .split(/\r?\n/u)
     .map((line) => line.trim())
@@ -1751,7 +1755,7 @@ function sanitizeInboundText(value: string): string {
     .filter((line) => !/^\[message_id:\s*[^\]]+\]$/iu.test(line));
 
   const candidate = lines.length > 0 ? lines.at(-1)! : value.trim();
-  if (/^<media:[^>]+>$/iu.test(candidate)) {
+  if (shouldPreserveMediaPlaceholder(channel, candidate)) {
     return candidate.trim();
   }
   const speakerPrefixMatch = candidate.match(/^([^\s:：]{1,32})[:：]\s*(.+)$/u);
@@ -1762,6 +1766,23 @@ function sanitizeInboundText(value: string): string {
     }
   }
   return candidate.trim();
+}
+
+function shouldPreserveMediaPlaceholder(
+  channel: string | undefined,
+  value: string,
+): boolean {
+  if (!/^<media:[^>]+>$/iu.test(value.trim())) {
+    return false;
+  }
+
+  const normalizedChannel = channel?.trim().toLowerCase();
+  return (
+    normalizedChannel === "telegram" ||
+    normalizedChannel === "openclaw-weixin" ||
+    normalizedChannel === "weixin" ||
+    normalizedChannel === "wechat"
+  );
 }
 
 function isOfficialConversationBinding(
