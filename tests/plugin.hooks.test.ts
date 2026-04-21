@@ -201,6 +201,12 @@ describe("travel companion inbound takeover hook", () => {
       boundAt: Date.now(),
       mode: "companion-exclusive",
     });
+    await runtime.conversationStateRepository.save({
+      ...(await runtime.conversationStateRepository.getByKey(key))!,
+      systemLocale: "zh-CN",
+      setupSession: undefined,
+      updatedAt: new Date().toISOString(),
+    });
 
     const result = await handleTravelCompanionInboundClaim(
       {
@@ -227,8 +233,12 @@ describe("travel companion inbound takeover hook", () => {
 
     expect(result).toEqual({ handled: true });
     const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.pendingUserMessages).toHaveLength(1);
-    expect(state?.pendingUserMessages[0]?.messageId).toBe("msg-route");
+    expect(state?.lastUserMessageAt).toBeTruthy();
+    expect(
+      state?.recentTurns.some(
+        (turn) => turn.role === "user" && turn.text === "where are you",
+      ),
+    ).toBe(true);
   });
 
   it("bridges travel-companion slash commands inside companion-exclusive conversations", async () => {
@@ -740,6 +750,12 @@ describe("travel companion inbound takeover hook", () => {
       boundAt: Date.now(),
       mode: "companion-exclusive",
     });
+    await runtime.conversationStateRepository.save({
+      ...(await runtime.conversationStateRepository.getByKey(key))!,
+      systemLocale: "zh-CN",
+      setupSession: undefined,
+      updatedAt: new Date().toISOString(),
+    });
 
     const result = await handleTravelCompanionBeforeDispatch(
       {
@@ -759,8 +775,12 @@ describe("travel companion inbound takeover hook", () => {
 
     expect(result).toEqual({ handled: true });
     const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.pendingUserMessages).toHaveLength(1);
-    expect(state?.pendingUserMessages[0]?.content).toBe("在吗");
+    expect(state?.lastUserMessageAt).toBeTruthy();
+    expect(
+      state?.recentTurns.some(
+        (turn) => turn.role === "user" && turn.text === "在吗",
+      ),
+    ).toBe(true);
   });
 
   it("continues feishu locale setup when the inbound sender id needs user: normalization", async () => {
@@ -887,6 +907,73 @@ describe("travel companion inbound takeover hook", () => {
         conversationId: "oc_direct_session_3",
         senderId: "ou_FEISHU789",
         messageId: "feishu-locale-wrapped",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.systemLocale).toBe("zh-CN");
+    expect(state?.setupSession).toBeUndefined();
+  });
+
+  it("parses feishu locale input from sender-id transcript text", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU999",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHU999",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "locale",
+        step: "locale_select",
+        awaitingReferencePhoto: false,
+        draft: {},
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "ou_FEISHU999: 1",
+        body: "ou_FEISHU999: 1",
+        bodyForAgent: "ou_FEISHU999: 1",
+        channel: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_sender_prefix",
+        senderId: "ou_FEISHU999",
+        messageId: "feishu-locale-sender-prefix",
+        isGroup: false,
+      },
+      {
+        channelId: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_sender_prefix",
+        senderId: "ou_FEISHU999",
+        messageId: "feishu-locale-sender-prefix",
       },
       createInboundDeps(runtime),
     );

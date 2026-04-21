@@ -1748,24 +1748,18 @@ function sanitizeInboundText(
   channel: string | undefined,
   value: string,
 ): string {
-  const lines = value
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !/^\[message_id:\s*[^\]]+\]$/iu.test(line));
-
-  const candidate = lines.length > 0 ? lines.at(-1)! : value.trim();
-  if (shouldPreserveMediaPlaceholder(channel, candidate)) {
-    return candidate.trim();
+  const normalizedChannel = channel?.trim().toLowerCase();
+  switch (normalizedChannel) {
+    case "feishu":
+      return sanitizeFeishuInboundText(value);
+    case "telegram":
+    case "openclaw-weixin":
+    case "weixin":
+    case "wechat":
+      return sanitizeMediaPlaceholderAwareInboundText(channel, value);
+    default:
+      return sanitizeDefaultInboundText(value);
   }
-  const speakerPrefixMatch = candidate.match(/^([^\s:：]{1,32})[:：]\s*(.+)$/u);
-  if (speakerPrefixMatch) {
-    const messageText = speakerPrefixMatch[2];
-    if (messageText) {
-      return messageText.trim();
-    }
-  }
-  return candidate.trim();
 }
 
 function shouldPreserveMediaPlaceholder(
@@ -1783,6 +1777,56 @@ function shouldPreserveMediaPlaceholder(
     normalizedChannel === "weixin" ||
     normalizedChannel === "wechat"
   );
+}
+
+function sanitizeDefaultInboundText(value: string): string {
+  const candidate = extractInboundCandidateLine(value);
+  const speakerPrefixMatch = candidate.match(/^([^\s:：]{1,32})[:：]\s*(.+)$/u);
+  if (speakerPrefixMatch) {
+    const messageText = speakerPrefixMatch[2];
+    if (messageText) {
+      return messageText.trim();
+    }
+  }
+  return candidate.trim();
+}
+
+function sanitizeMediaPlaceholderAwareInboundText(
+  channel: string | undefined,
+  value: string,
+): string {
+  const candidate = extractInboundCandidateLine(value);
+  if (shouldPreserveMediaPlaceholder(channel, candidate)) {
+    return candidate.trim();
+  }
+  return sanitizeDefaultInboundText(value);
+}
+
+function sanitizeFeishuInboundText(value: string): string {
+  const candidate = extractInboundCandidateLine(value);
+  const senderIdPrefixMatch = candidate.match(
+    /^((?:user:)?ou_[^:：\s]+)[:：]\s*(.+)$/u,
+  );
+  if (senderIdPrefixMatch?.[2]) {
+    return senderIdPrefixMatch[2].trim();
+  }
+
+  const speakerPrefixMatch = candidate.match(/^([^\s:：]{1,64})[:：]\s*(.+)$/u);
+  if (speakerPrefixMatch?.[2]) {
+    return speakerPrefixMatch[2].trim();
+  }
+
+  return candidate.trim();
+}
+
+function extractInboundCandidateLine(value: string): string {
+  const lines = value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^\[message_id:\s*[^\]]+\]$/iu.test(line));
+
+  return lines.length > 0 ? lines.at(-1)! : value.trim();
 }
 
 function isOfficialConversationBinding(
