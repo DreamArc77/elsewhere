@@ -117,7 +117,11 @@ export async function renderCaptionPrompt(input: {
   currentSituation: string;
   recentImageSummary: string;
 }): Promise<string> {
-  const template = await loadTemplate("compose-caption.md");
+  const template = await loadTemplate(
+    input.resolvedState.stage.substate === "planning" || input.phase === "planning"
+      ? "compose-caption-planning.md"
+      : "compose-caption.md",
+  );
   return renderTemplate(template, {
     personaSummary: buildPersonaSummary(input.persona),
     phase: input.phase,

@@ -526,6 +526,31 @@ export class CompanionConversationService {
       },
     });
 
+    if (new Date(dueAt).getTime() <= this.dependencies.clock.now().getTime()) {
+      await this.log({
+        tripId: activeTrip?.tripId ?? `conversation:${input.binding.key}`,
+        runId: randomUUID(),
+        phase: activeTrip?.state.currentPhase ?? "system",
+        event: "reply.dispatch_immediate",
+        decision:
+          "Triggered immediate reply processing because the queued message was due now.",
+        provider: "conversation-service",
+        status: "success",
+        startedAt,
+        finishedAt: nowIso(this.dependencies.clock),
+        details: {
+          conversationKey: input.binding.key,
+          messageId: input.messageId,
+          replyDueAt: dueAt,
+          mode: input.binding.mode,
+        },
+      });
+
+      return await this.runConversation(input.binding.key, {
+        ignoreSchedule: true,
+      });
+    }
+
     return nextState;
   }
 

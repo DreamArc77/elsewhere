@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  renderCaptionPrompt,
   renderCompanionReplyPrompt,
   renderDestinationAcknowledgementPrompt,
 } from "../src/prompting/travel-companion-prompts.js";
@@ -60,5 +61,54 @@ describe("reply prompt", () => {
     expect(prompt).toContain("Tokyo");
     expect(prompt).toContain("checking tickets/routes");
     expect(prompt).toContain("Do not say you are packing");
+  });
+
+  it("uses a dedicated planning caption prompt for planning postcards", async () => {
+    const prompt = await renderCaptionPrompt({
+      persona,
+      request: {
+        originCity: "Osaka",
+        destinationCity: "Seoul",
+      } as never,
+      phase: "planning",
+      day: 0,
+      stepContext: {
+        kind: "planning",
+        phase: "planning",
+        day: 0,
+        date: "2026-04-21",
+        theme: "planning",
+        activityIndex: 0,
+        isExtraMessage: false,
+        sendMoment: "summary",
+        timing: {
+          startAt: "2026-04-21T20:00:00.000Z",
+          endAt: "2026-04-21T20:30:00.000Z",
+          timeZone: "Asia/Tokyo",
+          localStartLabel: "20:00",
+          localEndLabel: "20:30",
+        },
+        activity: {
+          location: "Planning trip in Osaka",
+          description: "Checking tickets and routes for Seoul.",
+        },
+        previousActivity: null,
+        nextActivity: null,
+      } as never,
+      grounding: {
+        locality: "Planning trip in Osaka",
+      } as never,
+      resolvedState: {
+        stage: {
+          substate: "planning",
+        },
+      } as never,
+      currentSituation: "当前阶段：planning",
+      recentImageSummary: "No recent photo was sent.",
+    });
+
+    expect(prompt).toContain("You are still in the planning stage at home.");
+    expect(prompt).toContain("Do not say you are packing");
+    expect(prompt).toContain("checking tickets");
   });
 });
