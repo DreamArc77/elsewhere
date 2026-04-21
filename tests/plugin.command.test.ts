@@ -193,7 +193,7 @@ describe("travel companion command UX", () => {
     expect(state?.setupSession?.kind).toBe("locale");
   });
 
-  it("falls back to local soft binding when official binding approval stays pending", async () => {
+  it("does not activate before official binding approval succeeds", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
 
@@ -209,46 +209,39 @@ describe("travel companion command UX", () => {
       createDeps(runtime, bindings),
     );
 
-    expect(reply.isError).toBeUndefined();
-    expect(reply.text).toContain("Choose system language");
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain("approvalId: pending-approval-id");
 
     const binding = await bindings.get(keyForDefaultChat());
-    expect(binding?.mode).toBe("companion-exclusive");
-    expect(binding?.bindingSource).toBe("local");
-    expect(binding?.bindingId).toBeUndefined();
+    expect(binding).toBeNull();
+    const state = await runtime.conversationStateRepository.getByKey(
+      keyForDefaultChat(),
+    );
+    expect(state).toBeNull();
   });
 
-  it("uses telegram senderId as the local binding target when command routing points at the bot", async () => {
+  it("does not treat a local-only companion-exclusive record as an active conversation", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
-    const [, ...rest] = "/elsewhere activate".trim().split(/\s+/u);
+    await bindings.upsert({
+      key: keyForDefaultChat(),
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
 
     const reply = await handleTravelCompanionCommand(
-      {
-        senderId: "1459473177",
-        channel: "telegram",
-        isAuthorizedSender: true,
-        args: rest.join(" "),
-        commandBody: "/elsewhere activate",
-        config: {} as PluginCommandContext["config"],
-        from: "telegram:8571518412",
-        to: "telegram:8571518412",
-        accountId: "default",
-        requestConversationBinding: async () => ({
-          status: "pending" as const,
-          approvalId: "pending-approval-id",
-          reply: { text: "pending approval" },
-        }),
-        detachConversationBinding: async () => ({ removed: true }),
+      createTelegramContext("/elsewhere setup", {
         getCurrentConversationBinding: async () => null,
-      },
+      }),
       createDeps(runtime, bindings),
     );
 
-    expect(reply.isError).toBeUndefined();
-    const binding = await bindings.get(keyForDefaultChat());
-    expect(binding?.target).toBe("1459473177");
-    expect(binding?.mode).toBe("companion-exclusive");
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain("activate");
   });
 
   it("shows onboarding gate after locale is selected", async () => {

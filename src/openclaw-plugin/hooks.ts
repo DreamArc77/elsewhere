@@ -520,6 +520,7 @@ async function handleResolvedInboundTakeover(
           input.event,
           input.ctx,
           normalizedCommandBody,
+          input.binding,
         ),
         {
           service: deps.service,
@@ -1487,6 +1488,7 @@ function buildSyntheticCommandContext(
   event: InboundClaimEvent,
   ctx: InboundClaimContext,
   rawText: string,
+  binding?: ConversationBindingRecord,
 ) {
   const [, ...rest] = rawText.trim().split(/\s+/u);
   const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -1526,11 +1528,23 @@ function buildSyntheticCommandContext(
         pluginRoot,
         conversation,
       }),
-    getCurrentConversationBinding: async () =>
-      (await bindingInternals).getCurrentPluginConversationBinding({
+    getCurrentConversationBinding: async () => {
+      if (binding && (binding.bindingSource === "official" || binding.bindingId)) {
+        return {
+          bindingId: binding.bindingId,
+          channel: binding.channel,
+          accountId: binding.accountId,
+          conversationId: binding.target,
+          parentConversationId: binding.parentConversationId,
+          threadId: binding.threadId,
+          boundAt: binding.boundAt,
+        };
+      }
+      return (await bindingInternals).getCurrentPluginConversationBinding({
         pluginRoot,
         conversation,
-      }),
+      });
+    },
   } as unknown as PluginCommandContext;
 }
 
