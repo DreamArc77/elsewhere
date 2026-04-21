@@ -30,6 +30,7 @@ export interface SystemLocaleCatalog {
     activateFirst: string;
     notActiveYet: string;
     approvalRequired(approvalId: string): string;
+    runtimeTooOld(input: { currentVersion: string; minimumVersion: string }): string;
     startCreated(input: {
       tripId: string;
       destination: string;

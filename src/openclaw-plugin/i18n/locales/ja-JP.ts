@@ -69,6 +69,15 @@ export const jaJP: SystemLocaleCatalog = {
         "承認後、もう一度 /elsewhere activate を実行してください。",
       ].join("\n");
     },
+    runtimeTooOld({ currentVersion, minimumVersion }): string {
+      return [
+        "銇撱伄 OpenClaw 銇儛銉笺偢銉с儳銉炪伅 elsewhere 銈掍娇銇嗐伀銇彜銇欍亱銇ｃ仹銇欍€?",
+        `鐝惧湪銇儛銉笺偢銉с儳銉?: ${currentVersion}`,
+        `蹇呰銇儛銉笺偢銉с儳銉?: ${minimumVersion} 浠ヤ笂`,
+        "openclaw update 銈掑疅琛屻仐銇︺亸銇犮仌銇勩€?",
+        "銇濄伄寰屻€乬ateway 銈掑啀璧峰嫊銇椼€?/elsewhere activate 銈掕│銇椺亗銇椼仸銇忋仩銇曘亜銆?",
+      ].join("\n");
+    },
     startCreated({ tripId, destination, days }): string {
       return [
         `旅行を作成しました: ${tripId}`,

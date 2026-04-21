@@ -65,6 +65,15 @@ export const zhCN: SystemLocaleCatalog = {
         "批准后，再运行一次 /elsewhere activate。",
       ].join("\n");
     },
+    runtimeTooOld({ currentVersion, minimumVersion }): string {
+      return [
+        "当前 OpenClaw 版本过低，暂时无法使用 elsewhere。",
+        `当前版本：${currentVersion}`,
+        `最低要求：${minimumVersion} 或更高版本`,
+        "请先运行：openclaw update",
+        "更新后重启 gateway，再重新执行 /elsewhere activate。",
+      ].join("\n");
+    },
     startCreated({ tripId, destination, days }): string {
       return [
         `行程已创建：${tripId}`,

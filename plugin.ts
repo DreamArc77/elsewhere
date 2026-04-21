@@ -92,6 +92,7 @@ export default definePluginEntry({
           messenger: runtimeBundle.messenger,
           pluginConfig,
           runtimeDataPaths: runtimeBundle.runtimeDataPaths,
+          runtimeVersion: api.runtime.version,
           logger: runtimeBundle.logger,
         });
       } catch (error) {
@@ -118,6 +119,7 @@ export default definePluginEntry({
           messenger: runtimeBundle.messenger,
           pluginConfig,
           runtimeDataPaths: runtimeBundle.runtimeDataPaths,
+          runtimeVersion: api.runtime.version,
           logger: runtimeBundle.logger,
         });
       } catch (error) {
@@ -156,6 +158,7 @@ export default definePluginEntry({
               bindings,
               pluginConfig,
               runtimeDataPaths: runtimeBundle.runtimeDataPaths,
+              runtimeVersion: api.runtime.version,
               logger: runtimeBundle.logger,
             });
           } catch (error) {

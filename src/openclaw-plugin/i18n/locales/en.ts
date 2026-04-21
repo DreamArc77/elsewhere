@@ -69,6 +69,15 @@ export const en: SystemLocaleCatalog = {
         "Approve it, then run /elsewhere activate again.",
       ].join("\n");
     },
+    runtimeTooOld({ currentVersion, minimumVersion }): string {
+      return [
+        "This OpenClaw version is too old for elsewhere.",
+        `Current version: ${currentVersion}`,
+        `Required version: ${minimumVersion} or newer`,
+        "Please run: openclaw update",
+        "Then restart the gateway and run /elsewhere activate again.",
+      ].join("\n");
+    },
     startCreated({ tripId, destination, days }): string {
       return [
         `Trip created: ${tripId}`,

@@ -162,6 +162,7 @@ export interface InboundClaimDependencies {
   messenger: HostMessengerPort;
   pluginConfig: TravelCompanionPluginConfig;
   runtimeDataPaths: RuntimeDataPaths;
+  runtimeVersion?: string;
   logger: LoggerPort;
 }
 
@@ -532,6 +533,7 @@ async function handleResolvedInboundTakeover(
           bindings: deps.bindings,
           pluginConfig: deps.pluginConfig,
           runtimeDataPaths: deps.runtimeDataPaths,
+          runtimeVersion: deps.runtimeVersion,
           logger: deps.logger,
         },
       );

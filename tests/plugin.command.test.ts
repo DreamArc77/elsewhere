@@ -14,6 +14,7 @@ import { createTestRuntime } from "./helpers/runtime.js";
 function createDeps(
   runtime: Awaited<ReturnType<typeof createTestRuntime>>,
   bindings: BindingRegistryStore,
+  options?: { runtimeVersion?: string },
 ) {
   return {
     service: runtime.service,
@@ -32,6 +33,7 @@ function createDeps(
       logMode: "safe" as const,
     },
     runtimeDataPaths: runtime.paths,
+    runtimeVersion: options?.runtimeVersion ?? "2026.4.9",
     logger: runtime.logger,
   };
 }
@@ -191,6 +193,22 @@ describe("travel companion command UX", () => {
       keyForDefaultChat(),
     );
     expect(state?.setupSession?.kind).toBe("locale");
+  });
+
+  it("blocks activate on unsupported OpenClaw versions", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/elsewhere activate"),
+      createDeps(runtime, bindings, { runtimeVersion: "2026.3.23" }),
+    );
+
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain("openclaw update");
+
+    const binding = await bindings.get(keyForDefaultChat());
+    expect(binding).toBeNull();
   });
 
   it("falls back to local soft binding when official binding approval stays pending", async () => {
@@ -618,6 +636,7 @@ describe("travel companion command UX", () => {
           logsDir: "C:\\temp\\logs",
           configPath: "C:\\temp\\config.json",
         },
+        runtimeVersion: "2026.4.9",
       },
     );
 
@@ -779,6 +798,7 @@ describe("travel companion command UX", () => {
           logsDir: "C:\\temp\\logs",
           configPath: "C:\\temp\\config.json",
         },
+        runtimeVersion: "2026.4.9",
       },
     );
 

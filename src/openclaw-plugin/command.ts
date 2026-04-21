@@ -56,8 +56,11 @@ interface CommandDependencies {
   bindings: ConversationBindingStore;
   pluginConfig: TravelCompanionPluginConfig;
   runtimeDataPaths: RuntimeDataPaths;
+  runtimeVersion?: string;
   logger?: LoggerPort;
 }
+
+const MINIMUM_SUPPORTED_OPENCLAW_VERSION = "2026.3.28";
 
 type ParsedArgs = {
   subcommand: string;
@@ -136,6 +139,37 @@ async function activateConversation(
   ctx: PluginCommandContext,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
+  const runtimeCompatibility = ensureSupportedRuntimeVersion(
+    deps.runtimeVersion,
+    MINIMUM_SUPPORTED_OPENCLAW_VERSION,
+  );
+  if (!runtimeCompatibility.supported) {
+    await deps.logger?.log({
+      tripId: `conversation:${ctx.channel}:${ctx.accountId ?? "default"}`,
+      runId: `runtime-version-gate:${Date.now()}`,
+      phase: "system",
+      event: "runtime.version.unsupported",
+      decision:
+        "Blocked activate because the host OpenClaw version is below the minimum supported version.",
+      provider: "command",
+      status: "failure",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: 0,
+      details: {
+        currentVersion: deps.runtimeVersion ?? "unknown",
+        minimumVersion: MINIMUM_SUPPORTED_OPENCLAW_VERSION,
+      },
+    });
+    return {
+      text: getSystemCatalog(undefined).command.runtimeTooOld({
+        currentVersion: deps.runtimeVersion ?? "unknown",
+        minimumVersion: MINIMUM_SUPPORTED_OPENCLAW_VERSION,
+      }),
+      isError: true,
+    };
+  }
+
   const binding = await ensurePluginConversationBinding(
     ctx,
     deps.bindings,
@@ -249,6 +283,45 @@ async function activateConversation(
       "\n",
     ),
   };
+}
+
+function ensureSupportedRuntimeVersion(
+  currentVersion: string | undefined,
+  minimumVersion: string,
+): { supported: boolean } {
+  const current = parseComparableVersionParts(currentVersion);
+  const minimum = parseComparableVersionParts(minimumVersion);
+  if (!current || !minimum) {
+    return { supported: true };
+  }
+  const length = Math.max(current.length, minimum.length);
+  for (let index = 0; index < length; index += 1) {
+    const currentPart = current[index] ?? 0;
+    const minimumPart = minimum[index] ?? 0;
+    if (currentPart > minimumPart) {
+      return { supported: true };
+    }
+    if (currentPart < minimumPart) {
+      return { supported: false };
+    }
+  }
+  return { supported: true };
+}
+
+function parseComparableVersionParts(
+  version: string | undefined,
+): number[] | null {
+  if (!version) {
+    return null;
+  }
+  const match = version.match(/\d+(?:\.\d+)*/u)?.[0];
+  if (!match) {
+    return null;
+  }
+  return match
+    .split(".")
+    .map((part) => Number.parseInt(part, 10))
+    .filter((part) => Number.isFinite(part));
 }
 
 async function deactivateConversation(
