@@ -741,6 +741,7 @@ export class CompanionConversationService {
               pendingDestinationCandidate:
                 state.pendingDestinationCandidate ?? null,
             },
+            locale: getSystemLocale(state),
             now: nowIso(this.dependencies.clock),
           });
 
@@ -994,6 +995,7 @@ export class CompanionConversationService {
                 input.state.recentTurns,
                 input.activeTrip,
               ),
+              locale: getSystemLocale(input.state),
               now: nowIso(this.dependencies.clock),
             });
           input.replyPlan.segments = acknowledgement.segments;
@@ -1103,6 +1105,7 @@ export class CompanionConversationService {
             persona,
             recentTurns: trimTurns(state.recentTurns, 12),
             resolvedState,
+            locale,
             now: nowIso(this.dependencies.clock),
           });
 

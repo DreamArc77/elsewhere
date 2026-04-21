@@ -6,6 +6,7 @@ import type {
   ResolvedAgentState,
   RuntimeStepContext,
   StoredPersonaProfile,
+  SystemLocale,
   TripPlan,
   TripRequest,
 } from "../domain/types.js";
@@ -87,6 +88,18 @@ export function buildPersonaSummary(persona: StoredPersonaProfile): string {
   ].join("\n");
 }
 
+function buildOutputLanguageInstruction(locale: SystemLocale): string {
+  switch (locale) {
+    case "ja-JP":
+      return "Write the visible message in natural Japanese.";
+    case "en":
+      return "Write the visible message in natural English.";
+    case "zh-CN":
+    default:
+      return "Write the visible message in natural Simplified Chinese.";
+  }
+}
+
 export async function renderTripPlanPrompt(input: {
   tripId: string;
   persona: StoredPersonaProfile;
@@ -143,6 +156,7 @@ export async function renderCompanionReplyPrompt(input: {
   recentPhotoBlock: string;
   destinationLoopBlock: string;
   destinationLoopTaskBlock: string;
+  locale: SystemLocale;
   now: string;
   latestUserMessageAt: string;
 }): Promise<string> {
@@ -159,6 +173,7 @@ export async function renderCompanionReplyPrompt(input: {
     recentPhotoBlock: input.recentPhotoBlock,
     destinationLoopBlock: input.destinationLoopBlock,
     destinationLoopTaskBlock: input.destinationLoopTaskBlock,
+    outputLanguageInstruction: buildOutputLanguageInstruction(input.locale),
     now: input.now,
     latestUserMessageAt: input.latestUserMessageAt,
   });
@@ -169,6 +184,7 @@ export async function renderIdleDestinationGuidePrompt(input: {
   conversationKey: string;
   recentTurns: string;
   currentStateSummary: string;
+  locale: SystemLocale;
   now: string;
 }): Promise<string> {
   const template = await loadTemplate("compose-idle-guide.md");
@@ -177,6 +193,7 @@ export async function renderIdleDestinationGuidePrompt(input: {
     conversationKey: input.conversationKey,
     recentTurns: input.recentTurns,
     currentStateSummary: input.currentStateSummary,
+    outputLanguageInstruction: buildOutputLanguageInstruction(input.locale),
     now: input.now,
   });
 }
@@ -185,6 +202,7 @@ export async function renderDestinationAcknowledgementPrompt(input: {
   persona: StoredPersonaProfile;
   destination: string;
   recentTurns: string;
+  locale: SystemLocale;
   now: string;
 }): Promise<string> {
   const template = await loadTemplate("compose-destination-ack.md");
@@ -192,6 +210,7 @@ export async function renderDestinationAcknowledgementPrompt(input: {
     personaSummary: buildPersonaSummary(input.persona),
     destination: input.destination,
     recentTurns: input.recentTurns,
+    outputLanguageInstruction: buildOutputLanguageInstruction(input.locale),
     now: input.now,
   });
 }

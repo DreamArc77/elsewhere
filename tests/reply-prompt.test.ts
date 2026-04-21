@@ -31,6 +31,7 @@ describe("reply prompt", () => {
       destinationLoopTaskBlock: "",
       currentTransportBlock:
         'Current transport details:\n{"relevant":true,"identifier":"MU5478","departure":{"time":"09:15"}}',
+      locale: "zh-CN",
       now: "2026-04-14T08:00:00.000Z",
       latestUserMessageAt: "2026-04-14T07:58:00.000Z",
     });
@@ -54,9 +55,11 @@ describe("reply prompt", () => {
       persona,
       destination: "Tokyo",
       recentTurns: "[]",
+      locale: "en",
       now: "2026-04-14T08:00:00.000Z",
     });
 
+    expect(prompt).toContain("Write the visible message in natural English.");
     expect(prompt).toContain("Destination:");
     expect(prompt).toContain("Tokyo");
     expect(prompt).toContain("checking tickets/routes");

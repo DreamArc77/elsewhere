@@ -31,6 +31,7 @@ import {
   RuntimeStepContext,
   TravelCompanionGeminiProviderConfig,
   StoredPersonaProfile,
+  SystemLocale,
   TravelCompanionTextProviderConfig,
   TripPhase,
   TripPlan,
@@ -1559,6 +1560,7 @@ export class GeminiRestGroundingAdapter
       idleGuideSentAt?: string | null;
       pendingDestinationCandidate?: string | null;
     };
+    locale: SystemLocale;
     now: string;
   }): Promise<CompanionReplyPlan> {
     const startedAt = nowIso();
@@ -1584,6 +1586,7 @@ export class GeminiRestGroundingAdapter
         input.destinationLoopContext,
       ),
       currentTransportBlock,
+      locale: input.locale,
       now: input.now,
       latestUserMessageAt: latestPendingUserMessageAt(input.pendingUserMessages),
     });
@@ -1628,6 +1631,7 @@ export class GeminiRestGroundingAdapter
     persona: StoredPersonaProfile;
     recentTurns: CompanionTurn[];
     resolvedState: ResolvedAgentState;
+    locale: SystemLocale;
     now: string;
   }): Promise<{ segments: string[]; provider: string }> {
     const startedAt = nowIso();
@@ -1639,6 +1643,7 @@ export class GeminiRestGroundingAdapter
       currentStateSummary: buildCurrentStateSummary({
         resolvedState: input.resolvedState,
       }),
+      locale: input.locale,
       now: input.now,
     });
 
@@ -1683,6 +1688,7 @@ export class GeminiRestGroundingAdapter
     persona: StoredPersonaProfile;
     destination: string;
     recentTurns: CompanionTurn[];
+    locale: SystemLocale;
     now: string;
   }): Promise<{ segments: string[]; provider: string }> {
     const startedAt = nowIso();
@@ -1691,6 +1697,7 @@ export class GeminiRestGroundingAdapter
       persona: input.persona,
       destination: input.destination,
       recentTurns: JSON.stringify(input.recentTurns, null, 2),
+      locale: input.locale,
       now: input.now,
     });
 

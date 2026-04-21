@@ -19,6 +19,7 @@ import {
   RuntimeStepContext,
   SendReceipt,
   StoredPersonaProfile,
+  SystemLocale,
   TripPlan,
   TripRequest,
 } from "../domain/types.js";
@@ -501,6 +502,7 @@ export class FakeGroundingPort implements GroundingPort {
       idleGuideSentAt?: string | null;
       pendingDestinationCandidate?: string | null;
     };
+    locale: SystemLocale;
     now: string;
   }): Promise<CompanionReplyPlan> {
     const latest = input.pendingUserMessages[input.pendingUserMessages.length - 1];
@@ -517,6 +519,7 @@ export class FakeGroundingPort implements GroundingPort {
     persona: StoredPersonaProfile;
     recentTurns: CompanionTurn[];
     resolvedState: ResolvedAgentState;
+    locale: SystemLocale;
     now: string;
   }): Promise<{ segments: string[]; provider: string }> {
     return {
@@ -530,6 +533,7 @@ export class FakeGroundingPort implements GroundingPort {
     persona: StoredPersonaProfile;
     destination: string;
     recentTurns: CompanionTurn[];
+    locale: SystemLocale;
     now: string;
   }): Promise<{ segments: string[]; provider: string }> {
     return {

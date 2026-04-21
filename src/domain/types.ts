@@ -723,6 +723,7 @@ export interface GroundingPort {
     activeTrip: TripRecord | null;
     resolvedState: ResolvedAgentState;
     destinationLoopContext: IdleDestinationLoopContext;
+    locale: SystemLocale;
     now: string;
   }): Promise<CompanionReplyPlan>;
   composeIdleDestinationGuide(input: {
@@ -730,6 +731,7 @@ export interface GroundingPort {
     persona: StoredPersonaProfile;
     recentTurns: CompanionTurn[];
     resolvedState: ResolvedAgentState;
+    locale: SystemLocale;
     now: string;
   }): Promise<IdleDestinationGuidePlan>;
   composeDestinationAcknowledgement(input: {
@@ -737,6 +739,7 @@ export interface GroundingPort {
     persona: StoredPersonaProfile;
     destination: string;
     recentTurns: CompanionTurn[];
+    locale: SystemLocale;
     now: string;
   }): Promise<IdleDestinationGuidePlan>;
 }

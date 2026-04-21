@@ -91,6 +91,7 @@ describe("text provider routing", () => {
         idleGuideSentAt: null,
         pendingDestinationCandidate: null,
       },
+      locale: "zh-CN",
       now: new Date().toISOString(),
     });
 
