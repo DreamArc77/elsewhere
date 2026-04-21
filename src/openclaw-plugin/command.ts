@@ -1040,20 +1040,6 @@ async function requireActivatedThen(
     };
   }
 
-  const hasOfficialBinding =
-    resolved.record.bindingSource === "official" ||
-    Boolean(resolved.record.bindingId);
-  if (!hasOfficialBinding) {
-    const locale = await resolveLocaleForBinding(
-      resolved.record,
-      deps.conversationStates,
-    );
-    return {
-      text: getSystemCatalog(locale).command.notActiveYet,
-      isError: true,
-    };
-  }
-
   const state =
     typeof deps.conversationStates?.getByKey === "function"
       ? await deps.conversationStates.getByKey(resolved.record.key)
@@ -1102,42 +1088,14 @@ async function ensurePluginConversationBinding(
   | { record: NonNullable<Awaited<ReturnType<ConversationBindingStore["get"]>>> }
   | { reply: CommandReply }
 > {
-  const currentBinding = await ctx.getCurrentConversationBinding();
-  if (currentBinding) {
-    const record = await buildOfficialConversationBindingRecord(
-      bindings,
-      ctx,
-      {
-        channel: currentBinding.channel,
-        accountId: currentBinding.accountId,
-        target: currentBinding.conversationId,
-        parentConversationId: currentBinding.parentConversationId,
-        threadId: currentBinding.threadId,
-        bindingId: currentBinding.bindingId,
-        boundAt: currentBinding.boundAt,
-      },
-      mode,
-    );
-    await bindings.upsert(record);
-    await logBindingEvent(logger, {
-      event: "binding.current",
-      decision:
-        "Resolved current official OpenClaw conversation binding before activating elsewhere.",
-      status: "success",
-      ctx,
-      details: {
-        key: record.key,
-        bindingId: record.bindingId,
-        bindingSource: record.bindingSource,
-        channel: record.channel,
-        accountId: record.accountId,
-        target: record.target,
-        parentConversationId: record.parentConversationId,
-        threadId: record.threadId,
-        mode: record.mode,
-      },
-    });
-    return { record };
+  const localRecord = await ensureLocalConversationBindingRecord(
+    ctx,
+    bindings,
+    mode,
+    logger,
+  );
+  if ("reply" in localRecord) {
+    return localRecord;
   }
 
   try {
@@ -1221,29 +1179,29 @@ async function ensurePluginConversationBinding(
       return { record };
     }
 
-    if (requested.status === "pending") {
-      return {
-        reply: {
-          text: getSystemCatalog(undefined).command.approvalRequired(
-            requested.approvalId,
-          ),
-          isError: true,
-        },
-      };
-    }
-
-    return {
-      reply: {
-        text: getSystemCatalog(undefined).command.internalFailure,
-        isError: true,
+    await logBindingEvent(logger, {
+      event: "binding.soft_activated",
+      decision:
+        "Activated elsewhere using the local soft-binding path because official plugin binding was unavailable or still pending.",
+      status: "skipped",
+      ctx,
+      details: {
+        key: localRecord.record.key,
+        bindingId: localRecord.record.bindingId,
+        bindingSource:
+          localRecord.record.bindingSource ??
+          (localRecord.record.bindingId ? "official" : "local"),
+        mode: localRecord.record.mode,
       },
-    };
+    });
+
+    return localRecord;
   } catch (error) {
     await logBindingEvent(logger, {
       event: "binding.request_failed",
       decision:
-        "Official OpenClaw conversation binding request failed, so elsewhere did not activate this conversation.",
-      status: "failure",
+        "Official OpenClaw conversation binding request failed, so elsewhere stayed on the local soft-binding fallback.",
+      status: "skipped",
       ctx,
       details: {
         mode,
@@ -1251,12 +1209,7 @@ async function ensurePluginConversationBinding(
       },
     });
 
-    return {
-      reply: {
-        text: getSystemCatalog(undefined).command.internalFailure,
-        isError: true,
-      },
-    };
+    return localRecord;
   }
 }
 

@@ -15,6 +15,17 @@ export function inferConversationTargetForCommand(input: {
     return senderId ?? from ?? to;
   }
 
+  if (input.channel === "qqbot") {
+    const c2cRoute = [from, to].find((value) => value?.startsWith("qqbot:c2c:"));
+    if (c2cRoute) {
+      return c2cRoute;
+    }
+    if (senderId) {
+      return `qqbot:c2c:${senderId}`;
+    }
+    return from ?? to;
+  }
+
   if (input.channel === "feishu") {
     const userScoped = [from, to].find((value) => value?.startsWith("user:"));
     if (userScoped) {
@@ -25,6 +36,10 @@ export function inferConversationTargetForCommand(input: {
       return `user:${openId}`;
     }
     return from ?? to ?? senderId;
+  }
+
+  if (input.channel === "wechat") {
+    return senderId ?? from ?? to;
   }
 
   return to ?? from ?? senderId;
@@ -65,6 +80,10 @@ export function buildInboundTargetCandidates(input: {
     } else if (senderId.startsWith("ou_")) {
       candidates.add(`user:${senderId}`);
     }
+  }
+
+  if (input.channel === "wechat" && senderId) {
+    candidates.add(senderId);
   }
 
   return [...candidates];

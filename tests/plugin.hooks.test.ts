@@ -240,8 +240,6 @@ describe("travel companion inbound takeover hook", () => {
     });
     await runtime.bindings.upsert({
       key,
-      bindingId: "binding-official",
-      bindingSource: "official",
       channel: "telegram",
       accountId: "default",
       target: "1459473177",
@@ -250,8 +248,6 @@ describe("travel companion inbound takeover hook", () => {
     });
     await runtime.conversationService.activateConversation({
       key,
-      bindingId: "binding-official",
-      bindingSource: "official",
       channel: "telegram",
       accountId: "default",
       target: "1459473177",
