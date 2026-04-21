@@ -1391,6 +1391,10 @@ function shouldStartReferencePhotoProbe(
     return true;
   }
 
+  if (/^<media:[^>]+>$/iu.test(trimmedText)) {
+    return true;
+  }
+
   return /(?:^|\n)\s*-\s*(?:图片|image)\s*:/iu.test(trimmedText);
 }
 
@@ -1747,6 +1751,9 @@ function sanitizeInboundText(value: string): string {
     .filter((line) => !/^\[message_id:\s*[^\]]+\]$/iu.test(line));
 
   const candidate = lines.length > 0 ? lines.at(-1)! : value.trim();
+  if (/^<media:[^>]+>$/iu.test(candidate)) {
+    return candidate.trim();
+  }
   const speakerPrefixMatch = candidate.match(/^([^\s:：]{1,32})[:：]\s*(.+)$/u);
   if (speakerPrefixMatch) {
     const messageText = speakerPrefixMatch[2];

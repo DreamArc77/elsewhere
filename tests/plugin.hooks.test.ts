@@ -1259,6 +1259,81 @@ describe("travel companion inbound takeover hook", () => {
     expect(state?.pendingReferencePhotoProbe?.fallbackSentAt).toBeNull();
   });
 
+  it("shows a short checking message for telegram media placeholder bodies while waiting for a reference photo", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "persona",
+        step: "reference_photo",
+        awaitingReferencePhoto: true,
+        draft: {
+          name: "Mori",
+          originCity: "Hong Kong",
+          traits: ["gentle"],
+          toneStyle: "warm",
+          relationship: "travel soulmate",
+          userAddressing: "baby",
+        },
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingReferencePhotoProbe: null,
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionBeforeDispatch(
+      {
+        content: "<media:image>",
+        body: "<media:image>",
+        channel: "telegram",
+        senderId: "1459473177",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("正在检查");
+    expect(runtime.messenger.sentReplies[0]?.dedupeKey).toBe(
+      `setup-photo-checking:${key}`,
+    );
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.pendingReferencePhotoProbe?.noticeSentAt).toBeTruthy();
+    expect(state?.pendingReferencePhotoProbe?.fallbackSentAt).toBeNull();
+  });
+
   it("claims a weixin reply_dispatch media image before it reaches the default agent", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({
