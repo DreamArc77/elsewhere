@@ -325,6 +325,8 @@ export const en: SystemLocaleCatalog = {
     errorNeedUserAddressing:
       "Your companion still does not have a way to address you. This field needs to be filled in.",
     errorWaitingForPhoto: "The current setup step is not waiting for a photo.",
+    photoChecking:
+      "I'm checking the image you just sent. Please wait a moment.",
     errorWaitingForPhotoWithFallback:
       "I'm currently waiting for your reference photo. You can send an image directly. If image delivery is unstable on this platform, you can also try sending a publicly accessible image URL.",
     errorUnsupportedImage:

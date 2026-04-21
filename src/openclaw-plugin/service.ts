@@ -29,6 +29,7 @@ import { JsonlFileLogger } from "../infrastructure/jsonl-file-logger.js";
 import { BindingRegistryStore } from "./binding-state.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import { resolveConfiguredGeminiProvider } from "./gemini-provider-config.js";
+import { getSystemCatalog, getSystemLocale } from "./i18n/catalog.js";
 import { completeSetupReferencePhotoFromSource } from "./hooks.js";
 import { MessageCommandRunner, NoopSchedulerPort, OpenClawCliMessengerPort } from "./ports.js";
 
@@ -293,6 +294,7 @@ export function startPollingService(input: {
 }): { stop: () => void } {
   let disposed = false;
   let interval: NodeJS.Timeout | undefined;
+  let probeInterval: NodeJS.Timeout | undefined;
   let ticking = false;
 
   void createRuntimeBundle(input)
@@ -329,6 +331,18 @@ export function startPollingService(input: {
         tick,
         (input.pluginConfig.pollIntervalSeconds ?? 60) * 1000,
       );
+      probeInterval = setInterval(() => {
+        void runPendingReferencePhotoFallback({
+          bundle,
+          stateDir: input.stateDir,
+        }).catch((error) => {
+          input.logger.error(
+            `Travel companion reference photo probe failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+      }, 1_500);
       void tick();
     })
     .catch((error) => {
@@ -345,6 +359,9 @@ export function startPollingService(input: {
       if (interval) {
         clearInterval(interval);
       }
+      if (probeInterval) {
+        clearInterval(probeInterval);
+      }
     },
   };
 }
@@ -356,7 +373,7 @@ type InboundMediaCandidate = {
 
 const IMAGE_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
-async function runPendingReferencePhotoFallback(input: {
+export async function runPendingReferencePhotoFallback(input: {
   bundle: RuntimeBundle;
   stateDir: string;
 }): Promise<void> {
@@ -374,9 +391,6 @@ async function runPendingReferencePhotoFallback(input: {
 
   const mediaDir = join(input.stateDir, "media", "inbound");
   const mediaCandidates = await listInboundMediaCandidates(mediaDir);
-  if (mediaCandidates.length === 0) {
-    return;
-  }
 
   const claimed = new Set<string>();
   for (const state of pendingStates) {
@@ -394,49 +408,71 @@ async function runPendingReferencePhotoFallback(input: {
       .sort((a, b) => b.mtimeMs - a.mtimeMs);
 
     const candidate = eligible[0];
-    if (!candidate) {
+    if (candidate) {
+      claimed.add(candidate.path);
+      await input.bundle.logger.log({
+        tripId: `conversation:${binding.key}`,
+        runId: `setup-photo-fallback:${Date.now()}`,
+        phase: "system",
+        event: "setup.photo.media_fallback.detected",
+        decision:
+          "Detected a newly saved inbound media file while setup was waiting for a reference photo.",
+        provider: "setup-session",
+        status: "success",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        latencyMs: 0,
+        details: {
+          conversationKey: binding.key,
+          source: candidate.path,
+          mediaAgeMs: Math.max(0, Date.now() - candidate.mtimeMs),
+        },
+      });
+
+      await completeSetupReferencePhotoFromSource({
+        binding,
+        state,
+        deps: {
+          bindings: input.bundle.bindings,
+          conversationService: input.bundle.conversationService,
+          service: input.bundle.service,
+          tripRepository: input.bundle.tripRepository,
+          personaRepository: input.bundle.personaRepository,
+          conversationStates: input.bundle.conversationStateRepository,
+          globalConfigRepository: input.bundle.globalConfigRepository,
+          messenger: input.bundle.messenger,
+          pluginConfig: input.bundle.pluginConfig,
+          runtimeDataPaths: input.bundle.runtimeDataPaths,
+          logger: input.bundle.logger,
+        },
+        runId: `setup-photo-fallback:${Date.now()}`,
+        imageSource: candidate.path,
+        sourceKind: "media-inbound-fallback",
+      });
       continue;
     }
 
-    claimed.add(candidate.path);
-    await input.bundle.logger.log({
-      tripId: `conversation:${binding.key}`,
-      runId: `setup-photo-fallback:${Date.now()}`,
-      phase: "system",
-      event: "setup.photo.media_fallback.detected",
-      decision:
-        "Detected a newly saved inbound media file while setup was waiting for a reference photo.",
-      provider: "setup-session",
-      status: "success",
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
-      latencyMs: 0,
-      details: {
-        conversationKey: binding.key,
-        source: candidate.path,
-        mediaAgeMs: Math.max(0, Date.now() - candidate.mtimeMs),
-      },
-    });
+    const probe = state.pendingReferencePhotoProbe;
+    if (!probe?.deadlineAt || probe.fallbackSentAt) {
+      continue;
+    }
+    if (new Date(probe.deadlineAt).getTime() > Date.now()) {
+      continue;
+    }
 
-    await completeSetupReferencePhotoFromSource({
+    const locale = getSystemLocale(state);
+    await input.bundle.messenger.sendTextReply({
       binding,
-      state,
-      deps: {
-        bindings: input.bundle.bindings,
-        conversationService: input.bundle.conversationService,
-        service: input.bundle.service,
-        tripRepository: input.bundle.tripRepository,
-        personaRepository: input.bundle.personaRepository,
-        conversationStates: input.bundle.conversationStateRepository,
-        globalConfigRepository: input.bundle.globalConfigRepository,
-        messenger: input.bundle.messenger,
-        pluginConfig: input.bundle.pluginConfig,
-        runtimeDataPaths: input.bundle.runtimeDataPaths,
-        logger: input.bundle.logger,
+      text: getSystemCatalog(locale).setup.errorWaitingForPhotoWithFallback,
+      dedupeKey: `setup-photo-reminder:${binding.key}:${probe.startedAt}`,
+    });
+    await input.bundle.conversationStateRepository.save({
+      ...state,
+      pendingReferencePhotoProbe: {
+        ...probe,
+        fallbackSentAt: new Date().toISOString(),
       },
-      runId: `setup-photo-fallback:${Date.now()}`,
-      imageSource: candidate.path,
-      sourceKind: "media-inbound-fallback",
+      updatedAt: new Date().toISOString(),
     });
   }
 }

@@ -384,6 +384,13 @@ export interface PendingReplyDispatch {
   instantSeen?: boolean;
 }
 
+export interface PendingReferencePhotoProbe {
+  startedAt: string;
+  deadlineAt: string;
+  noticeSentAt?: string | null;
+  fallbackSentAt?: string | null;
+}
+
 export interface DestinationIntent {
   outcome: "none" | "start_trip" | "confirm_candidate" | "reject_candidate";
   destination?: string;
@@ -585,6 +592,7 @@ export interface ConversationCompanionState {
   mode: ConversationMode;
   systemLocale?: SystemLocale;
   setupSession?: SetupSession;
+  pendingReferencePhotoProbe?: PendingReferencePhotoProbe | null;
   pendingUserMessages: InboundUserMessage[];
   pendingReplyDispatch: PendingReplyDispatch | null;
   instantReplyWindow: InstantReplyWindow | null;

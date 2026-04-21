@@ -1182,6 +1182,79 @@ describe("travel companion inbound takeover hook", () => {
     expect(runtime.messenger.sentReplies.at(-1)?.text).toContain("请确认旅伴聊天时要用的文本模型");
   });
 
+  it("shows a short checking message instead of an immediate fallback when a media-like reference photo event arrives without a usable source yet", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "openclaw-weixin",
+      accountId: "bot-1",
+      target: "wechat-user-1",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "openclaw-weixin",
+      accountId: "bot-1",
+      target: "wechat-user-1",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      setupSession: {
+        kind: "persona",
+        step: "reference_photo",
+        awaitingReferencePhoto: true,
+        draft: {
+          name: "Mori",
+          originCity: "Hong Kong",
+          traits: ["gentle"],
+          toneStyle: "warm",
+          relationship: "travel soulmate",
+          userAddressing: "baby",
+        },
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingReferencePhotoProbe: null,
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionBeforeDispatch(
+      {
+        content: "",
+        body: "",
+        channel: "openclaw-weixin",
+        senderId: "wechat-user-1",
+        isGroup: false,
+        hasMedia: true,
+      },
+      {
+        channelId: "openclaw-weixin",
+        accountId: "bot-1",
+        conversationId: "wechat-user-1",
+        senderId: "wechat-user-1",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("正在检查");
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.pendingReferencePhotoProbe?.noticeSentAt).toBeTruthy();
+    expect(state?.pendingReferencePhotoProbe?.fallbackSentAt).toBeNull();
+  });
+
   it("claims a weixin reply_dispatch media image before it reaches the default agent", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

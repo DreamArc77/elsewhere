@@ -129,6 +129,7 @@ export interface SystemLocaleCatalog {
     errorGeminiProviderChoice: string;
     errorNeedUserAddressing: string;
     errorWaitingForPhoto: string;
+    photoChecking?: string;
     errorWaitingForPhotoWithFallback: string;
     errorUnsupportedImage: string;
     errorImageDownloadFailed: string;

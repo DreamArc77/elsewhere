@@ -165,6 +165,8 @@ export interface InboundClaimDependencies {
   logger: LoggerPort;
 }
 
+const REFERENCE_PHOTO_PROBE_WINDOW_MS = 15_000;
+
 type ConversationBindingInternals = {
   requestPluginConversationBinding: (input: {
     pluginId: string;
@@ -755,6 +757,36 @@ async function handleSetupSessionInbound(
         status: "success",
         details: buildSetupPhotoDebugDetails(input.event),
       });
+      if (shouldStartReferencePhotoProbe(input.event, input.trimmed)) {
+        const existingProbe = input.state.pendingReferencePhotoProbe;
+        const now = new Date();
+        const nextProbe = existingProbe ?? {
+          startedAt: now.toISOString(),
+          deadlineAt: new Date(
+            now.getTime() + REFERENCE_PHOTO_PROBE_WINDOW_MS,
+          ).toISOString(),
+          noticeSentAt: null,
+          fallbackSentAt: null,
+        };
+        await deps.conversationStates.save({
+          ...input.state,
+          pendingReferencePhotoProbe: {
+            ...nextProbe,
+            noticeSentAt: nextProbe.noticeSentAt ?? now.toISOString(),
+          },
+          updatedAt: now.toISOString(),
+        });
+        if (!existingProbe?.noticeSentAt) {
+          await deps.messenger.sendTextReply({
+            binding: input.binding,
+            text:
+              catalog.setup.photoChecking ??
+              catalog.setup.errorWaitingForPhotoWithFallback,
+            dedupeKey: `setup-photo-checking:${input.binding.key}`,
+          });
+        }
+        return true;
+      }
       if (input.trimmed) {
         await deps.messenger.sendTextReply({
           binding: input.binding,
@@ -868,6 +900,7 @@ async function handleSetupSessionInbound(
     await deps.conversationStates.save({
       ...input.state,
       setupSession: advanced.session,
+      pendingReferencePhotoProbe: undefined,
       updatedAt: new Date().toISOString(),
     });
     await deps.messenger.sendTextReply({
@@ -994,6 +1027,7 @@ export async function completeSetupReferencePhotoFromSource(input: {
   await input.deps.conversationStates.save({
     ...input.state,
     setupSession: nextSession,
+    pendingReferencePhotoProbe: undefined,
     updatedAt: new Date().toISOString(),
   });
   await input.deps.messenger.sendTextReply({
@@ -1043,6 +1077,7 @@ async function finalizeSetupSession(input: {
       ...inbound.state,
       systemLocale: localeToPersist,
       setupSession: undefined,
+      pendingReferencePhotoProbe: undefined,
       updatedAt: new Date().toISOString(),
     };
     await deps.conversationStates.save(nextState);
@@ -1121,6 +1156,7 @@ async function finalizeSetupSession(input: {
       ...inbound.state,
       systemLocale: inbound.state.systemLocale,
       setupSession: undefined,
+      pendingReferencePhotoProbe: undefined,
       idleEnteredAt:
         readiness.isComplete && !isEditingExistingPersona
           ? new Date().toISOString()
@@ -1231,6 +1267,7 @@ async function finalizeSetupSession(input: {
     ...inbound.state,
     systemLocale: inbound.state.systemLocale,
     setupSession: undefined,
+    pendingReferencePhotoProbe: undefined,
     idleEnteredAt:
       readiness.isComplete && inbound.binding.defaultPersonaId
         ? new Date().toISOString()
@@ -1320,6 +1357,39 @@ function extractInboundImageSource(event: InboundClaimEvent): string | null {
   }
 
   return null;
+}
+
+function shouldStartReferencePhotoProbe(
+  event: InboundClaimEvent,
+  trimmedText: string,
+): boolean {
+  if (!trimmedText) {
+    return true;
+  }
+
+  if (
+    typeof event.mediaUrl === "string" && event.mediaUrl.trim().length > 0
+  ) {
+    return true;
+  }
+  if (Array.isArray(event.mediaUrls) && event.mediaUrls.length > 0) {
+    return true;
+  }
+  if (Array.isArray(event.attachments) && event.attachments.length > 0) {
+    return true;
+  }
+
+  const metadata = event.metadata;
+  if (
+    metadata &&
+    ["mediaPath", "mediaUrl", "mediaPaths", "mediaUrls", "mediaType", "mediaTypes"].some(
+      (key) => key in metadata,
+    )
+  ) {
+    return true;
+  }
+
+  return /(?:^|\n)\s*-\s*(?:图片|image)\s*:/iu.test(trimmedText);
 }
 
 function extractReferenceImageSourceFromText(text: string): string | null {

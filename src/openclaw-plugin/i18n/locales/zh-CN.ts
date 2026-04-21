@@ -320,6 +320,8 @@ export const zhCN: SystemLocaleCatalog = {
     errorNeedUserAddressing:
       "当前还没有设置旅伴对你的称呼，这一项需要补一个。",
     errorWaitingForPhoto: "当前 setup 步骤不在等待照片。",
+    photoChecking:
+      "正在检查你刚发来的图片，请稍等一下。",
     errorWaitingForPhotoWithFallback:
       "我现在在等你的参考图。你可以直接发一张图片；如果这个平台传图不稳定，也可以尝试直接发一个可访问的图片 URL。",
     errorUnsupportedImage:
