@@ -70,6 +70,36 @@ describe("companion business situation", () => {
     expect(situation.substate).toBe("packing");
   });
 
+  it("treats the first planning postcard as the start of packing", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      homeCity: "Hong Kong",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Seoul",
+    });
+
+    await runtime.service.runTrip(trip.tripId);
+
+    const record = await runtime.tripRepository.getById(trip.tripId);
+    const situation = deriveCompanionBusinessSituation(
+      record!,
+      runtime.clock.now(),
+    );
+
+    expect(record?.state.activeStateAnchor?.source).toBe("postcard");
+    expect(situation.state).toBe("plan");
+    expect(situation.substate).toBe("packing");
+  });
+
   it("keeps state resolution working when transport legs contain full datetime strings", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
@@ -239,7 +269,7 @@ describe("companion business situation", () => {
     expect(situation.scene).toBe("food");
   });
 
-  it("prefers the latest postcard state anchor over wall-clock planning state", async () => {
+  it("prefers the latest postcard state anchor over the wall-clock state", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({
       name: "Mori",
@@ -266,8 +296,8 @@ describe("companion business situation", () => {
     );
 
     expect(record?.state.activeStateAnchor?.source).toBe("postcard");
-    expect(situation.state).toBe("plan");
-    expect(situation.substate).toBe("packing");
+    expect(situation.state).toBe("departure");
+    expect(situation.substate).toBe("before_departure");
   });
 
   it("does not carry synthetic airport activity into planning anchors", async () => {

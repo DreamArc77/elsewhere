@@ -675,11 +675,20 @@ export class ElsewhereService {
 
       const advanced = advanceAfterCurrentStep(record, this.dependencies.clock.now());
       const currentStep = getCurrentStep(record);
+      const advancedRecord: TripRecord = {
+        ...record,
+        state: advanced.state,
+        timelineIndex: advanced.timelineIndex,
+      };
+      const anchorStep =
+        currentStep?.phase === "planning"
+          ? getCurrentStep(advancedRecord)
+          : currentStep;
       const activeStateAnchor =
-        currentStep && currentStep.context
+        anchorStep && anchorStep.context
           ? createStateAnchorFromTimelineStep({
-              record,
-              step: currentStep,
+              record: currentStep?.phase === "planning" ? advancedRecord : record,
+              step: anchorStep,
               sentAt,
             })
           : null;
