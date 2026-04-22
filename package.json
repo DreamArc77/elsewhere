@@ -36,6 +36,11 @@
   ],
   "openclaw": {
     "extensions": ["./plugin.ts"],
+    "install": {
+      "npmSpec": "@dreamarc/elsewhere",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.3.28"
+    },
     "compat": {
       "pluginApi": ">=2026.3.28",
       "minGatewayVersion": "2026.3.28"
