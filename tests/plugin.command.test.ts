@@ -195,6 +195,22 @@ describe("travel companion command UX", () => {
     expect(state?.setupSession?.kind).toBe("locale");
   });
 
+  it("accepts the direct Telegram-friendly /elsewhere-activate alias", async () => {
+    const runtime = await createTestRuntime();
+    const bindings = new BindingRegistryStore(runtime.rootDir);
+
+    const reply = await handleTravelCompanionCommand(
+      createTelegramContext("/elsewhere-activate"),
+      createDeps(runtime, bindings),
+    );
+
+    expect(reply.isError).toBeUndefined();
+    expect(reply.text).toContain("Choose system language");
+
+    const binding = await bindings.get(keyForDefaultChat());
+    expect(binding?.mode).toBe("companion-exclusive");
+  });
+
   it("blocks activate on runtimes older than 2026.3.28", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);

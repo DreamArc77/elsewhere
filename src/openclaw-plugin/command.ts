@@ -71,7 +71,7 @@ export async function handleTravelCompanionCommand(
   ctx: PluginCommandContext,
   deps: CommandDependencies,
 ): Promise<CommandReply> {
-  const parsed = parseArgs(ctx.args);
+  const parsed = parseArgs(ctx.args, ctx.commandBody);
 
   switch (parsed.subcommand) {
     case "bind":
@@ -1607,9 +1607,26 @@ function requiredOptionAlias(
   );
 }
 
-function parseArgs(rawArgs: string | undefined): ParsedArgs {
+function parseArgs(
+  rawArgs: string | undefined,
+  commandBody?: string,
+): ParsedArgs {
+  const directAliasSubcommand = extractDirectAliasSubcommand(commandBody);
+  if (directAliasSubcommand) {
+    return {
+      subcommand: directAliasSubcommand,
+      options: parseOptions(tokenize(rawArgs ?? "")),
+    };
+  }
+
   const tokens = tokenize(rawArgs ?? "");
   const subcommand = tokens.shift() ?? "help";
+  const options = parseOptions(tokens);
+
+  return { subcommand, options };
+}
+
+function parseOptions(tokens: string[]): Record<string, string> {
   const options: Record<string, string> = {};
 
   while (tokens.length > 0) {
@@ -1623,12 +1640,21 @@ function parseArgs(rawArgs: string | undefined): ParsedArgs {
     options[key] = value;
   }
 
-  return { subcommand, options };
+  return options;
 }
 
 function tokenize(input: string): string[] {
   const matches = input.match(/"([^"]*)"|'([^']*)'|[^\s]+/g) ?? [];
   return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
+}
+
+function extractDirectAliasSubcommand(commandBody: string | undefined): string | null {
+  const trimmed = commandBody?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const match = trimmed.match(/^\/(?:elsewhere|travel-companion)-([a-z-]+)\b/iu);
+  return match?.[1] ?? null;
 }
 
 function ensureSupportedRuntimeVersion(

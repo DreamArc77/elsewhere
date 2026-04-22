@@ -313,6 +313,66 @@ describe("travel companion inbound takeover hook", () => {
     expect(payload).toContain('"event":"command.bridge.replied"');
   });
 
+  it("bridges direct /elsewhere-status aliases inside companion-exclusive conversations", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationService.activateConversation({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      ...(await runtime.conversationStateRepository.getByKey(key))!,
+      systemLocale: "zh-CN",
+      setupSession: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "/elsewhere-status",
+        body: "/elsewhere-status",
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-2b",
+        isGroup: false,
+      },
+      {
+        channelId: "telegram",
+        accountId: "default",
+        conversationId: "1459473177",
+        senderId: "1459473177",
+        messageId: "msg-2b",
+      },
+      {
+        ...createInboundDeps(runtime),
+      },
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text).toContain(
+      "这条会话还没有记录到最近的行程。",
+    );
+  });
+
   it("recovers a missing local binding from the official binding surface before bridging commands", async () => {
     const runtime = await createTestRuntime();
     const now = Date.now();
