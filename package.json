@@ -1,6 +1,6 @@
 {
   "name": "@dreamarc/elsewhere",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": false,
   "type": "module",
   "description": "elsewhere is an OpenClaw companion plugin with guided onboarding, travel postcards, delayed replies, and image generation.",
@@ -35,7 +35,9 @@
     "CHANGELOG.md"
   ],
   "openclaw": {
-    "extensions": ["./plugin.ts"],
+    "extensions": [
+      "./plugin.ts"
+    ],
     "install": {
       "npmSpec": "@dreamarc/elsewhere",
       "defaultChoice": "npm",
