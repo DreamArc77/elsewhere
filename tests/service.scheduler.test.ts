@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { OpenClawTravelCompanionService } from "../src/application/openclaw-travel-companion-service.js";
+import { ElsewhereService } from "../src/application/elsewhere-service.js";
 import type { TripPlan } from "../src/domain/types.js";
 import { JsonArtifactStore, JsonPersonaRepository, JsonTripRepository } from "../src/infrastructure/json-file-repositories.js";
 import { JsonlFileLogger } from "../src/infrastructure/jsonl-file-logger.js";
@@ -74,7 +74,7 @@ describe("service scheduling and crash recovery", () => {
       destinationCity: "Tokyo",
     });
 
-    const siblingService = new OpenClawTravelCompanionService({
+    const siblingService = new ElsewhereService({
       personaRepository: new JsonPersonaRepository(runtime.paths.personasDir),
       tripRepository: new JsonTripRepository(runtime.paths.tripsDir),
       artifactStore: new JsonArtifactStore(runtime.paths.artifactsDir),
@@ -207,7 +207,7 @@ describe("service scheduling and crash recovery", () => {
     );
     expect(runtime.messenger.sentMessages).toHaveLength(0);
 
-    const resumedService = new OpenClawTravelCompanionService({
+    const resumedService = new ElsewhereService({
       personaRepository: new JsonPersonaRepository(runtime.paths.personasDir),
       tripRepository: new JsonTripRepository(runtime.paths.tripsDir),
       artifactStore: new JsonArtifactStore(runtime.paths.artifactsDir),
@@ -268,7 +268,7 @@ describe("service scheduling and crash recovery", () => {
     expect(persisted?.pendingDispatch?.imageAsset).toBeTruthy();
     expect(persisted?.pendingDispatch?.postcard).toBeNull();
 
-    const resumedService = new OpenClawTravelCompanionService({
+    const resumedService = new ElsewhereService({
       personaRepository: new JsonPersonaRepository(runtime.paths.personasDir),
       tripRepository: new JsonTripRepository(runtime.paths.tripsDir),
       artifactStore: new JsonArtifactStore(runtime.paths.artifactsDir),
@@ -313,7 +313,7 @@ describe("service scheduling and crash recovery", () => {
     );
     expect(runtime.messenger.sentMessages).toHaveLength(1);
 
-    const resumedService = new OpenClawTravelCompanionService({
+    const resumedService = new ElsewhereService({
       personaRepository: new JsonPersonaRepository(runtime.paths.personasDir),
       tripRepository: new JsonTripRepository(runtime.paths.tripsDir),
       artifactStore: new JsonArtifactStore(runtime.paths.artifactsDir),

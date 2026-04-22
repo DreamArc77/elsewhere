@@ -1,7 +1,7 @@
 import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
-import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
+import { ElsewhereService } from "../application/elsewhere-service.js";
 import type {
   ConversationBindingRecord,
   ConversationBindingStore,
@@ -46,7 +46,7 @@ import {
 type CommandReply = { text: string; isError?: boolean };
 
 interface CommandDependencies {
-  service: OpenClawTravelCompanionService;
+  service: ElsewhereService;
   conversationService: CompanionConversationService;
   tripRepository: TripRepository;
   personaRepository: PersonaRepository;
@@ -60,12 +60,12 @@ interface CommandDependencies {
   logger?: LoggerPort;
 }
 
-const MINIMUM_SUPPORTED_OPENCLAW_VERSION = "2026.3.28";
-
 type ParsedArgs = {
   subcommand: string;
   options: Record<string, string>;
 };
+
+const MINIMUM_SUPPORTED_OPENCLAW_VERSION = "2026.3.28";
 
 export async function handleTravelCompanionCommand(
   ctx: PluginCommandContext,
@@ -283,45 +283,6 @@ async function activateConversation(
       "\n",
     ),
   };
-}
-
-function ensureSupportedRuntimeVersion(
-  currentVersion: string | undefined,
-  minimumVersion: string,
-): { supported: boolean } {
-  const current = parseComparableVersionParts(currentVersion);
-  const minimum = parseComparableVersionParts(minimumVersion);
-  if (!current || !minimum) {
-    return { supported: true };
-  }
-  const length = Math.max(current.length, minimum.length);
-  for (let index = 0; index < length; index += 1) {
-    const currentPart = current[index] ?? 0;
-    const minimumPart = minimum[index] ?? 0;
-    if (currentPart > minimumPart) {
-      return { supported: true };
-    }
-    if (currentPart < minimumPart) {
-      return { supported: false };
-    }
-  }
-  return { supported: true };
-}
-
-function parseComparableVersionParts(
-  version: string | undefined,
-): number[] | null {
-  if (!version) {
-    return null;
-  }
-  const match = version.match(/\d+(?:\.\d+)*/u)?.[0];
-  if (!match) {
-    return null;
-  }
-  return match
-    .split(".")
-    .map((part) => Number.parseInt(part, 10))
-    .filter((part) => Number.isFinite(part));
 }
 
 async function deactivateConversation(
@@ -1186,7 +1147,7 @@ async function ensurePluginConversationBinding(
     await logBindingEvent(logger, {
       event: "binding.requested",
       decision:
-        "Requested official OpenClaw conversation binding for travel companion.",
+        "Requested official OpenClaw conversation binding for elsewhere.",
       status:
         requested.status === "bound"
           ? "success"
@@ -1668,6 +1629,42 @@ function parseArgs(rawArgs: string | undefined): ParsedArgs {
 function tokenize(input: string): string[] {
   const matches = input.match(/"([^"]*)"|'([^']*)'|[^\s]+/g) ?? [];
   return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
+}
+
+function ensureSupportedRuntimeVersion(
+  currentVersion: string | undefined,
+  minimumVersion: string,
+): { supported: boolean } {
+  const current = parseComparableVersionParts(currentVersion);
+  const minimum = parseComparableVersionParts(minimumVersion);
+  if (!current || !minimum) {
+    return { supported: true };
+  }
+  const length = Math.max(current.length, minimum.length);
+  for (let index = 0; index < length; index += 1) {
+    const currentPart = current[index] ?? 0;
+    const minimumPart = minimum[index] ?? 0;
+    if (currentPart > minimumPart) {
+      return { supported: true };
+    }
+    if (currentPart < minimumPart) {
+      return { supported: false };
+    }
+  }
+  return { supported: true };
+}
+
+function parseComparableVersionParts(
+  version: string | undefined,
+): number[] | null {
+  if (!version) {
+    return null;
+  }
+  const match = version.match(/\d+(?:\.\d+)*/u)?.[0];
+  if (!match) {
+    return null;
+  }
+  return match.split(".").map((part) => Number(part));
 }
 
 function helpText(locale: SystemLocale | undefined): string {

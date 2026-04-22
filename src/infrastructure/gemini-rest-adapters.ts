@@ -43,7 +43,7 @@ import {
   renderCompanionReplyPrompt,
   renderDestinationAcknowledgementPrompt,
   renderTripPlanPrompt,
-} from "../prompting/travel-companion-prompts.js";
+} from "../prompting/elsewhere-prompts.js";
 import { readInlineImageFromFile } from "./image-file.js";
 
 interface GeminiOptions {

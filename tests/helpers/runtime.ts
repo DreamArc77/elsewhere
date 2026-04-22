@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { OpenClawTravelCompanionService } from "../../src/application/openclaw-travel-companion-service.js";
+import { ElsewhereService } from "../../src/application/elsewhere-service.js";
 import { CompanionConversationService } from "../../src/application/companion-conversation-service.js";
 import { RuntimeHooks } from "../../src/domain/types.js";
 import {
@@ -52,7 +52,7 @@ export async function createTestRuntime(options?: {
   const artifactStore = new JsonArtifactStore(paths.artifactsDir);
   const bindings = new BindingRegistryStore(rootDir);
   let conversationService!: CompanionConversationService;
-  const service = new OpenClawTravelCompanionService({
+  const service = new ElsewhereService({
     personaRepository,
     tripRepository,
     artifactStore,

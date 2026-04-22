@@ -1028,8 +1028,9 @@ describe("travel companion inbound takeover hook", () => {
 
     expect(result).toEqual({ handled: true });
     const state = await runtime.conversationStateRepository.getByKey(key);
-    expect(state?.pendingUserMessages).toHaveLength(1);
-    expect(state?.pendingUserMessages[0]?.content).toBe("在吗");
+    expect(state?.lastUserMessageAt).toBeTruthy();
+    expect(state?.recentTurns.at(-1)?.role).toBe("user");
+    expect(state?.recentTurns.at(-1)?.text).toBe("在吗");
   });
 
   it("accepts the next inbound image from inbound metadata as setup reference photo", async () => {

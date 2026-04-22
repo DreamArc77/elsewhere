@@ -5,7 +5,7 @@ import { CompanionConversationService } from "../application/companion-conversat
 import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 
-import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
+import { ElsewhereService } from "../application/elsewhere-service.js";
 import {
   ClockPort,
   ConversationBindingStore,
@@ -30,11 +30,12 @@ import { BindingRegistryStore } from "./binding-state.js";
 import { TravelCompanionPluginConfig } from "./config.js";
 import { resolveConfiguredGeminiProvider } from "./gemini-provider-config.js";
 import { getSystemCatalog, getSystemLocale } from "./i18n/catalog.js";
+import { resolvePluginStateRoot } from "./runtime-paths.js";
 import { completeSetupReferencePhotoFromSource } from "./hooks.js";
 import { MessageCommandRunner, NoopSchedulerPort, OpenClawCliMessengerPort } from "./ports.js";
 
 export interface RuntimeBundle {
-  service: OpenClawTravelCompanionService;
+  service: ElsewhereService;
   conversationService: CompanionConversationService;
   tripRepository: TripRepository;
   personaRepository: PersonaRepository;
@@ -59,7 +60,7 @@ export async function createRuntimeBundle(input: {
   runtime: PluginRuntime;
   logger: PluginLogger;
 }): Promise<RuntimeBundle> {
-  const runtimeRoot = join(input.stateDir, "openclaw-travel-companion");
+  const runtimeRoot = await resolvePluginStateRoot(input.stateDir, input.logger);
   const runtimeDataPaths = await ensureRuntimeDataPaths(runtimeRoot);
   const personaRepository = new JsonPersonaRepository(runtimeDataPaths.personasDir);
   const tripRepository = new JsonTripRepository(runtimeDataPaths.tripsDir);
@@ -100,7 +101,7 @@ export async function createRuntimeBundle(input: {
     logger,
   );
 
-  let service!: OpenClawTravelCompanionService;
+  let service!: ElsewhereService;
   let conversationService!: CompanionConversationService;
 
   const startTripFromIdleDestination = async (input2: {
@@ -161,7 +162,7 @@ export async function createRuntimeBundle(input: {
     return patchedTrip;
   };
 
-  service = new OpenClawTravelCompanionService({
+  service = new ElsewhereService({
     personaRepository,
     tripRepository,
     artifactStore,
@@ -308,7 +309,7 @@ export async function createRuntimeBundle(input: {
       await startTripFromIdleDestination({ binding, destination }),
   });
 
-  input.logger.info("OpenClaw Travel Companion runtime ready.");
+  input.logger.info("elsewhere runtime ready.");
 
   return {
     service,
@@ -357,7 +358,7 @@ export function startPollingService(input: {
           await bundle.conversationService.runDueIdleGuides();
         } catch (error) {
           input.logger.error(
-            `Travel companion background tick failed: ${
+            `elsewhere background tick failed: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
@@ -376,7 +377,7 @@ export function startPollingService(input: {
           stateDir: input.stateDir,
         }).catch((error) => {
           input.logger.error(
-            `Travel companion reference photo probe failed: ${
+            `elsewhere reference photo probe failed: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
@@ -386,7 +387,7 @@ export function startPollingService(input: {
     })
     .catch((error) => {
       input.logger.error(
-        `Travel companion runtime failed to start: ${
+        `elsewhere runtime failed to start: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

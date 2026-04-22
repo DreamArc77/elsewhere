@@ -1,3 +1,5 @@
+import { LEGACY_PLUGIN_ID } from "./metadata.js";
+
 export interface TravelCompanionPluginConfig {
   geminiApiKey?: string;
   openrouterApiKey?: string;
@@ -35,8 +37,25 @@ export function resolvePluginConfig(
       "https://openrouter.ai/api/v1",
     logMode:
       asLogMode(raw?.logMode) ??
+      asLogMode(env.OPENCLAW_ELSEWHERE_LOG_MODE) ??
       asLogMode(env.OPENCLAW_TRAVEL_COMPANION_LOG_MODE) ??
       "safe",
+  };
+}
+
+export function mergeLegacyPluginConfig(
+  raw: Record<string, unknown> | undefined,
+  fullConfig: unknown,
+): Record<string, unknown> | undefined {
+  const current = asRecord(raw);
+  const legacy = resolveLegacyPluginConfig(fullConfig);
+  if (!current && !legacy) {
+    return undefined;
+  }
+
+  return {
+    ...(legacy ?? {}),
+    ...(current ?? {}),
   };
 }
 
@@ -50,4 +69,22 @@ function asInteger(value: unknown): number | undefined {
 
 function asLogMode(value: unknown): "safe" | "debug" | undefined {
   return value === "safe" || value === "debug" ? value : undefined;
+}
+
+function resolveLegacyPluginConfig(
+  fullConfig: unknown,
+): Record<string, unknown> | undefined {
+  const root = asRecord(fullConfig);
+  const plugins = asRecord(root?.plugins);
+  const entries = asRecord(plugins?.entries);
+  const legacyEntry = asRecord(entries?.[LEGACY_PLUGIN_ID]);
+  return asRecord(legacyEntry?.config);
+}
+
+function asRecord(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }

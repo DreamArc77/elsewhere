@@ -15,7 +15,7 @@ const templateCache = new Map<string, string>();
 
 function promptTemplateUrl(fileName: string): URL {
   return new URL(
-    `../../prompts/openclaw-travel-companion/${fileName}`,
+    `../../prompts/elsewhere/${fileName}`,
     import.meta.url,
   );
 }

@@ -4,7 +4,7 @@ import {
   renderCaptionPrompt,
   renderCompanionReplyPrompt,
   renderDestinationAcknowledgementPrompt,
-} from "../src/prompting/travel-companion-prompts.js";
+} from "../src/prompting/elsewhere-prompts.js";
 
 const persona = {
   personaId: "persona-1",

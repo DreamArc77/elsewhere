@@ -94,8 +94,8 @@ function createTelegramContext(
   const [, ...rest] = commandBody.trim().split(/\s+/u);
   const pluginBinding = {
     bindingId: "binding-1",
-    pluginId: "openclaw-travel-companion",
-    pluginName: "OpenClaw Travel Companion",
+    pluginId: "elsewhere",
+    pluginName: "elsewhere",
     pluginRoot: "C:\\Users\\ndh\\Documents\\New project",
     channel: "telegram",
     accountId: "default",
@@ -195,7 +195,7 @@ describe("travel companion command UX", () => {
     expect(state?.setupSession?.kind).toBe("locale");
   });
 
-  it("blocks activate on unsupported OpenClaw versions", async () => {
+  it("blocks activate on runtimes older than 2026.3.28", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
 

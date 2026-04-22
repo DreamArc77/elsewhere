@@ -1,7 +1,0 @@
-interface:
-  display_name: "OpenClaw Travel Companion"
-  short_description: "Run a grounded travel-partner bot with postcard-style trip updates."
-  default_prompt: "Use $openclaw-travel-companion to set up a persona, plan a realistic trip, and generate grounded postcard updates."
-
-policy:
-  allow_implicit_invocation: true

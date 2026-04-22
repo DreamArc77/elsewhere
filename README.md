@@ -1,43 +1,47 @@
 # elsewhere
 
-elsewhere is an OpenClaw companion plugin that creates a personal travel companion with guided onboarding, proactive travel postcards, delayed replies, and image generation.
+elsewhere is an OpenClaw companion plugin for guided onboarding, proactive travel postcards, delayed replies, and grounded trip updates.
 
-## Install From GitHub Marketplace
-
-Requirements:
+## Requirements
 
 - OpenClaw `2026.3.28` or newer
 - Node.js `22` or newer
 
-Install the plugin:
+## Install
 
 ```bash
-openclaw plugins install elsewhere --marketplace DreamArc77/elsewhere#codex/openclaw-travel-companion
+openclaw plugins install @dreamarc/elsewhere
 openclaw gateway restart
 ```
 
-Then activate it in your chat:
+Configure the plugin under `plugins.entries.elsewhere.config`, then activate it in chat:
 
 ```text
 /elsewhere activate
 ```
 
-## Manual Install Fallback
-
-If marketplace install is unavailable in your OpenClaw build, install from source:
+## Update
 
 ```bash
-git clone https://github.com/DreamArc77/elsewhere.git
-cd elsewhere
-git checkout codex/openclaw-travel-companion
-npm install
-npm run build
-openclaw plugins install . --link
+openclaw plugins update elsewhere
 openclaw gateway restart
 ```
 
-Then run:
+You can also update everything at once with `openclaw plugins update --all`.
 
-```text
-/elsewhere activate
-```
+## Upgrade Notes
+
+- Existing runtime state is migrated into the `elsewhere` state directory on startup.
+- Existing plugin config is merged into `plugins.entries.elsewhere.config` during upgrades.
+- GitHub branch installs and old marketplace-spec installs are no longer the recommended update path.
+
+## Release Flow
+
+1. Update code, docs, and `CHANGELOG.md`.
+2. Bump the version in `package.json`.
+3. Run `npm run release:check`.
+4. Create the matching Git tag `vX.Y.Z`.
+5. Run `npm run release:publish:dry-run`.
+6. Run `npm run release:publish`.
+
+The publish scripts use ClawHub as the primary registry and npm as the companion distribution channel.

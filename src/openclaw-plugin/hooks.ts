@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import type { PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 
 import { CompanionConversationService } from "../application/companion-conversation-service.js";
-import { OpenClawTravelCompanionService } from "../application/openclaw-travel-companion-service.js";
+import { ElsewhereService } from "../application/elsewhere-service.js";
 import {
   ConversationBindingRecord,
   ConversationBindingStore,
@@ -27,6 +27,7 @@ import {
   isSupportedSlashCommand,
   normalizeSupportedSlashCommand,
 } from "./command-alias.js";
+import { PLUGIN_ID, PLUGIN_NAME } from "./metadata.js";
 import { RuntimeDataPaths } from "../infrastructure/json-file-repositories.js";
 import {
   advanceSetupSessionWithPhoto,
@@ -154,7 +155,7 @@ interface ReplyDispatchResult {
 export interface InboundClaimDependencies {
   bindings: ConversationBindingStore;
   conversationService: CompanionConversationService;
-  service: OpenClawTravelCompanionService;
+  service: ElsewhereService;
   tripRepository: TripRepository;
   personaRepository: PersonaRepository;
   conversationStates: ConversationStateRepository;
@@ -1532,8 +1533,8 @@ function buildSyntheticCommandContext(
     threadParentId: event.parentConversationId,
     requestConversationBinding: async (binding = {}) =>
       (await bindingInternals).requestPluginConversationBinding({
-        pluginId: "openclaw-travel-companion",
-        pluginName: "OpenClaw Travel Companion",
+        pluginId: PLUGIN_ID,
+        pluginName: PLUGIN_NAME,
         pluginRoot,
         requestedBySenderId: senderId,
         conversation,

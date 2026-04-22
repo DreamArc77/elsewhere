@@ -1,9 +1,39 @@
 {
-  "name": "openclaw-travel-companion",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@dreamarc/elsewhere",
+  "version": "1.0.0",
+  "private": false,
   "type": "module",
-  "description": "MVP runtime and skill package for a travel-frog-style OpenClaw companion.",
+  "description": "elsewhere is an OpenClaw companion plugin with guided onboarding, travel postcards, delayed replies, and image generation.",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "travel",
+    "companion",
+    "telegram",
+    "wechat",
+    "qq",
+    "feishu"
+  ],
+  "homepage": "https://github.com/DreamArc77/elsewhere",
+  "bugs": {
+    "url": "https://github.com/DreamArc77/elsewhere/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DreamArc77/elsewhere.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "plugin.ts",
+    "src",
+    "prompts",
+    "skills",
+    "openclaw.plugin.json",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "openclaw": {
     "extensions": ["./plugin.ts"],
     "compat": {
@@ -17,6 +47,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-prompts.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "release:publish": "node scripts/release-publish.mjs",
+    "release:publish:dry-run": "node scripts/release-publish.mjs --dry-run",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "vitest run tests/live.gemini.smoke.test.ts"

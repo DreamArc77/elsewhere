@@ -1,0 +1,7 @@
+interface:
+  display_name: "elsewhere"
+  short_description: "Run a grounded travel-partner bot with postcard-style trip updates."
+  default_prompt: "Use $elsewhere to set up a persona, plan a realistic trip, and generate grounded postcard updates."
+
+policy:
+  allow_implicit_invocation: true

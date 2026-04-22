@@ -1,5 +1,5 @@
 {
-  "id": "openclaw-travel-companion",
+  "id": "elsewhere",
   "name": "elsewhere",
   "description": "A companion travel plugin with proactive postcards, delayed chat, and guided onboarding.",
   "skills": ["./skills"],

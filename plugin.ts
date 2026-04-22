@@ -6,7 +6,17 @@ import {
   LEGACY_COMMAND_NAME,
   PRIMARY_COMMAND_NAME,
 } from "./src/openclaw-plugin/command-alias.js";
-import { resolvePluginConfig } from "./src/openclaw-plugin/config.js";
+import {
+  mergeLegacyPluginConfig,
+  resolvePluginConfig,
+} from "./src/openclaw-plugin/config.js";
+import {
+  PLUGIN_DESCRIPTION,
+  PLUGIN_ID,
+  PLUGIN_NAME,
+  PLUGIN_WORKER_ID,
+} from "./src/openclaw-plugin/metadata.js";
+import { resolvePluginStateRootSync } from "./src/openclaw-plugin/runtime-paths.js";
 import { createRuntimeBundle, startPollingService } from "./src/openclaw-plugin/service.js";
 import {
   handleTravelCompanionBeforeDispatch,
@@ -14,9 +24,9 @@ import {
 } from "./src/openclaw-plugin/hooks.js";
 
 export default definePluginEntry({
-  id: "openclaw-travel-companion",
-  name: "elsewhere",
-  description: "A companion travel plugin with proactive postcards and delayed chat.",
+  id: PLUGIN_ID,
+  name: PLUGIN_NAME,
+  description: PLUGIN_DESCRIPTION,
   configSchema: {
     jsonSchema: {
       type: "object",
@@ -43,9 +53,11 @@ export default definePluginEntry({
     },
   },
   register(api) {
-    const pluginConfig = resolvePluginConfig(api.pluginConfig);
+    const pluginConfig = resolvePluginConfig(
+      mergeLegacyPluginConfig(api.pluginConfig, api.runtime.config.loadConfig()),
+    );
     const stateDir = api.runtime.state.resolveStateDir();
-    const pluginStateDir = `${stateDir}/openclaw-travel-companion`;
+    const pluginStateDir = resolvePluginStateRootSync(stateDir, api.logger);
     const bindings = new BindingRegistryStore(pluginStateDir);
     let runtimeBundlePromise:
       | ReturnType<typeof createRuntimeBundle>
@@ -61,7 +73,7 @@ export default definePluginEntry({
     };
 
     api.registerService({
-      id: "openclaw-travel-companion-worker",
+      id: PLUGIN_WORKER_ID,
       start() {
         const control = startPollingService({
           stateDir,
@@ -97,7 +109,7 @@ export default definePluginEntry({
         });
       } catch (error) {
         api.logger.warn(
-          `Travel companion inbound claim failed: ${
+          `elsewhere inbound claim failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -124,7 +136,7 @@ export default definePluginEntry({
         });
       } catch (error) {
         api.logger.warn(
-          `Travel companion before-dispatch takeover failed: ${
+          `elsewhere before-dispatch takeover failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );

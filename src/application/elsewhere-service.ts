@@ -28,7 +28,7 @@ import {
 } from "../domain/business-situation.js";
 import { deriveImageIntent } from "../domain/image-intent.js";
 import { buildDerivedGrounding } from "../domain/step-grounding.js";
-import { renderImageGenerationPrompt } from "../prompting/travel-companion-prompts.js";
+import { renderImageGenerationPrompt } from "../prompting/elsewhere-prompts.js";
 
 function nowIso(clock: ClockPort): string {
   return clock.now().toISOString();
@@ -54,7 +54,7 @@ function detectImageExtension(mimeType: string): string {
 const inFlightPostcardPreparationKeys = new Set<string>();
 const inFlightPostcardDeliveryKeys = new Set<string>();
 
-export class OpenClawTravelCompanionService {
+export class ElsewhereService {
   private readonly inFlightTripIds = new Set<string>();
 
   constructor(

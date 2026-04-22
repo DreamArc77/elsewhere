@@ -1,4 +1,4 @@
-export * from "./application/openclaw-travel-companion-service.js";
+export * from "./application/elsewhere-service.js";
 export * from "./contracts/schemas.js";
 export * from "./domain/state-machine.js";
 export * from "./domain/types.js";
