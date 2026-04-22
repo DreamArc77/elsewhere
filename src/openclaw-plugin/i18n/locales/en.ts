@@ -33,17 +33,12 @@ export const en: SystemLocaleCatalog = {
   },
   help: {
     lines: [
-      "/elsewhere bind",
-      "/elsewhere activate",
-      "/elsewhere deactivate",
-      "/elsewhere setup                      # edit the current companion",
-      "/elsewhere create                     # create a new companion",
-      "/elsewhere model                      # reconfigure the text model / Gemini key",
-      "/elsewhere start --to Tokyo [--from Hong-Kong] [--when next-week]",
-      "/elsewhere status [--trip <id>]",
-      "/elsewhere tick [--trip <id>]         # force delayed replies and the next trip step",
-      "/elsewhere tick-reply                 # force delayed replies only",
-      "/elsewhere stop [--trip <id>]",
+      "/elsewhere-activate",
+      "/elsewhere-deactivate",
+      "/elsewhere-setup                      # edit the current companion",
+      "/elsewhere-model                      # reconfigure the text model / Gemini key",
+      "/elsewhere-status",
+      "/elsewhere-stop",
     ],
   },
   command: {

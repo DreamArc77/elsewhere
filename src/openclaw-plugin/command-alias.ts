@@ -4,12 +4,8 @@ export const DIRECT_SUBCOMMAND_ALIASES = [
   "activate",
   "deactivate",
   "setup",
-  "create",
   "model",
-  "start",
   "status",
-  "tick",
-  "tick-reply",
   "stop",
 ] as const;
 
