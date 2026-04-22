@@ -320,6 +320,11 @@ export interface RecentPostcardPhotoContext {
 
 export type SystemLocale = "zh-CN" | "ja-JP" | "en";
 
+export type LastTripExitKind =
+  | "completed_return_arrive"
+  | "stopped"
+  | "deactivated";
+
 export type SetupStep =
   | "locale_select"
   | "persona_intro"
@@ -603,6 +608,10 @@ export interface ConversationCompanionState {
   idleGuideSentAt?: string | null;
   awaitingDestination?: boolean;
   pendingDestinationCandidate?: string | null;
+  lastTripExitKind?: LastTripExitKind | null;
+  lastTripExitAt?: string | null;
+  pendingPlanningPostcardTripId?: string | null;
+  planningSilentUserMessages?: InboundUserMessage[];
   lastUserMessageAt: string | null;
   lastCompanionReplyAt: string | null;
   memorySummary?: string;
@@ -713,6 +722,8 @@ export interface GroundingPort {
     grounding: PhaseGroundingResult;
     resolvedState: ResolvedAgentState;
     imageSummary?: string;
+    planningSilentUserMessages?: InboundUserMessage[];
+    locale?: SystemLocale;
   }): Promise<{ caption: string; provider: string }>;
   composeCompanionReply(input: {
     conversationKey: string;
@@ -726,14 +737,6 @@ export interface GroundingPort {
     locale: SystemLocale;
     now: string;
   }): Promise<CompanionReplyPlan>;
-  composeIdleDestinationGuide(input: {
-    conversationKey: string;
-    persona: StoredPersonaProfile;
-    recentTurns: CompanionTurn[];
-    resolvedState: ResolvedAgentState;
-    locale: SystemLocale;
-    now: string;
-  }): Promise<IdleDestinationGuidePlan>;
   composeDestinationAcknowledgement(input: {
     conversationKey: string;
     persona: StoredPersonaProfile;
@@ -820,6 +823,11 @@ export interface RuntimeHooks {
   afterTripCompleted?(record: TripRecord): Promise<void> | void;
 }
 
+export interface CaptionContextSupplement {
+  planningSilentUserMessages?: InboundUserMessage[];
+  locale?: SystemLocale;
+}
+
 export interface OpenClawTravelCompanionServiceDependencies {
   personaRepository: PersonaRepository;
   tripRepository: TripRepository;
@@ -831,4 +839,8 @@ export interface OpenClawTravelCompanionServiceDependencies {
   clock: ClockPort;
   logger: LoggerPort;
   hooks?: RuntimeHooks;
+  resolveCaptionContext?(
+    record: TripRecord,
+    step: TimelineStep,
+  ): Promise<CaptionContextSupplement | null> | CaptionContextSupplement | null;
 }

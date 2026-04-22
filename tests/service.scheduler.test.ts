@@ -327,7 +327,7 @@ describe("service scheduling and crash recovery", () => {
 
     await resumedService.runTrip(trip.tripId);
     expect(runtime.messenger.sentMessages).toHaveLength(1);
-    expect(runtime.messenger.rawSendAttempts).toBe(2);
+    expect(runtime.messenger.rawSendAttempts).toBe(1);
   });
 
   it("normalizes boundary arrival context for the first and last activities", async () => {

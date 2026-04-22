@@ -42,7 +42,6 @@ import {
   renderCaptionPrompt,
   renderCompanionReplyPrompt,
   renderDestinationAcknowledgementPrompt,
-  renderIdleDestinationGuidePrompt,
   renderTripPlanPrompt,
 } from "../prompting/travel-companion-prompts.js";
 import { readInlineImageFromFile } from "./image-file.js";
@@ -471,6 +470,33 @@ function buildCaptionCurrentSituation(
     `route：${route ? JSON.stringify(route, null, 2) : "无"}`,
     `note：${state.note ?? "无"}`,
   ].join("\n");
+}
+
+function buildPlanningPlanSummary(plan: TripPlan): string {
+  return JSON.stringify(
+    {
+      metadata: plan.metadata,
+      transportation: plan.transportation,
+      daily_itinerary: plan.daily_itinerary,
+    },
+    null,
+    2,
+  );
+}
+
+function buildPlanningSilentUserMessagesBlock(
+  planningSilentUserMessages: InboundUserMessage[] = [],
+): string {
+  if (planningSilentUserMessages.length === 0) {
+    return "无";
+  }
+
+  return planningSilentUserMessages
+    .map((message) => {
+      const time = message.receivedAt ?? "未知时间";
+      return `${time}：${message.content}`;
+    })
+    .join("\n");
 }
 
 function buildCaptionRecentImageSummary(imageSummary?: string): string {
@@ -1492,10 +1518,16 @@ export class GeminiRestGroundingAdapter
     grounding: PhaseGroundingResult;
     resolvedState: ResolvedAgentState;
     imageSummary?: string;
+    planningSilentUserMessages?: InboundUserMessage[];
+    locale?: SystemLocale;
   }): Promise<{ caption: string; provider: string }> {
     const startedAt = nowIso();
     const promptProvider = await this.describeTextProvider();
-    const currentSituation = buildCaptionCurrentSituation(input.resolvedState);
+    const isPlanningCaption =
+      input.resolvedState.stage.substate === "planning" || input.phase === "planning";
+    const currentSituation = isPlanningCaption
+      ? buildPlanningPlanSummary(input.plan)
+      : buildCaptionCurrentSituation(input.resolvedState);
     const prompt = await renderCaptionPrompt({
       persona: input.persona,
       request: input.request,
@@ -1506,6 +1538,10 @@ export class GeminiRestGroundingAdapter
       resolvedState: input.resolvedState,
       currentSituation,
       recentImageSummary: buildCaptionRecentImageSummary(input.imageSummary),
+      locale: input.locale ?? "zh-CN",
+      planningSilentUserMessages: isPlanningCaption
+        ? buildPlanningSilentUserMessagesBlock(input.planningSilentUserMessages ?? [])
+        : undefined,
     });
 
     await this.logPromptEntry({
@@ -1622,63 +1658,6 @@ export class GeminiRestGroundingAdapter
         companionReplyPlanSchema,
         "Gemini companion reply",
       ),
-      provider: response.provider,
-    };
-  }
-
-  async composeIdleDestinationGuide(input: {
-    conversationKey: string;
-    persona: StoredPersonaProfile;
-    recentTurns: CompanionTurn[];
-    resolvedState: ResolvedAgentState;
-    locale: SystemLocale;
-    now: string;
-  }): Promise<{ segments: string[]; provider: string }> {
-    const startedAt = nowIso();
-    const promptProvider = await this.describeTextProvider();
-    const prompt = await renderIdleDestinationGuidePrompt({
-      persona: input.persona,
-      conversationKey: input.conversationKey,
-      recentTurns: JSON.stringify(input.recentTurns, null, 2),
-      currentStateSummary: buildCurrentStateSummary({
-        resolvedState: input.resolvedState,
-      }),
-      locale: input.locale,
-      now: input.now,
-    });
-
-    await this.logPromptEntry({
-      tripId: `conversation:${input.conversationKey}`,
-      runId: `idle-guide:${input.conversationKey}:${startedAt}`,
-      phase: "system",
-      event: "idle.guide.prompt.rendered",
-      decision: "Rendered the final idle destination guide prompt before sending it to the selected text provider.",
-      provider: promptProvider,
-      status: "success",
-      startedAt,
-      finishedAt: startedAt,
-      latencyMs: 0,
-      details: {
-        conversationKey: input.conversationKey,
-        promptLength: prompt.length,
-        renderedPrompt: prompt,
-      },
-    });
-
-    const response = await this.completeTextPrompt(prompt, {
-      kind: "json",
-      temperature: 0.8,
-      jsonSchema: companionReplyPlanJsonSchema,
-    });
-
-    const parsed = parseModelJson(
-      response.text,
-      companionReplyPlanSchema,
-      "Gemini idle destination guide",
-    );
-
-    return {
-      segments: parsed.segments,
       provider: response.provider,
     };
   }

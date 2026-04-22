@@ -34,7 +34,7 @@ describe("renderSetupStepPrompt persona review", () => {
 
     expect(message).toContain("当前资料如下：");
     expect(message).toContain("名字：小美");
-    expect(message).toContain("旅伴居住的城市：东京");
+    expect(message).toContain("Ta居住的城市：东京");
     expect(message).toContain("1. 确认并继续处理参考图");
     expect(message).not.toContain("1. 名字");
     expect(message).not.toContain("2. 旅伴居住的城市");

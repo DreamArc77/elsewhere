@@ -70,6 +70,7 @@ export interface SystemLocaleCatalog {
     personaUpdatedReactivateHint: string;
     modelUpdated: string;
     idleGuideHint: string;
+    idleDestinationPrompt(name: string): string;
   };
   setup: {
     cancelledCreate: string;

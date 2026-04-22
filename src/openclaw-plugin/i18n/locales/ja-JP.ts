@@ -188,6 +188,8 @@ export const jaJP: SystemLocaleCatalog = {
       "たとえば: 東京 / 北京 / パリ",
       "そうすると相棒が旅行の準備を始めます。",
     ].join("\n"),
+    idleDestinationPrompt: (name: string) =>
+      `${name} は次の旅の準備ができています。これからは ${name} に行き先の候補をそのまま伝えてください。たとえば: 東京 / 北京 / パリ。そうすると ${name} が今回の旅の準備を始めます。`,
   },
   setup: {
     cancelledCreate: "今回の設定をキャンセルしました。",

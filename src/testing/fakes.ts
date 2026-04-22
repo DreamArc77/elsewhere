@@ -471,6 +471,8 @@ export class FakeGroundingPort implements GroundingPort {
     grounding: PhaseGroundingResult;
     resolvedState: ResolvedAgentState;
     imageSummary?: string;
+    planningSilentUserMessages?: InboundUserMessage[];
+    locale?: SystemLocale;
   }): Promise<{ caption: string; provider: string }> {
     return {
       caption:
@@ -510,20 +512,6 @@ export class FakeGroundingPort implements GroundingPort {
       segments: [
         `${input.persona?.name ?? "Companion"} heard: ${latest?.content ?? "..."}`,
       ],
-      provider: "fake-grounding",
-    };
-  }
-
-  async composeIdleDestinationGuide(input: {
-    conversationKey: string;
-    persona: StoredPersonaProfile;
-    recentTurns: CompanionTurn[];
-    resolvedState: ResolvedAgentState;
-    locale: SystemLocale;
-    now: string;
-  }): Promise<{ segments: string[]; provider: string }> {
-    return {
-      segments: [`${input.persona.name} wants to know where to go next.`],
       provider: "fake-grounding",
     };
   }

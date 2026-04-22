@@ -108,10 +108,14 @@ describe("reply prompt", () => {
       } as never,
       currentSituation: "当前阶段：planning",
       recentImageSummary: "No recent photo was sent.",
+      locale: "zh-CN",
+      planningSilentUserMessages: "2026-04-21T20:05:00.000Z：到了告诉我",
     });
 
     expect(prompt).toContain("You are still in the planning stage at home.");
     expect(prompt).toContain("Do not say you are packing");
     expect(prompt).toContain("checking tickets");
+    expect(prompt).toContain("刚才你做计划时，用户发了：");
+    expect(prompt).toContain("2026-04-21T20:05:00.000Z：到了告诉我");
   });
 });

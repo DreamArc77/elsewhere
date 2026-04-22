@@ -198,6 +198,8 @@ export const en: SystemLocaleCatalog = {
       "for example: Tokyo / Beijing / Paris",
       "and they will start preparing the trip.",
     ].join("\n"),
+    idleDestinationPrompt: (name: string) =>
+      `${name} is ready for the next trip. You can now tell ${name} a destination you suggest, for example: Tokyo / Beijing / Paris, and ${name} will start preparing the trip.`,
   },
   setup: {
     cancelledCreate: "This setup was cancelled.",

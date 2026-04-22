@@ -209,7 +209,7 @@ export async function createRuntimeBundle(input: {
             continue;
           }
 
-          await conversationStateRepository.save({
+          const nextState = {
             ...state,
             latestPostcardPhoto: {
               tripId: record.tripId,
@@ -219,7 +219,24 @@ export async function createRuntimeBundle(input: {
               imageSummary: pending.imageSummary,
             },
             updatedAt: new Date().toISOString(),
-          });
+          };
+          await conversationStateRepository.save(nextState);
+          if (
+            pending.phase === "planning" &&
+            state.pendingPlanningPostcardTripId === record.tripId
+          ) {
+            await conversationService.completePlanningPostcardGate({
+              conversationKey: binding.key,
+              tripId: record.tripId,
+            });
+            const refreshed =
+              await conversationStateRepository.getByKey(binding.key);
+            if (refreshed?.pendingReplyDispatch) {
+              await conversationService.runConversation(binding.key, {
+                ignoreSchedule: true,
+              });
+            }
+          }
         }
       },
       afterTripCompleted: async (record) => {
@@ -243,6 +260,25 @@ export async function createRuntimeBundle(input: {
         }
       },
     },
+    resolveCaptionContext: async (record, step) => {
+      if (step.phase !== "planning") {
+        return null;
+      }
+
+      const allBindings = await bindings.list();
+      const targetBinding = allBindings.find(
+        (binding) => binding.lastTripId === record.tripId,
+      );
+      if (!targetBinding) {
+        return null;
+      }
+
+      const state = await conversationStateRepository.getByKey(targetBinding.key);
+      return {
+        planningSilentUserMessages: state?.planningSilentUserMessages ?? [],
+        locale: state?.systemLocale ?? "zh-CN",
+      };
+    },
   });
   conversationService = new CompanionConversationService({
     bindings,
@@ -265,6 +301,9 @@ export async function createRuntimeBundle(input: {
     messenger,
     clock: new SystemClockPort(),
     logger,
+    triggerPlanningPostcard: async (tripId) => {
+      await service.runTrip(tripId, { ignoreSchedule: true });
+    },
     idleDestinationStarter: async ({ binding, destination }) =>
       await startTripFromIdleDestination({ binding, destination }),
   });

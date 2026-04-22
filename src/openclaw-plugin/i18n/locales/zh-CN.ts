@@ -194,6 +194,8 @@ export const zhCN: SystemLocaleCatalog = {
       "比如：东京 / 北京 / 巴黎",
       "Ta就会开始准备这次旅行。",
     ].join("\n"),
+    idleDestinationPrompt: (name: string) =>
+      `${name}已经准备好下次旅行了，接下来你可以直接告诉${name}你建议的目的地，比如：东京 / 北京 / 巴黎，${name}就会开始准备这次旅行。`,
   },
   setup: {
     cancelledCreate: "已取消本次设置。",

@@ -548,6 +548,8 @@ export class OpenClawTravelCompanionService {
       step,
       persona,
     });
+    const captionContext =
+      (await this.dependencies.resolveCaptionContext?.(record, step)) ?? null;
     const captionResult = await this.dependencies.grounding.composeCaption({
       tripId: record.tripId,
       persona,
@@ -559,6 +561,9 @@ export class OpenClawTravelCompanionService {
       grounding: pending.grounding,
       resolvedState,
       imageSummary: pending.imageSummary,
+      planningSilentUserMessages:
+        captionContext?.planningSilentUserMessages ?? [],
+      locale: captionContext?.locale ?? "zh-CN",
     });
 
     const pendingPostcard: Postcard = {
@@ -660,8 +665,6 @@ export class OpenClawTravelCompanionService {
         },
       });
 
-      await this.dependencies.hooks?.afterMessageSent?.(record, receipt);
-
       const deliveryArtifactId = randomUUID();
       const deliveryPath = await this.dependencies.artifactStore.writeJsonArtifact({
         tripId: record.tripId,
@@ -718,6 +721,7 @@ export class OpenClawTravelCompanionService {
       };
 
       await this.dependencies.tripRepository.save(nextRecord);
+      await this.dependencies.hooks?.afterMessageSent?.(nextRecord, receipt);
       await this.log({
         tripId: record.tripId,
         runId,

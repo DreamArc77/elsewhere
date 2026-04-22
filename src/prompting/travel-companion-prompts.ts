@@ -129,13 +129,16 @@ export async function renderCaptionPrompt(input: {
   resolvedState: ResolvedAgentState;
   currentSituation: string;
   recentImageSummary: string;
+  locale: SystemLocale;
+  planningSilentUserMessages?: string;
 }): Promise<string> {
+  const isPlanning =
+    input.resolvedState.stage.substate === "planning" || input.phase === "planning";
   const template = await loadTemplate(
-    input.resolvedState.stage.substate === "planning" || input.phase === "planning"
-      ? "compose-caption-planning.md"
-      : "compose-caption.md",
+    isPlanning ? "compose-caption-planning.md" : "compose-caption.md",
   );
-  return renderTemplate(template, {
+
+  const commonValues = {
     personaSummary: buildPersonaSummary(input.persona),
     phase: input.phase,
     day: input.day,
@@ -143,7 +146,17 @@ export async function renderCaptionPrompt(input: {
     grounding: JSON.stringify(input.grounding, null, 2),
     currentSituation: input.currentSituation,
     recentImageSummary: input.recentImageSummary,
-  });
+    outputLanguageInstruction: buildOutputLanguageInstruction(input.locale),
+  };
+
+  if (isPlanning) {
+    return renderTemplate(template, {
+      ...commonValues,
+      planningSilentUserMessages: input.planningSilentUserMessages ?? "无",
+    });
+  }
+
+  return renderTemplate(template, commonValues);
 }
 
 export async function renderCompanionReplyPrompt(input: {
@@ -176,25 +189,6 @@ export async function renderCompanionReplyPrompt(input: {
     outputLanguageInstruction: buildOutputLanguageInstruction(input.locale),
     now: input.now,
     latestUserMessageAt: input.latestUserMessageAt,
-  });
-}
-
-export async function renderIdleDestinationGuidePrompt(input: {
-  persona: StoredPersonaProfile;
-  conversationKey: string;
-  recentTurns: string;
-  currentStateSummary: string;
-  locale: SystemLocale;
-  now: string;
-}): Promise<string> {
-  const template = await loadTemplate("compose-idle-guide.md");
-  return renderTemplate(template, {
-    personaSummary: buildPersonaSummary(input.persona),
-    conversationKey: input.conversationKey,
-    recentTurns: input.recentTurns,
-    currentStateSummary: input.currentStateSummary,
-    outputLanguageInstruction: buildOutputLanguageInstruction(input.locale),
-    now: input.now,
   });
 }
 

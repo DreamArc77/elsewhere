@@ -92,9 +92,10 @@ describe("reply seen strategy", () => {
       content: "秒回试试",
     });
 
-    expect(state.pendingReplyDispatch?.instantSeen).toBe(true);
-    expect(state.pendingReplyDispatch?.dueAt).toBe(runtime.clock.now().toISOString());
+    expect(state.pendingReplyDispatch).toBeNull();
     expect(state.instantReplyWindow).not.toBeNull();
+    expect(state.lastCompanionReplyAt).toBe(runtime.clock.now().toISOString());
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
   });
 
   it("filters old-trip turns out of the reply context", async () => {
@@ -295,7 +296,7 @@ describe("reply seen strategy", () => {
     await runtime.conversationService.enterIdleAwaitingDestination({
       binding,
       sendGuideNow: false,
-      reason: "activate",
+      reason: "trip_completed",
     });
 
     runtime.clock.advanceHours(12);

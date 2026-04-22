@@ -258,7 +258,7 @@ describe("travel companion command UX", () => {
     expect(reply.text).toContain("/elsewhere setup");
   });
 
-  it("does not auto-send the idle destination guide on activate after onboarding is complete", async () => {
+  it("sends the idle destination system prompt on activate after onboarding is complete", async () => {
     const runtime = await createTestRuntime();
     const bindings = new BindingRegistryStore(runtime.rootDir);
     const deps = createDeps(runtime, bindings);
@@ -292,12 +292,14 @@ describe("travel companion command UX", () => {
     expect(reply.isError).toBeUndefined();
     expect(reply.text).toContain("旅伴模式已开启");
     expect(reply.text).toContain("现在直接告诉旅伴一个想去的目的地就行");
-    expect(runtime.messenger.sentReplies).toHaveLength(0);
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("Mori");
+    expect(runtime.messenger.sentReplies[0]?.text).toContain("东京 / 北京 / 巴黎");
     const state = await runtime.conversationStateRepository.getByKey(
       keyForDefaultChat(),
     );
     expect(state?.awaitingDestination).toBe(true);
-    expect(state?.idleGuideSentAt).toBeNull();
+    expect(state?.idleGuideSentAt).toBeTruthy();
   });
 
   it("creates a persona from an image URL pasted in the setup command after locale is selected", async () => {

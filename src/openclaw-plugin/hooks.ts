@@ -1106,7 +1106,7 @@ async function finalizeSetupSession(input: {
     if (readiness.isComplete && !inbound.binding.lastTripId && !nextState.awaitingDestination) {
       await deps.conversationService.enterIdleAwaitingDestination({
         binding: inbound.binding,
-        sendGuideNow: false,
+        sendGuideNow: true,
         reason: "activate",
       });
     }

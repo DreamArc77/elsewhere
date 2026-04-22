@@ -723,13 +723,6 @@ export function renderSetupStepPrompt(
   return buildPersonaStepPrompt(session, locale);
 }
 
-export function buildIdleGuideMessage(
-  _persona: StoredPersonaProfile,
-  locale: SystemLocale = "zh-CN",
-): string {
-  return getSystemCatalog(locale).onboarding.idleGuideHint;
-}
-
 export function buildPersonaCreatedMessage(
   persona: StoredPersonaProfile,
   locale: SystemLocale = "zh-CN",

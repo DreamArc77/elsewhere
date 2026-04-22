@@ -48,18 +48,18 @@ describe("buildOnboardingGateMessage", () => {
     expect(message).not.toContain("/elsewhere model");
   });
 
-  it("continues model setup when model wizard is already open", () => {
+  it("continues model setup inside the setup flow when model wizard is already open", () => {
     const message = buildOnboardingGateMessage({
       binding,
       readiness: readiness({ hasPersona: true }),
       setupSession: setupSession("model"),
     });
 
-    expect(message).toContain("/elsewhere model");
-    expect(message).not.toContain("/elsewhere setup");
+    expect(message).toContain("/elsewhere setup");
+    expect(message).toContain("配置模型");
   });
 
-  it("guides full first-time onboarding in two steps", () => {
+  it("guides first-time onboarding into setup first", () => {
     const message = buildOnboardingGateMessage({
       binding,
       readiness: readiness({}),
@@ -68,42 +68,42 @@ describe("buildOnboardingGateMessage", () => {
 
     expect(message).toContain("欢迎来到 elsewhere");
     expect(message).toContain("/elsewhere setup");
-    expect(message).toContain("/elsewhere model");
+    expect(message).not.toContain("/elsewhere model");
   });
 
-  it("guides setup first when persona is missing", () => {
+  it("reuses the same first-time gate when persona is missing", () => {
     const message = buildOnboardingGateMessage({
       binding,
       readiness: readiness({ hasTextProvider: true, hasGeminiKey: true }),
       setupSession: null,
     });
 
-    expect(message).toContain("旅伴资料");
+    expect(message).toContain("欢迎来到 elsewhere");
     expect(message).toContain("/elsewhere setup");
-    expect(message).not.toContain("旅伴资料已经有了");
+    expect(message).not.toContain("/elsewhere model");
   });
 
-  it("guides model when only provider config is missing", () => {
+  it("reuses the same first-time gate when only provider config is missing", () => {
     const message = buildOnboardingGateMessage({
       binding,
       readiness: readiness({ hasPersona: true, hasGeminiKey: true }),
       setupSession: null,
     });
 
-    expect(message).toContain("文本模型配置");
-    expect(message).toContain("旅伴资料已经有了");
-    expect(message).toContain("/elsewhere model");
+    expect(message).toContain("欢迎来到 elsewhere");
+    expect(message).toContain("/elsewhere setup");
+    expect(message).not.toContain("/elsewhere model");
   });
 
-  it("guides model when only gemini key is missing", () => {
+  it("reuses the same first-time gate when only gemini key is missing", () => {
     const message = buildOnboardingGateMessage({
       binding,
       readiness: readiness({ hasPersona: true, hasTextProvider: true }),
       setupSession: null,
     });
 
-    expect(message).toContain("planning / 生图通道配置");
-    expect(message).toContain("/elsewhere model");
-    expect(message).not.toContain("/elsewhere setup");
+    expect(message).toContain("欢迎来到 elsewhere");
+    expect(message).toContain("/elsewhere setup");
+    expect(message).not.toContain("/elsewhere model");
   });
 });

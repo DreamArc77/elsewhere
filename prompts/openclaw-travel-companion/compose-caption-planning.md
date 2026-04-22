@@ -21,6 +21,9 @@ Your persona:
 Current situation:
 {{currentSituation}}
 
+刚才你做计划时，用户发了：
+{{planningSilentUserMessages}}
+
 Recent photo summary:
 {{recentImageSummary}}
 

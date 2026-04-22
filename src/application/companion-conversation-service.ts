@@ -15,6 +15,7 @@ import {
   PersonaRepository,
   StoredPersonaProfile,
   SystemLocale,
+  LastTripExitKind,
   TripRecord,
   TripRepository,
 } from "../domain/types.js";
@@ -25,7 +26,6 @@ import {
   resolveAgentState,
 } from "../domain/business-situation.js";
 import { getSystemCatalog, getSystemLocale } from "../openclaw-plugin/i18n/catalog.js";
-import { buildIdleGuideMessage } from "../openclaw-plugin/onboarding.js";
 
 function nowIso(clock: ClockPort): string {
   return clock.now().toISOString();
@@ -64,6 +64,36 @@ function filterReplyTurnsForActiveTrip(
 
 const IDLE_GUIDE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
+function isNonFirstIdleLoop(state: ConversationCompanionState): boolean {
+  return state.lastTripExitKind === "completed_return_arrive";
+}
+
+function shouldSendIdlePromptNow(input: {
+  state: ConversationCompanionState;
+  sendGuideNow: boolean;
+}): boolean {
+  return input.sendGuideNow && !isNonFirstIdleLoop(input.state);
+}
+
+function mapIdleReasonToLastTripExitKind(
+  reason:
+    | "activate"
+    | "first_onboarding_complete"
+    | "trip_stopped"
+    | "trip_completed",
+): LastTripExitKind | null {
+  switch (reason) {
+    case "trip_completed":
+      return "completed_return_arrive";
+    case "trip_stopped":
+      return "stopped";
+    case "activate":
+    case "first_onboarding_complete":
+    default:
+      return null;
+  }
+}
+
 function emptyConversationState(
   conversationKey: string,
   mode: ConversationBindingRecord["mode"],
@@ -84,6 +114,10 @@ function emptyConversationState(
     idleGuideSentAt: null,
     awaitingDestination: false,
     pendingDestinationCandidate: null,
+    lastTripExitKind: null,
+    lastTripExitAt: null,
+    pendingPlanningPostcardTripId: null,
+    planningSilentUserMessages: [],
     lastUserMessageAt: null,
     lastCompanionReplyAt: null,
     memorySummary: undefined,
@@ -119,6 +153,7 @@ export class CompanionConversationService {
       messenger: HostMessengerPort;
       clock: ClockPort;
       logger: LoggerPort;
+      triggerPlanningPostcard?: (tripId: string) => Promise<void>;
       idleDestinationStarter?: (input: {
         binding: ConversationBindingRecord;
         destination: string;
@@ -162,6 +197,9 @@ export class CompanionConversationService {
 
   async deactivateConversation(
     conversationKey: string,
+    input?: {
+      lastTripExitKind?: LastTripExitKind | null;
+    },
   ): Promise<ConversationCompanionState> {
     const startedAt = nowIso(this.dependencies.clock);
     const runId = randomUUID();
@@ -183,6 +221,11 @@ export class CompanionConversationService {
       idleGuideSentAt: null,
       awaitingDestination: false,
       pendingDestinationCandidate: null,
+      lastTripExitKind:
+        input?.lastTripExitKind ?? state.lastTripExitKind ?? "deactivated",
+      lastTripExitAt: updatedAt,
+      pendingPlanningPostcardTripId: null,
+      planningSilentUserMessages: [],
       updatedAt,
     };
     await this.dependencies.conversationStates.save(nextState);
@@ -230,6 +273,8 @@ export class CompanionConversationService {
       idleGuideSentAt: null,
       awaitingDestination: false,
       pendingDestinationCandidate: null,
+      pendingPlanningPostcardTripId: null,
+      planningSilentUserMessages: [],
       updatedAt,
     };
     await this.dependencies.conversationStates.save(nextState);
@@ -263,6 +308,12 @@ export class CompanionConversationService {
     const state =
       (await this.dependencies.conversationStates.getByKey(input.binding.key)) ??
       emptyConversationState(input.binding.key, input.binding.mode, updatedAt);
+    const lastTripExitKind =
+      mapIdleReasonToLastTripExitKind(input.reason) ?? state.lastTripExitKind ?? null;
+    const lastTripExitAt =
+      mapIdleReasonToLastTripExitKind(input.reason) !== null
+        ? updatedAt
+        : state.lastTripExitAt ?? null;
 
     const nextState: ConversationCompanionState = {
       ...state,
@@ -278,6 +329,10 @@ export class CompanionConversationService {
       idleGuideSentAt: null,
       awaitingDestination: true,
       pendingDestinationCandidate: null,
+      lastTripExitKind,
+      lastTripExitAt,
+      pendingPlanningPostcardTripId: null,
+      planningSilentUserMessages: [],
       lastUserMessageAt: input.clearConversationContext
         ? null
         : state.lastUserMessageAt,
@@ -302,15 +357,16 @@ export class CompanionConversationService {
         conversationKey: input.binding.key,
         reason: input.reason,
         sendGuideNow: input.sendGuideNow,
+        lastTripExitKind,
         clearConversationContext: Boolean(input.clearConversationContext),
       },
     });
 
-    if (!input.sendGuideNow) {
+    if (!shouldSendIdlePromptNow({ state: nextState, sendGuideNow: input.sendGuideNow })) {
       return nextState;
     }
 
-    return await this.sendIdleGuide(input.binding, nextState, input.reason);
+    return await this.sendIdleGuide(input.binding, nextState);
   }
 
   async runDueIdleGuides(): Promise<ConversationCompanionState[]> {
@@ -328,7 +384,11 @@ export class CompanionConversationService {
       }
 
       const state = await this.dependencies.conversationStates.getByKey(binding.key);
-      if (!state?.awaitingDestination || state.idleGuideSentAt) {
+      if (
+        !state?.awaitingDestination ||
+        state.idleGuideSentAt ||
+        state.lastTripExitKind !== "completed_return_arrive"
+      ) {
         continue;
       }
 
@@ -343,7 +403,7 @@ export class CompanionConversationService {
         continue;
       }
 
-      dueStates.push(await this.sendIdleGuide(binding, state, "trip_completed"));
+      dueStates.push(await this.sendIdleGuide(binding, state));
     }
 
     return dueStates;
@@ -462,6 +522,18 @@ export class CompanionConversationService {
         senderUsername: input.senderUsername,
       },
     ];
+    const shouldSilenceDuringPlanning =
+      Boolean(activeTrip) &&
+      state.pendingPlanningPostcardTripId === activeTrip?.tripId;
+    const planningSilentUserMessages = shouldSilenceDuringPlanning
+      ? trimTurns(
+          [
+            ...(state.planningSilentUserMessages ?? []),
+            pendingUserMessages[pendingUserMessages.length - 1]!,
+          ],
+          12,
+        )
+      : state.planningSilentUserMessages ?? [];
 
     const nextState: ConversationCompanionState = {
       ...state,
@@ -488,6 +560,7 @@ export class CompanionConversationService {
         ],
         12,
       ),
+      planningSilentUserMessages,
       lastUserMessageAt: updatedAt,
       updatedAt,
     };
@@ -606,6 +679,31 @@ export class CompanionConversationService {
       }
 
       if (!state.pendingReplyDispatch) {
+        return state;
+      }
+
+      const activeTrip = await this.getActiveTrip(binding);
+      if (
+        activeTrip &&
+        state.pendingPlanningPostcardTripId === activeTrip.tripId
+      ) {
+        await this.log({
+          tripId: activeTrip.tripId,
+          runId,
+          phase: activeTrip.state.currentPhase,
+          event: "reply.skipped",
+          decision:
+            "Reply stayed queued because planning is still in progress and the planning postcard has not been sent yet.",
+          provider: "conversation-service",
+          status: "skipped",
+          startedAt,
+          finishedAt: nowIso(this.dependencies.clock),
+          details: {
+            conversationKey,
+            planningTripId: activeTrip.tripId,
+            replyDueAt: state.pendingReplyDispatch.dueAt,
+          },
+        });
         return state;
       }
 
@@ -909,7 +1007,37 @@ export class CompanionConversationService {
       },
     });
 
+    if (
+      updatedState.pendingPlanningPostcardTripId &&
+      this.dependencies.triggerPlanningPostcard
+    ) {
+      await this.dependencies.triggerPlanningPostcard(
+        updatedState.pendingPlanningPostcardTripId,
+      );
+    }
+
     return updatedState;
+  }
+
+  async completePlanningPostcardGate(input: {
+    conversationKey: string;
+    tripId: string;
+  }): Promise<ConversationCompanionState | null> {
+    const state = await this.dependencies.conversationStates.getByKey(
+      input.conversationKey,
+    );
+    if (!state || state.pendingPlanningPostcardTripId !== input.tripId) {
+      return state;
+    }
+
+    const nextState: ConversationCompanionState = {
+      ...state,
+      pendingPlanningPostcardTripId: null,
+      planningSilentUserMessages: [],
+      updatedAt: nowIso(this.dependencies.clock),
+    };
+    await this.dependencies.conversationStates.save(nextState);
+    return nextState;
   }
 
   private async applyDestinationIntent(input: {
@@ -988,6 +1116,8 @@ export class CompanionConversationService {
       idleGuideSentAt: null,
       awaitingDestination: false,
       pendingDestinationCandidate: null,
+      pendingPlanningPostcardTripId: null,
+      planningSilentUserMessages: [],
       pendingReplyDispatch: input.state.pendingReplyDispatch
         ? {
             ...input.state.pendingReplyDispatch,
@@ -1087,13 +1217,15 @@ export class CompanionConversationService {
       }
       return {
         ...destinationStartGuardState,
+        pendingPlanningPostcardTripId: trip.tripId,
+        planningSilentUserMessages: [],
       };
     } catch (error) {
       input.replyPlan.segments = [
-        ...input.replyPlan.segments,
         getSystemCatalog(getSystemLocale(input.state)).replyErrors
           .idleDestinationStartFailed,
       ];
+      input.replyPlan.provider = "conversation-service";
       await this.log({
         tripId: `conversation:${input.binding.key}`,
         runId: input.runId,
@@ -1121,7 +1253,6 @@ export class CompanionConversationService {
   private async sendIdleGuide(
     binding: ConversationBindingRecord,
     state: ConversationCompanionState,
-    reason: "activate" | "first_onboarding_complete" | "trip_stopped" | "trip_completed",
   ): Promise<ConversationCompanionState> {
     const persona = await this.getPersona(binding);
     if (!persona) {
@@ -1134,20 +1265,12 @@ export class CompanionConversationService {
       now: this.dependencies.clock.now(),
     });
     const locale = getSystemLocale(state);
-    const guide =
-      reason === "first_onboarding_complete"
-        ? {
-            segments: [buildIdleGuideMessage(persona, locale)],
-            provider: "system",
-          }
-        : await this.dependencies.grounding.composeIdleDestinationGuide({
-            conversationKey: binding.key,
-            persona,
-            recentTurns: trimTurns(state.recentTurns, 12),
-            resolvedState,
-            locale,
-            now: nowIso(this.dependencies.clock),
-          });
+    const guide = {
+      segments: [
+        getSystemCatalog(locale).onboarding.idleDestinationPrompt(persona.name),
+      ],
+      provider: "system",
+    };
 
     const sentAt = nowIso(this.dependencies.clock);
     for (const [index, segment] of guide.segments.entries()) {
@@ -1195,7 +1318,7 @@ export class CompanionConversationService {
       finishedAt: sentAt,
       details: {
         conversationKey: binding.key,
-        reason,
+        lastTripExitKind: state.lastTripExitKind ?? null,
         segmentCount: guide.segments.length,
       },
     });

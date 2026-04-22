@@ -273,7 +273,7 @@ async function activateConversation(
   if (!activatedBinding.lastTripId && !state.awaitingDestination) {
     await deps.conversationService.enterIdleAwaitingDestination({
       binding: activatedBinding,
-      sendGuideNow: false,
+      sendGuideNow: true,
       reason: "activate",
     });
   }
@@ -349,7 +349,9 @@ async function deactivateConversation(
     lastTripId: undefined,
   };
   await deps.bindings.upsert(nextBinding);
-  await deps.conversationService.deactivateConversation(binding.record.key);
+  await deps.conversationService.deactivateConversation(binding.record.key, {
+    lastTripExitKind: "deactivated",
+  });
   await detachOfficialConversationBinding(ctx, binding.record, deps.logger);
 
   return {
@@ -692,6 +694,8 @@ async function startTrip(
       idleGuideSentAt: null,
       awaitingDestination: false,
       pendingDestinationCandidate: null,
+      pendingPlanningPostcardTripId: null,
+      planningSilentUserMessages: [],
       updatedAt: new Date().toISOString(),
     });
   }
@@ -945,7 +949,7 @@ async function stopTrip(
   await deps.bindings.upsert(updatedBinding);
   await deps.conversationService.enterIdleAwaitingDestination({
     binding: updatedBinding,
-    sendGuideNow: false,
+    sendGuideNow: true,
     clearConversationContext: true,
     reason: "trip_stopped",
   });
