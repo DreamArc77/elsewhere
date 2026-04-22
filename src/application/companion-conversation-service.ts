@@ -14,6 +14,7 @@ import {
   LoggerPort,
   PersonaRepository,
   StoredPersonaProfile,
+  SystemLocale,
   TripRecord,
   TripRepository,
 } from "../domain/types.js";
@@ -88,6 +89,21 @@ function emptyConversationState(
     memorySummary: undefined,
     updatedAt,
   };
+}
+
+function buildDestinationAcknowledgementFallback(input: {
+  locale: SystemLocale;
+  destination: string;
+}): string {
+  switch (input.locale) {
+    case "ja-JP":
+      return `${input.destination}、わかった。まずは行き方と流れをちゃんと整理してみるね。`;
+    case "en":
+      return `Got it. I'll sort out the route and plan for ${input.destination} first.`;
+    case "zh-CN":
+    default:
+      return `知道了，我先把去${input.destination}的路线和安排整理一下。`;
+  }
 }
 
 export class CompanionConversationService {
@@ -754,8 +770,11 @@ export class CompanionConversationService {
       activeTrip,
     });
 
+    const replyDispatchSource =
+      postProcessedState.pendingReplyDispatch ?? state.pendingReplyDispatch!;
     const pendingReplyDispatch = {
-      ...state.pendingReplyDispatch!,
+      ...replyDispatchSource,
+      dueAt: nowIso(this.dependencies.clock),
       segments: replyPlan.segments,
     };
 
@@ -963,6 +982,24 @@ export class CompanionConversationService {
       return baseState;
     }
 
+    const destinationStartGuardState: ConversationCompanionState = {
+      ...baseState,
+      idleEnteredAt: null,
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      pendingDestinationCandidate: null,
+      pendingReplyDispatch: input.state.pendingReplyDispatch
+        ? {
+            ...input.state.pendingReplyDispatch,
+            dueAt: new Date(
+              this.dependencies.clock.now().getTime() + 15 * 60 * 1000,
+            ).toISOString(),
+          }
+        : null,
+      updatedAt: nowIso(this.dependencies.clock),
+    };
+    await this.dependencies.conversationStates.save(destinationStartGuardState);
+
     try {
       const trip = await this.dependencies.idleDestinationStarter({
         binding: input.binding,
@@ -1018,14 +1055,21 @@ export class CompanionConversationService {
             },
           });
         } catch (error) {
+          input.replyPlan.segments = [
+            buildDestinationAcknowledgementFallback({
+              locale: getSystemLocale(input.state),
+              destination,
+            }),
+          ];
+          input.replyPlan.provider = "conversation-service";
           await this.log({
             tripId: trip.tripId,
             runId: input.runId,
             phase: "planning",
             event: "idle.destination.ack_failed",
             decision:
-              "Dedicated destination acknowledgement failed; preserving the original reply plan.",
-            provider: input.replyPlan.provider,
+              "Dedicated destination acknowledgement failed; used a safe fallback acknowledgement instead of the old idle reply plan.",
+            provider: "conversation-service",
             status: "failure",
             startedAt: nowIso(this.dependencies.clock),
             finishedAt: nowIso(this.dependencies.clock),
@@ -1042,11 +1086,7 @@ export class CompanionConversationService {
         }
       }
       return {
-        ...baseState,
-        idleEnteredAt: null,
-        idleGuideSentAt: null,
-        awaitingDestination: false,
-        pendingDestinationCandidate: null,
+        ...destinationStartGuardState,
       };
     } catch (error) {
       input.replyPlan.segments = [

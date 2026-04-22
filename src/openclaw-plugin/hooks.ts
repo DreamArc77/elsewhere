@@ -1366,6 +1366,7 @@ function shouldStartReferencePhotoProbe(
   event: InboundClaimEvent,
   trimmedText: string,
 ): boolean {
+  const normalizedChannel = event.channel?.trim().toLowerCase();
   if (!trimmedText) {
     return true;
   }
@@ -1394,6 +1395,16 @@ function shouldStartReferencePhotoProbe(
 
   if (shouldPreserveMediaPlaceholder(event.channel, trimmedText)) {
     return true;
+  }
+
+  if (normalizedChannel === "feishu") {
+    if (
+      /^(?:\[(?:image|图片|photo)\]|<(?:image|photo)>|图片|image|photo)$/iu.test(
+        trimmedText,
+      )
+    ) {
+      return true;
+    }
   }
 
   return /(?:^|\n)\s*-\s*(?:图片|image)\s*:/iu.test(trimmedText);

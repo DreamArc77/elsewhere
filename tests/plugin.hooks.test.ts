@@ -1421,6 +1421,87 @@ describe("travel companion inbound takeover hook", () => {
     expect(state?.pendingReferencePhotoProbe?.fallbackSentAt).toBeNull();
   });
 
+  it("shows a short checking message for feishu image transcript placeholders while waiting for a reference photo", async () => {
+    const runtime = await createTestRuntime();
+    const key = bindingKey({
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHUIMG1",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "feishu",
+      accountId: "default",
+      target: "user:ou_FEISHUIMG1",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      systemLocale: "zh-CN",
+      setupSession: {
+        kind: "persona",
+        step: "reference_photo",
+        awaitingReferencePhoto: true,
+        draft: {
+          name: "Mori",
+          originCity: "Hong Kong",
+          traits: ["gentle"],
+          toneStyle: "warm",
+          relationship: "travel soulmate",
+          userAddressing: "baby",
+        },
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      idleGuideSentAt: null,
+      awaitingDestination: false,
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await handleTravelCompanionInboundClaim(
+      {
+        content: "ou_FEISHUIMG1: [image]",
+        body: "ou_FEISHUIMG1: [image]",
+        bodyForAgent: "ou_FEISHUIMG1: [image]",
+        channel: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_photo_probe",
+        senderId: "ou_FEISHUIMG1",
+        messageId: "feishu-photo-probe",
+        isGroup: false,
+      },
+      {
+        channelId: "feishu",
+        accountId: "default",
+        conversationId: "oc_direct_session_photo_probe",
+        senderId: "ou_FEISHUIMG1",
+        messageId: "feishu-photo-probe",
+      },
+      createInboundDeps(runtime),
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(runtime.messenger.sentReplies.at(-1)?.text).toContain(
+      "正在检查你刚发来的图片",
+    );
+    expect(runtime.messenger.sentReplies.at(-1)?.dedupeKey).toBe(
+      `setup-photo-checking:${key}`,
+    );
+    const state = await runtime.conversationStateRepository.getByKey(key);
+    expect(state?.pendingReferencePhotoProbe?.noticeSentAt).toBeTruthy();
+    expect(state?.pendingReferencePhotoProbe?.fallbackSentAt).toBeNull();
+  });
+
   it("claims a weixin reply_dispatch media image before it reaches the default agent", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({

@@ -66,4 +66,68 @@ describe("conversation service", () => {
     const trip = await runtime.tripRepository.getById(updatedBinding!.lastTripId!);
     expect(trip?.request.destinationCity).toBe("Seoul");
   });
+
+  it("uses a destination acknowledgement fallback instead of the old idle reply when ack generation fails", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      homeCity: "Osaka",
+      traits: ["gentle"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    await runtime.bindings.upsert({
+      bindingId: "binding-1",
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      bindingSource: "local",
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+    });
+    await runtime.conversationService.enterIdleAwaitingDestination({
+      binding: (await runtime.bindings.get(key))!,
+      sendGuideNow: false,
+      clearConversationContext: true,
+      reason: "activate",
+    });
+
+    runtime.grounding.composeCompanionReply = async () => ({
+      segments: ["old idle reply"],
+      provider: "fake-grounding",
+      destinationIntent: {
+        outcome: "start_trip",
+        destination: "Paris",
+      },
+    });
+    runtime.grounding.composeDestinationAcknowledgement = async () => {
+      throw new Error("empty ack");
+    };
+
+    await runtime.conversationService.claimInboundMessage({
+      binding: (await runtime.bindings.get(key))!,
+      messageId: "msg-paris",
+      content: "巴黎",
+      senderId: "1459473177",
+    });
+    const state = await runtime.conversationService.runConversation(key, {
+      ignoreSchedule: true,
+    });
+
+    expect(runtime.messenger.sentReplies).toHaveLength(1);
+    expect(runtime.messenger.sentReplies[0]?.text).toBe(
+      "知道了，我先把去Paris的路线和安排整理一下。",
+    );
+    expect(runtime.messenger.sentReplies[0]?.text).not.toContain("old idle reply");
+    expect(state.pendingReplyDispatch).toBeNull();
+    expect(state.awaitingDestination).toBe(false);
+  });
 });

@@ -337,7 +337,7 @@ export const en: SystemLocaleCatalog = {
     photoChecking:
       "I'm checking the image you just sent. Please wait a moment.",
     errorWaitingForPhotoWithFallback:
-      "I'm currently waiting for your reference photo. You can send an image directly. If image delivery is unstable on this platform, you can also try sending a publicly accessible image URL.",
+      "I'm checking the image you just sent. Please wait a moment. If nothing happens shortly, you can resend the image or send a publicly accessible image URL.",
     errorUnsupportedImage:
       "This image cannot be used as a reference photo right now. Please try another common image format.",
     errorImageDownloadFailed:

@@ -332,7 +332,7 @@ export const zhCN: SystemLocaleCatalog = {
     photoChecking:
       "正在检查你刚发来的图片，请稍等一下。",
     errorWaitingForPhotoWithFallback:
-      "我现在在等你的参考图。你可以直接发一张图片；如果这个平台传图不稳定，也可以尝试直接发一个可访问的图片 URL。",
+      "正在检查你刚发来的图片，请稍等一下。如果稍后还没有继续，你可以重发一次图片，或发送一个可访问的图片 URL。",
     errorUnsupportedImage:
       "这张图片现在还不能用作参考图，请换一张常见格式的图片试试。",
     errorImageDownloadFailed:
