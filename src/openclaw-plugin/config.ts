@@ -2,6 +2,7 @@ import { LEGACY_PLUGIN_ID } from "./metadata.js";
 
 export interface TravelCompanionPluginConfig {
   geminiApiKey?: string;
+  openaiApiKey?: string;
   openrouterApiKey?: string;
   defaultOriginCity?: string;
   pollIntervalSeconds?: number;
@@ -10,6 +11,7 @@ export interface TravelCompanionPluginConfig {
   textModel?: string;
   imageModel?: string;
   geminiBaseUrl?: string;
+  openaiBaseUrl?: string;
   openrouterBaseUrl?: string;
   logMode?: "safe" | "debug";
 }
@@ -22,15 +24,18 @@ export function resolvePluginConfig(
   return {
     geminiApiKey:
       asString(raw?.geminiApiKey) ?? env.GEMINI_API_KEY ?? env.GOOGLE_API_KEY,
+    openaiApiKey:
+      asString(raw?.openaiApiKey) ?? env.OPENAI_API_KEY,
     openrouterApiKey:
       asString(raw?.openrouterApiKey) ?? env.OPENROUTER_API_KEY,
     defaultOriginCity: asString(raw?.defaultOriginCity) ?? "Hong Kong",
     pollIntervalSeconds: asInteger(raw?.pollIntervalSeconds) ?? 60,
     openclawBinaryPath: asString(raw?.openclawBinaryPath) ?? "openclaw",
-    planningModel: asString(raw?.planningModel) ?? "gemini-3-flash-preview",
+    planningModel: asString(raw?.planningModel),
     textModel: asString(raw?.textModel) ?? "gemini-3-flash-preview",
-    imageModel: asString(raw?.imageModel) ?? "gemini-3.1-flash-image-preview",
+    imageModel: asString(raw?.imageModel),
     geminiBaseUrl: asString(raw?.geminiBaseUrl) ?? env.GEMINI_BASE_URL,
+    openaiBaseUrl: asString(raw?.openaiBaseUrl) ?? env.OPENAI_BASE_URL,
     openrouterBaseUrl:
       asString(raw?.openrouterBaseUrl) ??
       env.OPENROUTER_BASE_URL ??

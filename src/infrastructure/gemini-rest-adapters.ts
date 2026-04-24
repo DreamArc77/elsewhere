@@ -29,7 +29,7 @@ import {
   PhaseGroundingResult,
   ResolvedAgentState,
   RuntimeStepContext,
-  TravelCompanionGeminiProviderConfig,
+  TravelCompanionPlanningImageProviderConfig,
   StoredPersonaProfile,
   SystemLocale,
   TravelCompanionTextProviderConfig,
@@ -51,8 +51,8 @@ interface GeminiOptions {
   apiKeyResolver?: () => Promise<string | undefined> | string | undefined;
   geminiProviderResolver?:
     | (() =>
-        | Promise<TravelCompanionGeminiProviderConfig | undefined>
-        | TravelCompanionGeminiProviderConfig
+        | Promise<ResolvedPlanningImageProviderConfig | undefined>
+        | ResolvedPlanningImageProviderConfig
         | undefined)
     | undefined;
   textProviderResolver?:
@@ -69,6 +69,27 @@ interface GeminiOptions {
   fetchImpl?: typeof fetch;
   logger?: LoggerPort;
 }
+
+type LegacyPlanningImageProviderConfig =
+  | {
+      kind: "openrouter";
+      apiKey?: string;
+      baseUrl?: string;
+    }
+  | {
+      kind: "openai-direct";
+      apiKey?: string;
+      baseUrl?: string;
+    }
+  | {
+      kind: "google-direct";
+      apiKey?: string;
+      baseUrl?: string;
+    };
+
+type ResolvedPlanningImageProviderConfig =
+  | TravelCompanionPlanningImageProviderConfig
+  | LegacyPlanningImageProviderConfig;
 
 interface GenerateContentResponse {
   candidates?: Array<{
@@ -192,8 +213,60 @@ function normalizeOpenRouterBaseUrl(baseUrl?: string): string {
   return (baseUrl ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
 }
 
-function normalizeOpenRouterModel(model: string): string {
-  return model.includes("/") ? model : `google/${model}`;
+function normalizeOpenAIBaseUrl(baseUrl?: string): string {
+  return (baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
+}
+
+function normalizeOpenRouterModel(
+  model: string,
+  family: "gemini" | "openai" = "gemini",
+): string {
+  if (model.includes("/")) {
+    return model;
+  }
+  return `${family === "openai" ? "openai" : "google"}/${model}`;
+}
+
+function defaultPlanningModelForProvider(
+  provider: TravelCompanionPlanningImageProviderConfig,
+  configured?: string,
+): string {
+  if (configured?.trim()) {
+    return provider.channel === "openrouter"
+      ? normalizeOpenRouterModel(configured.trim(), provider.family)
+      : configured.trim();
+  }
+
+  if (provider.family === "openai") {
+    return provider.channel === "openrouter"
+      ? "openai/gpt-5.4"
+      : "gpt-5.4";
+  }
+
+  return provider.channel === "openrouter"
+    ? "google/gemini-3-flash-preview"
+    : "gemini-3-flash-preview";
+}
+
+function defaultImageModelForProvider(
+  provider: TravelCompanionPlanningImageProviderConfig,
+  configured?: string,
+): string {
+  if (configured?.trim()) {
+    return provider.channel === "openrouter"
+      ? normalizeOpenRouterModel(configured.trim(), provider.family)
+      : configured.trim();
+  }
+
+  if (provider.family === "openai") {
+    return provider.channel === "openrouter"
+      ? "openai/gpt-5.4-image-2"
+      : "gpt-image-2";
+  }
+
+  return provider.channel === "openrouter"
+    ? "google/gemini-3.1-flash-image-preview"
+    : "gemini-3.1-flash-image-preview";
 }
 
 function extractText(response: GenerateContentResponse): string {
@@ -771,7 +844,7 @@ function buildOpenRouterRequestBody(
   body: Record<string, unknown>,
 ): Record<string, unknown> {
   const request: Record<string, unknown> = {
-    model: normalizeOpenRouterModel(model),
+    model,
     messages: buildOpenRouterMessages(body),
   };
 
@@ -847,6 +920,159 @@ function buildOpenRouterRequestBody(
   return request;
 }
 
+function convertGeminiJsonSchemaToStandard(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  const type = typeof node.type === "string" ? node.type.toUpperCase() : undefined;
+  switch (type) {
+    case "OBJECT": {
+      const propertiesRecord =
+        node.properties && typeof node.properties === "object"
+          ? (node.properties as Record<string, unknown>)
+          : {};
+      const properties = Object.fromEntries(
+        Object.entries(propertiesRecord).map(([key, value]) => [
+          key,
+          convertGeminiJsonSchemaToStandard(value as Record<string, unknown>),
+        ]),
+      );
+      return {
+        type: "object",
+        properties,
+        required: Array.isArray(node.required) ? node.required : [],
+      };
+    }
+    case "ARRAY":
+      return {
+        type: "array",
+        items:
+          node.items && typeof node.items === "object"
+            ? convertGeminiJsonSchemaToStandard(node.items as Record<string, unknown>)
+            : {},
+      };
+    case "STRING":
+      return {
+        type: "string",
+        ...(Array.isArray(node.enum) ? { enum: node.enum } : {}),
+        ...(typeof node.pattern === "string" ? { pattern: node.pattern } : {}),
+      };
+    case "INTEGER":
+      return {
+        type: "integer",
+        ...(typeof node.minimum === "number" ? { minimum: node.minimum } : {}),
+        ...(typeof node.maximum === "number" ? { maximum: node.maximum } : {}),
+      };
+    case "NUMBER":
+      return {
+        type: "number",
+        ...(typeof node.minimum === "number" ? { minimum: node.minimum } : {}),
+        ...(typeof node.maximum === "number" ? { maximum: node.maximum } : {}),
+      };
+    case "BOOLEAN":
+      return { type: "boolean" };
+    default:
+      return {};
+  }
+}
+
+function makeOpenAIStrictJsonSchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  const type = schema.type;
+  if (type === "object") {
+    const propertiesRecord =
+      schema.properties && typeof schema.properties === "object"
+        ? (schema.properties as Record<string, unknown>)
+        : {};
+    const originalRequired = new Set(
+      Array.isArray(schema.required) ? (schema.required as string[]) : [],
+    );
+    const properties = Object.fromEntries(
+      Object.entries(propertiesRecord).map(([key, value]) => {
+        const strictChild = makeOpenAIStrictJsonSchema(
+          value as Record<string, unknown>,
+        );
+        return [
+          key,
+          originalRequired.has(key)
+            ? strictChild
+            : {
+                anyOf: [strictChild, { type: "null" }],
+              },
+        ];
+      }),
+    );
+    return {
+      type: "object",
+      additionalProperties: false,
+      properties,
+      required: Object.keys(properties),
+    };
+  }
+
+  if (type === "array") {
+    return {
+      ...schema,
+      items:
+        schema.items && typeof schema.items === "object"
+          ? makeOpenAIStrictJsonSchema(schema.items as Record<string, unknown>)
+          : schema.items,
+    };
+  }
+
+  if (Array.isArray(schema.anyOf)) {
+    return {
+      anyOf: schema.anyOf.map((entry) =>
+        entry && typeof entry === "object"
+          ? makeOpenAIStrictJsonSchema(entry as Record<string, unknown>)
+          : entry,
+      ),
+    };
+  }
+
+  return schema;
+}
+
+const openAiTripPlanJsonSchema = makeOpenAIStrictJsonSchema(
+  convertGeminiJsonSchemaToStandard(
+    tripPlanJsonSchema as unknown as Record<string, unknown>,
+  ),
+);
+
+const openAiImageSummaryJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["scene", "otherPeopleVisible", "notableDetails"],
+  properties: {
+    scene: { type: "string" },
+    otherPeopleVisible: {
+      type: "string",
+      enum: ["none", "blurred_background_only", "clear_people_present"],
+    },
+    notableDetails: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+};
+
+function stripNullsDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripNullsDeep(entry)) as T;
+  }
+  if (value && typeof value === "object") {
+    const next: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry === null) {
+        continue;
+      }
+      next[key] = stripNullsDeep(entry);
+    }
+    return next as T;
+  }
+  return value;
+}
+
 function buildOpenRouterMessages(
   body: Record<string, unknown>,
 ): Array<Record<string, unknown>> {
@@ -916,8 +1142,8 @@ abstract class BaseGeminiAdapter {
   protected readonly apiKeyResolver?: () => Promise<string | undefined> | string | undefined;
   protected readonly geminiProviderResolver?:
     | (() =>
-        | Promise<TravelCompanionGeminiProviderConfig | undefined>
-        | TravelCompanionGeminiProviderConfig
+        | Promise<ResolvedPlanningImageProviderConfig | undefined>
+        | ResolvedPlanningImageProviderConfig
         | undefined)
     | undefined;
   protected readonly textProviderResolver?:
@@ -942,21 +1168,52 @@ abstract class BaseGeminiAdapter {
     this.logger = options.logger;
   }
 
-  protected async resolveGeminiProvider(): Promise<TravelCompanionGeminiProviderConfig> {
+  protected async resolveGeminiProvider(): Promise<TravelCompanionPlanningImageProviderConfig> {
     const configured = await this.geminiProviderResolver?.();
     if (configured?.kind) {
-      return configured;
+      if ("family" in configured && "channel" in configured) {
+        return configured;
+      }
+      switch (configured.kind) {
+        case "openrouter":
+          return {
+            kind: "gemini-openrouter",
+            family: "gemini",
+            channel: "openrouter",
+            apiKey: configured.apiKey,
+            baseUrl: configured.baseUrl,
+          };
+        case "openai-direct":
+          return {
+            kind: "openai-direct",
+            family: "openai",
+            channel: "native",
+            apiKey: configured.apiKey,
+            baseUrl: configured.baseUrl,
+          };
+        case "google-direct":
+        default:
+          return {
+            kind: "gemini-direct",
+            family: "gemini",
+            channel: "native",
+            apiKey: configured.apiKey,
+            baseUrl: configured.baseUrl,
+          };
+      }
     }
 
     const resolved = (await this.apiKeyResolver?.()) ?? this.apiKey;
     if (!resolved?.trim()) {
       throw new Error(
-        "Gemini provider is not configured. Complete onboarding and provide a Google Gemini or OpenRouter key first.",
+        "The planning/image provider is not configured. Complete onboarding and provide a provider key first.",
       );
     }
 
     return {
-      kind: "google-direct",
+      kind: "gemini-direct",
+      family: "gemini",
+      channel: "native",
       apiKey: resolved.trim(),
       baseUrl: this.baseUrl,
     };
@@ -966,7 +1223,7 @@ abstract class BaseGeminiAdapter {
     const resolved = (await this.apiKeyResolver?.()) ?? this.apiKey;
     if (!resolved?.trim()) {
       throw new Error(
-        "Gemini API key is not configured. Complete onboarding and provide a Gemini key first.",
+        "A provider API key is not configured. Complete onboarding and provide the selected provider key first.",
       );
     }
     return resolved.trim();
@@ -984,12 +1241,22 @@ abstract class BaseGeminiAdapter {
       );
     }
 
-    if (provider.kind === "openrouter") {
+    if (provider.channel === "openrouter") {
       return await this.generateContentViaOpenRouter({
         model,
         body,
         apiKey,
         baseUrl: normalizeOpenRouterBaseUrl(provider.baseUrl),
+        family: provider.family,
+      });
+    }
+
+    if (provider.family === "openai") {
+      return await this.generateContentViaOpenAI({
+        model,
+        body,
+        apiKey,
+        baseUrl: normalizeOpenAIBaseUrl(provider.baseUrl),
       });
     }
 
@@ -1022,8 +1289,12 @@ abstract class BaseGeminiAdapter {
     body: Record<string, unknown>;
     apiKey: string;
     baseUrl: string;
+    family: "gemini" | "openai";
   }): Promise<GenerateContentResponse> {
-    const requestBody = buildOpenRouterRequestBody(input.model, input.body);
+    const requestBody = buildOpenRouterRequestBody(
+      normalizeOpenRouterModel(input.model, input.family),
+      input.body,
+    );
     const response = await this.fetchImpl(
       `${input.baseUrl}/chat/completions`,
       {
@@ -1040,6 +1311,71 @@ abstract class BaseGeminiAdapter {
       const errorText = await response.text();
       throw new Error(
         `OpenRouter Gemini request failed: ${response.status} ${response.statusText}${
+          errorText ? ` - ${truncate(errorText, 600)}` : ""
+        }`,
+      );
+    }
+
+    const payload =
+      (await response.json()) as OpenRouterChatCompletionResponse;
+    return convertOpenRouterResponseToGenerateContent(payload);
+  }
+
+  private async generateContentViaOpenAI(input: {
+    model: string;
+    body: Record<string, unknown>;
+    apiKey: string;
+    baseUrl: string;
+  }): Promise<GenerateContentResponse> {
+    const generationConfig =
+      input.body.generationConfig && typeof input.body.generationConfig === "object"
+        ? (input.body.generationConfig as Record<string, unknown>)
+        : undefined;
+    const schema =
+      generationConfig?.responseJsonSchema &&
+      typeof generationConfig.responseJsonSchema === "object"
+        ? makeOpenAIStrictJsonSchema(
+            convertGeminiJsonSchemaToStandard(
+              generationConfig.responseJsonSchema as Record<string, unknown>,
+            ),
+          )
+        : undefined;
+    const requestBody: Record<string, unknown> = {
+      model: input.model,
+      messages: buildOpenRouterMessages(input.body),
+      ...(typeof generationConfig?.temperature === "number"
+        ? { temperature: generationConfig.temperature }
+        : {}),
+      ...(schema
+        ? {
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "travel_companion_json",
+                strict: true,
+                schema,
+              },
+            },
+          }
+        : {}),
+    };
+
+    const response = await this.fetchImpl(
+      `${input.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${input.apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `OpenAI request failed: ${response.status} ${response.statusText}${
           errorText ? ` - ${truncate(errorText, 600)}` : ""
         }`,
       );
@@ -1071,12 +1407,12 @@ export class GeminiRestGroundingAdapter
   extends BaseGeminiAdapter
   implements GroundingPort
 {
-  private readonly planningModel: string;
+  private readonly planningModel?: string;
   private readonly textModel: string;
 
   constructor(options: GeminiOptions) {
     super(options);
-    this.planningModel = options.planningModel ?? "gemini-3-flash-preview";
+    this.planningModel = options.planningModel;
     this.textModel = options.textModel ?? "gemini-3-flash-preview";
   }
 
@@ -1086,6 +1422,11 @@ export class GeminiRestGroundingAdapter
 
   private async logPromptEntry(entry: LogEntry): Promise<void> {
     await this.logger?.log(entry);
+  }
+
+  private async resolvePlanningModel(): Promise<string> {
+    const provider = await this.resolveGeminiProvider();
+    return defaultPlanningModelForProvider(provider, this.planningModel);
   }
 
   private async resolveTextProviderConfig(): Promise<TravelCompanionTextProviderConfig> {
@@ -1295,6 +1636,7 @@ export class GeminiRestGroundingAdapter
     persona: StoredPersonaProfile;
     request: TripRequest;
   }): Promise<TripPlan> {
+    const planningModel = await this.resolvePlanningModel();
     const basePrompt = await renderTripPlanPrompt(input);
     const prompts = [
       basePrompt,
@@ -1336,7 +1678,7 @@ export class GeminiRestGroundingAdapter
           event: "plan.prompt.rendered",
           decision:
             "Rendered the final planning prompt before sending it to Gemini.",
-          provider: this.planningModel,
+          provider: planningModel,
           status: "success",
           startedAt: requestStartedAt,
           finishedAt: requestStartedAt,
@@ -1355,7 +1697,7 @@ export class GeminiRestGroundingAdapter
           phase: "planning",
           event: "plan.request.started",
           decision: "Started Gemini trip planning request.",
-          provider: this.planningModel,
+          provider: planningModel,
           status: "success",
           startedAt: requestStartedAt,
           finishedAt: requestStartedAt,
@@ -1369,7 +1711,7 @@ export class GeminiRestGroundingAdapter
         });
 
         try {
-          const response = await this.generateContent(this.planningModel, {
+          const response = await this.generateContent(planningModel, {
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             ...(usesGoogleSearch ? { tools: [{ google_search: {} }] } : {}),
             generationConfig: {
@@ -1387,7 +1729,7 @@ export class GeminiRestGroundingAdapter
             phase: "planning",
             event: "plan.request.finished",
             decision: "Gemini trip planning request returned a response payload.",
-            provider: this.planningModel,
+            provider: planningModel,
             status: "success",
             startedAt: requestStartedAt,
             finishedAt: responseFinishedAt,
@@ -1402,8 +1744,14 @@ export class GeminiRestGroundingAdapter
           const parseStartedAt = nowIso();
           let parsed: TripPlan;
           try {
+            const normalizedResponseText =
+              planningModel.includes("gpt")
+                ? JSON.stringify(
+                    stripNullsDeep(JSON.parse(extractLikelyJson(responseText))),
+                  )
+                : responseText;
             parsed = parseModelJson(
-              responseText,
+              normalizedResponseText,
               tripPlanSchema,
               "Gemini trip plan",
             );
@@ -1421,7 +1769,7 @@ export class GeminiRestGroundingAdapter
             phase: "planning",
             event: "plan.parse.finished",
             decision: "Validated trip plan JSON against the contract schema.",
-            provider: this.planningModel,
+            provider: planningModel,
             status: "success",
             startedAt: parseStartedAt,
             finishedAt: parseFinishedAt,
@@ -1458,7 +1806,7 @@ export class GeminiRestGroundingAdapter
               event: "plan.request.retry_without_grounding",
               decision:
                 "Gemini rejected the grounded planning request; retrying the same prompt without Google Search grounding.",
-              provider: this.planningModel,
+              provider: planningModel,
               status: "failure",
               startedAt: requestStartedAt,
               finishedAt: failedAt,
@@ -1482,9 +1830,9 @@ export class GeminiRestGroundingAdapter
               attempt < prompts.length ? "plan.request.retry" : "plan.request.failed",
             decision:
               attempt < prompts.length
-                ? "Gemini trip planning attempt failed; retrying with a stricter corrective prompt."
-                : "Gemini trip planning failed after exhausting all attempts.",
-            provider: this.planningModel,
+              ? "Gemini trip planning attempt failed; retrying with a stricter corrective prompt."
+              : "Gemini trip planning failed after exhausting all attempts.",
+            provider: planningModel,
             status: "failure",
             startedAt: requestStartedAt,
             finishedAt: failedAt,
@@ -1722,15 +2070,79 @@ export class GeminiRestImageAdapter
   extends BaseGeminiAdapter
   implements ImageGenerationPort
 {
-  private readonly imageModel: string;
+  private readonly imageModel?: string;
 
   constructor(options: GeminiOptions) {
     super(options);
-    this.imageModel = options.imageModel ?? "gemini-3.1-flash-image-preview";
+    this.imageModel = options.imageModel;
   }
 
   private async logPromptEntry(entry: LogEntry): Promise<void> {
     await this.logger?.log(entry);
+  }
+
+  private async resolveImageModel(): Promise<string> {
+    const provider = await this.resolveGeminiProvider();
+    return defaultImageModelForProvider(provider, this.imageModel);
+  }
+
+  private async summarizeGeneratedImage(input: {
+    imageDataUrl: string;
+    apiKey: string;
+    baseUrl: string;
+  }): Promise<string | undefined> {
+    const response = await this.fetchImpl(
+      `${normalizeOpenAIBaseUrl(input.baseUrl)}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${input.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Analyze only the provided image and return strict JSON with keys scene, otherPeopleVisible, notableDetails. otherPeopleVisible must be one of none, blurred_background_only, clear_people_present.",
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: input.imageDataUrl,
+                  },
+                },
+              ],
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "image_summary",
+              strict: true,
+              schema: openAiImageSummaryJsonSchema,
+            },
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `OpenAI image summary request failed: ${response.status} ${response.statusText}${
+          errorText ? ` - ${truncate(errorText, 600)}` : ""
+        }`,
+      );
+    }
+
+    const payload =
+      (await response.json()) as OpenRouterChatCompletionResponse;
+    const text = extractOpenRouterMessageText(payload.choices?.[0]?.message);
+    return text ? extractLikelyJson(text) : undefined;
   }
 
   async generateImage(input: {
@@ -1747,6 +2159,8 @@ export class GeminiRestImageAdapter
     prompt: string;
   }): Promise<ImageGenerationResult> {
     const startedAt = nowIso();
+    const provider = await this.resolveGeminiProvider();
+    const imageModel = await this.resolveImageModel();
     const parts: Array<Record<string, unknown>> = [{ text: input.prompt }];
 
     await this.logPromptEntry({
@@ -1755,7 +2169,7 @@ export class GeminiRestImageAdapter
       phase: input.phase,
       event: "image.prompt.rendered",
       decision: "Rendered the final image-generation prompt before sending it to Gemini.",
-      provider: this.imageModel,
+      provider: imageModel,
       status: "success",
       startedAt,
       finishedAt: startedAt,
@@ -1768,6 +2182,116 @@ export class GeminiRestImageAdapter
         renderedPrompt: input.prompt,
       },
     });
+
+    if (provider.family === "openai" && provider.channel === "native") {
+      const apiKey = provider.apiKey?.trim();
+      if (!apiKey) {
+        throw new Error("OpenAI API key is not configured for image generation.");
+      }
+
+      if (input.usesReferenceImage) {
+        const form = new FormData();
+        const inlineImage = await readInlineImageFromFile(
+          input.persona.referenceImageAsset,
+        );
+        const imageBytes = Buffer.from(inlineImage.bytesBase64, "base64");
+        form.append("model", imageModel);
+        form.append("prompt", input.prompt);
+        form.append("size", "1024x1280");
+        form.append(
+          "image",
+          new Blob([imageBytes], { type: inlineImage.mimeType }),
+          "reference.png",
+        );
+        form.append("response_format", "b64_json");
+
+        const response = await this.fetchImpl(
+          `${normalizeOpenAIBaseUrl(provider.baseUrl)}/images/edits`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: form,
+          },
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `OpenAI image edit request failed: ${response.status} ${response.statusText}${
+              errorText ? ` - ${truncate(errorText, 600)}` : ""
+            }`,
+          );
+        }
+
+        const payload = (await response.json()) as {
+          data?: Array<{ b64_json?: string }>;
+        };
+        const bytesBase64 = payload.data?.[0]?.b64_json;
+        if (!bytesBase64) {
+          throw new Error("OpenAI image edit response did not contain image bytes.");
+        }
+        const imageDataUrl = `data:image/png;base64,${bytesBase64}`;
+        return {
+          mimeType: "image/png",
+          bytesBase64,
+          provider: imageModel,
+          promptEcho: input.prompt,
+          imageSummary: await this.summarizeGeneratedImage({
+            imageDataUrl,
+            apiKey,
+            baseUrl: provider.baseUrl ?? normalizeOpenAIBaseUrl(),
+          }),
+        };
+      }
+
+      const response = await this.fetchImpl(
+        `${normalizeOpenAIBaseUrl(provider.baseUrl)}/images/generations`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: imageModel,
+            prompt: input.prompt,
+            size: "1024x1280",
+            response_format: "b64_json",
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `OpenAI image generation request failed: ${response.status} ${response.statusText}${
+            errorText ? ` - ${truncate(errorText, 600)}` : ""
+          }`,
+        );
+      }
+
+      const payload = (await response.json()) as {
+        data?: Array<{ b64_json?: string }>;
+      };
+      const bytesBase64 = payload.data?.[0]?.b64_json;
+      if (!bytesBase64) {
+        throw new Error("OpenAI image generation response did not contain image bytes.");
+      }
+      const imageDataUrl = `data:image/png;base64,${bytesBase64}`;
+      return {
+        mimeType: "image/png",
+        bytesBase64,
+        provider: imageModel,
+        promptEcho: input.prompt,
+        imageSummary: await this.summarizeGeneratedImage({
+          imageDataUrl,
+          apiKey,
+          baseUrl: provider.baseUrl ?? normalizeOpenAIBaseUrl(),
+        }),
+      };
+    }
 
     if (input.usesReferenceImage) {
       const inlineImage = await readInlineImageFromFile(
@@ -1807,10 +2331,10 @@ export class GeminiRestImageAdapter
       },
     };
 
-    const response = await this.generateContent(this.imageModel, body);
+    const response = await this.generateContent(imageModel, body);
     return {
       ...extractImage(response),
-      provider: this.imageModel,
+      provider: imageModel,
       promptEcho: input.prompt,
       imageSummary: extractOptionalImageSummary(response),
     };

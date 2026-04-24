@@ -7,7 +7,9 @@ import type {
   SetupSessionKind,
   StoredPersonaProfile,
   SystemLocale,
-  TravelCompanionGeminiProviderKind,
+  TravelCompanionPlanningImageProviderChannel,
+  TravelCompanionPlanningImageProviderFamily,
+  TravelCompanionPlanningImageProviderKind,
   TravelCompanionGlobalConfig,
   TravelCompanionTextProviderKind,
 } from "../domain/types.js";
@@ -209,6 +211,7 @@ export function evaluateOnboardingReadiness(input: {
   binding: ConversationBindingRecord;
   config: TravelCompanionGlobalConfig;
   fallbackGeminiApiKey?: string;
+  fallbackOpenAiApiKey?: string;
   fallbackOpenRouterApiKey?: string;
 }): OnboardingReadiness {
   const hasPersona = Boolean(input.binding.defaultPersonaId);
@@ -217,6 +220,7 @@ export function evaluateOnboardingReadiness(input: {
     globalConfig: input.config,
     pluginConfig: {
       geminiApiKey: input.fallbackGeminiApiKey,
+      openaiApiKey: input.fallbackOpenAiApiKey,
       openrouterApiKey: input.fallbackOpenRouterApiKey,
     },
   });
@@ -250,11 +254,31 @@ export function buildPersonaSetupDraft(
 export function buildModelSetupDraft(
   config: TravelCompanionGlobalConfig,
 ): SetupSessionDraft {
-  const geminiProviderKind =
-    config.geminiProvider?.kind ??
-    (config.geminiApiKey?.trim() ? "google-direct" : undefined);
-  const geminiProviderApiKey =
-    config.geminiProvider?.apiKey ?? config.geminiApiKey;
+  const planningImageProvider =
+    config.planningImageProvider ??
+    (config.geminiProvider?.kind === "openrouter"
+      ? {
+          kind: "gemini-openrouter" as const,
+          family: "gemini" as const,
+          channel: "openrouter" as const,
+          apiKey: config.geminiProvider.apiKey,
+        }
+      : config.geminiProvider?.kind === "openai-direct"
+        ? {
+            kind: "openai-direct" as const,
+            family: "openai" as const,
+            channel: "native" as const,
+            apiKey: config.geminiProvider.apiKey,
+          }
+        : config.geminiProvider?.kind === "google-direct" ||
+            config.geminiApiKey?.trim()
+          ? {
+              kind: "gemini-direct" as const,
+              family: "gemini" as const,
+              channel: "native" as const,
+              apiKey: config.geminiProvider?.apiKey ?? config.geminiApiKey,
+            }
+          : undefined);
 
   return {
     textProviderKind: config.textProvider?.kind,
@@ -270,8 +294,10 @@ export function buildModelSetupDraft(
       config.textProvider?.kind === "openai-compatible"
         ? config.textProvider.model
         : undefined,
-    geminiProviderKind,
-    geminiProviderApiKey,
+    planningImageFamily: planningImageProvider?.family,
+    planningImageChannel: planningImageProvider?.channel,
+    planningImageProviderKind: planningImageProvider?.kind,
+    planningImageApiKey: planningImageProvider?.apiKey,
   };
 }
 
@@ -328,17 +354,37 @@ export function parseTextProviderChoice(
   return null;
 }
 
-export function parseGeminiProviderChoice(
+export function parsePlanningImageFamilyChoice(
   value: string,
-): TravelCompanionGeminiProviderKind | null {
+): TravelCompanionPlanningImageProviderFamily | null {
   const normalized = value.trim().toLowerCase();
-  if (["1", "google", "gemini", "google-direct", "direct"].includes(normalized)) {
-    return "google-direct";
+  if (["1", "gemini", "google"].includes(normalized)) {
+    return "gemini";
+  }
+  if (["2", "openai", "oa"].includes(normalized)) {
+    return "openai";
+  }
+  return null;
+}
+
+export function parsePlanningImageChannelChoice(
+  value: string,
+): TravelCompanionPlanningImageProviderChannel | null {
+  const normalized = value.trim().toLowerCase();
+  if (["1", "native", "direct"].includes(normalized)) {
+    return "native";
   }
   if (["2", "openrouter", "or"].includes(normalized)) {
     return "openrouter";
   }
   return null;
+}
+
+function composePlanningImageProviderKind(input: {
+  family: TravelCompanionPlanningImageProviderFamily;
+  channel: TravelCompanionPlanningImageProviderChannel;
+}): TravelCompanionPlanningImageProviderKind {
+  return `${input.family}-${input.channel}` as TravelCompanionPlanningImageProviderKind;
 }
 
 export function advanceSetupSessionWithText(input: {
@@ -347,6 +393,7 @@ export function advanceSetupSessionWithText(input: {
   locale?: SystemLocale;
   globalConfig: TravelCompanionGlobalConfig;
   fallbackGeminiApiKey?: string;
+  fallbackOpenAiApiKey?: string;
   fallbackOpenRouterApiKey?: string;
 }): {
   session: SetupSession;
@@ -359,10 +406,11 @@ export function advanceSetupSessionWithText(input: {
   const locale = input.locale ?? "zh-CN";
   const catalog = getSystemCatalog(locale);
   const updatedAt = nowIso();
-  const hasGeminiKeyAlready = hasConfiguredGeminiProvider({
+  const hasPlanningImageProviderAlready = hasConfiguredGeminiProvider({
     globalConfig: input.globalConfig,
     pluginConfig: {
       geminiApiKey: input.fallbackGeminiApiKey,
+      openaiApiKey: input.fallbackOpenAiApiKey,
       openrouterApiKey: input.fallbackOpenRouterApiKey,
     },
   });
@@ -535,7 +583,7 @@ export function advanceSetupSessionWithText(input: {
         next.step = "openai_base_url";
         return { session: next, completed: false };
       }
-      if (hasGeminiKeyAlready && !shouldForceGeminiReconfigure) {
+      if (hasPlanningImageProviderAlready && !shouldForceGeminiReconfigure) {
         next.step = "complete";
         return {
           session: next,
@@ -543,7 +591,7 @@ export function advanceSetupSessionWithText(input: {
           configPatch: { textProvider: { kind: choice } },
         };
       }
-      next.step = "gemini_provider";
+      next.step = "planning_image_family";
       return {
         session: next,
         completed: false,
@@ -560,7 +608,7 @@ export function advanceSetupSessionWithText(input: {
       return { session: next, completed: false };
     case "openai_model":
       next.draft.openaiModel = text;
-      if (hasGeminiKeyAlready && !shouldForceGeminiReconfigure) {
+      if (hasPlanningImageProviderAlready && !shouldForceGeminiReconfigure) {
         next.step = "complete";
         return {
           session: next,
@@ -575,7 +623,7 @@ export function advanceSetupSessionWithText(input: {
           },
         };
       }
-      next.step = "gemini_provider";
+      next.step = "planning_image_family";
       return {
         session: next,
         completed: false,
@@ -588,51 +636,64 @@ export function advanceSetupSessionWithText(input: {
           },
         },
       };
-    case "gemini_provider": {
-      const choice = parseGeminiProviderChoice(text);
+    case "planning_image_family": {
+      const choice = parsePlanningImageFamilyChoice(text);
       if (!choice) {
         throw new Error(catalog.setup.errorGeminiProviderChoice);
       }
-      next.draft.geminiProviderKind = choice;
-      next.step =
-        choice === "openrouter" ? "openrouter_api_key" : "gemini_api_key";
+      next.draft.planningImageFamily = choice;
+      next.step = "planning_image_channel";
       return { session: next, completed: false };
     }
-    case "gemini_api_key":
+    case "planning_image_channel": {
+      const channel = parsePlanningImageChannelChoice(text);
+      if (!channel) {
+        throw new Error(catalog.setup.errorGeminiProviderChoice);
+      }
+      next.draft.planningImageChannel = channel;
+      next.draft.planningImageProviderKind =
+        next.draft.planningImageFamily
+          ? composePlanningImageProviderKind({
+              family: next.draft.planningImageFamily,
+              channel,
+            })
+          : undefined;
+      next.step = "planning_image_api_key";
+      return { session: next, completed: false };
+    }
+    case "planning_image_api_key":
       next.step = "complete";
-      next.draft.geminiProviderKind = "google-direct";
-      next.draft.geminiProviderApiKey = text;
+      next.draft.planningImageProviderKind =
+        next.draft.planningImageProviderKind ??
+        composePlanningImageProviderKind({
+          family: next.draft.planningImageFamily ?? "gemini",
+          channel: next.draft.planningImageChannel ?? "native",
+        });
+      next.draft.planningImageApiKey = text;
       return {
         session: next,
         completed: true,
         configPatch: {
-          geminiApiKey: text,
-          geminiProvider: {
-            kind: "google-direct",
-            apiKey: text,
-          },
-          textProvider:
-            next.draft.textProviderKind === "openai-compatible"
+          geminiApiKey:
+            next.draft.planningImageProviderKind === "gemini-direct"
+              ? text
+              : undefined,
+          geminiProvider:
+            next.draft.planningImageProviderKind === "gemini-direct"
               ? {
-                  kind: "openai-compatible",
-                  baseUrl: next.draft.openaiBaseUrl,
-                  apiKey: next.draft.openaiApiKey,
-                  model: next.draft.openaiModel,
+                  kind: "google-direct",
+                  apiKey: text,
                 }
-              : { kind: next.draft.textProviderKind ?? "host-default" },
-        },
-      };
-    case "openrouter_api_key":
-      next.step = "complete";
-      next.draft.geminiProviderKind = "openrouter";
-      next.draft.geminiProviderApiKey = text;
-      return {
-        session: next,
-        completed: true,
-        configPatch: {
-          geminiApiKey: undefined,
-          geminiProvider: {
-            kind: "openrouter",
+              : undefined,
+          planningImageProvider: {
+            kind:
+              next.draft.planningImageProviderKind ??
+              composePlanningImageProviderKind({
+                family: next.draft.planningImageFamily ?? "gemini",
+                channel: next.draft.planningImageChannel ?? "native",
+              }),
+            family: next.draft.planningImageFamily ?? "gemini",
+            channel: next.draft.planningImageChannel ?? "native",
             apiKey: text,
           },
           textProvider:
@@ -705,14 +766,24 @@ export function renderSetupStepPrompt(
         return catalog.setup.askOpenAiModel(
           displayValue(session.draft.openaiModel, locale),
         );
-      case "gemini_provider":
+      case "planning_image_family":
         return catalog.setup.geminiProviderChoice(
-          displayValue(session.draft.geminiProviderKind, locale),
+          displayValue(session.draft.planningImageFamily, locale),
         );
-      case "gemini_api_key":
-        return catalog.setup.askGeminiApiKey;
-      case "openrouter_api_key":
-        return catalog.setup.askOpenRouterApiKey;
+      case "planning_image_channel":
+        return catalog.setup.planImageChannelChoice(
+          displayValue(session.draft.planningImageChannel, locale),
+          displayValue(session.draft.planningImageFamily, locale),
+        );
+      case "planning_image_api_key":
+        if (session.draft.planningImageChannel === "openrouter") {
+          return catalog.setup.askOpenRouterApiKey(
+            displayValue(session.draft.planningImageFamily, locale),
+          );
+        }
+        return session.draft.planningImageFamily === "openai"
+          ? catalog.setup.askPlanImageOpenAiApiKey
+          : catalog.setup.askGeminiApiKey;
       case "complete":
         return catalog.setup.completeModel;
       default:

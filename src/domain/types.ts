@@ -37,9 +37,19 @@ export type TravelCompanionTextProviderKind =
   | "gemini"
   | "openai-compatible";
 
-export type TravelCompanionGeminiProviderKind =
-  | "google-direct"
+export type TravelCompanionPlanningImageProviderFamily =
+  | "gemini"
+  | "openai";
+
+export type TravelCompanionPlanningImageProviderChannel =
+  | "native"
   | "openrouter";
+
+export type TravelCompanionPlanningImageProviderKind =
+  | "gemini-direct"
+  | "gemini-openrouter"
+  | "openai-direct"
+  | "openai-openrouter";
 
 export interface TravelCompanionTextProviderConfig {
   kind: TravelCompanionTextProviderKind;
@@ -48,15 +58,23 @@ export interface TravelCompanionTextProviderConfig {
   model?: string;
 }
 
-export interface TravelCompanionGeminiProviderConfig {
-  kind: TravelCompanionGeminiProviderKind;
+export interface TravelCompanionPlanningImageProviderConfig {
+  kind: TravelCompanionPlanningImageProviderKind;
+  family: TravelCompanionPlanningImageProviderFamily;
+  channel: TravelCompanionPlanningImageProviderChannel;
   apiKey?: string;
   baseUrl?: string;
 }
 
 export interface TravelCompanionGlobalConfig {
   geminiApiKey?: string;
-  geminiProvider?: TravelCompanionGeminiProviderConfig;
+  /** @deprecated legacy config retained for migration fallback */
+  geminiProvider?: {
+    kind: "google-direct" | "openrouter" | "openai-direct";
+    apiKey?: string;
+    baseUrl?: string;
+  };
+  planningImageProvider?: TravelCompanionPlanningImageProviderConfig;
   textProvider?: TravelCompanionTextProviderConfig;
   updatedAt: string;
 }
@@ -342,9 +360,9 @@ export type SetupStep =
   | "openai_base_url"
   | "openai_api_key"
   | "openai_model"
-  | "gemini_provider"
-  | "gemini_api_key"
-  | "openrouter_api_key"
+  | "planning_image_family"
+  | "planning_image_channel"
+  | "planning_image_api_key"
   | "complete";
 
 export type SetupSessionKind = "locale" | "persona" | "model";
@@ -363,8 +381,10 @@ export interface SetupSessionDraft {
   openaiBaseUrl?: string;
   openaiApiKey?: string;
   openaiModel?: string;
-  geminiProviderKind?: TravelCompanionGeminiProviderKind;
-  geminiProviderApiKey?: string;
+  planningImageFamily?: TravelCompanionPlanningImageProviderFamily;
+  planningImageChannel?: TravelCompanionPlanningImageProviderChannel;
+  planningImageProviderKind?: TravelCompanionPlanningImageProviderKind;
+  planningImageApiKey?: string;
 }
 
 export interface SetupSession {

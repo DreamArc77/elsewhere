@@ -221,6 +221,7 @@ async function activateConversation(
     binding: activatedBinding,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenAiApiKey: deps.pluginConfig.openaiApiKey,
     fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
   });
   await deps.logger?.log({
@@ -347,6 +348,7 @@ async function setupPersona(
     binding: binding.record,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenAiApiKey: deps.pluginConfig.openaiApiKey,
     fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
   });
 
@@ -544,6 +546,7 @@ async function startTrip(
     binding: binding.record,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenAiApiKey: deps.pluginConfig.openaiApiKey,
     fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
   });
   await deps.logger?.log({
@@ -738,6 +741,7 @@ async function statusTrip(
     binding: binding.record,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenAiApiKey: deps.pluginConfig.openaiApiKey,
     fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
   });
   const geminiProvider = describeConfiguredGeminiProvider({
@@ -776,8 +780,8 @@ async function statusTrip(
       `onboardingComplete: ${readiness.isComplete}`,
       `setupStep: ${inspection.state?.setupSession?.step ?? "none"}`,
       `textProvider: ${globalConfig.textProvider?.kind ?? "none"}`,
-      `geminiProvider: ${geminiProvider}`,
-      `geminiKeyConfigured: ${readiness.hasGeminiKey}`,
+      `planImageProvider: ${geminiProvider}`,
+      `planImageProviderConfigured: ${readiness.hasGeminiKey}`,
       `state: ${inspection.resolvedState.stage.group ?? inspection.businessSituation.state}`,
       `substate: ${inspection.resolvedState.stage.substate}`,
       `stateLocation: ${inspection.resolvedState.state.location ?? "none"}`,

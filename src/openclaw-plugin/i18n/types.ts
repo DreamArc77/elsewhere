@@ -119,8 +119,10 @@ export interface SystemLocaleCatalog {
     askOpenAiApiKey: string;
     askOpenAiModel(current: string): string;
     geminiProviderChoice(current: string): string;
+    planImageChannelChoice(current: string, family: string): string;
     askGeminiApiKey: string;
-    askOpenRouterApiKey: string;
+    askPlanImageOpenAiApiKey: string;
+    askOpenRouterApiKey(family: string): string;
     localeSelectionPersisted(localeLabel: string): string;
     errorReplyOne: string;
     errorContinueOrCancel: string;

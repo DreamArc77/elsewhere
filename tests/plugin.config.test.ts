@@ -6,12 +6,12 @@ import {
 } from "../src/openclaw-plugin/config.js";
 
 describe("elsewhere plugin config", () => {
-  it("defaults to Gemini 3 models that support search plus structured outputs", () => {
+  it("defaults only the text model and leaves plan/image models provider-specific", () => {
     const config = resolvePluginConfig({}, {});
 
-    expect(config.planningModel).toBe("gemini-3-flash-preview");
+    expect(config.planningModel).toBeUndefined();
     expect(config.textModel).toBe("gemini-3-flash-preview");
-    expect(config.imageModel).toBe("gemini-3.1-flash-image-preview");
+    expect(config.imageModel).toBeUndefined();
   });
 
   it("merges legacy plugin config into the new elsewhere entry during upgrades", () => {

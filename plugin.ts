@@ -34,6 +34,7 @@ export default definePluginEntry({
       additionalProperties: false,
       properties: {
         geminiApiKey: { type: "string" },
+        openaiApiKey: { type: "string" },
         openrouterApiKey: { type: "string" },
         defaultOriginCity: { type: "string" },
         pollIntervalSeconds: { type: "integer", minimum: 15, maximum: 3600 },
@@ -42,6 +43,7 @@ export default definePluginEntry({
         textModel: { type: "string" },
         imageModel: { type: "string" },
         geminiBaseUrl: { type: "string" },
+        openaiBaseUrl: { type: "string" },
         openrouterBaseUrl: { type: "string" },
         logMode: { type: "string", enum: ["safe", "debug"] },
       },

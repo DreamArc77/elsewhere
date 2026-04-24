@@ -36,7 +36,7 @@ export const jaJP: SystemLocaleCatalog = {
       "/elsewhere-activate",
       "/elsewhere-deactivate",
       "/elsewhere-setup                      # 今の相棒を編集",
-      "/elsewhere-model                      # テキストモデル / Gemini key を再設定",
+      "/elsewhere-model                      # テキストモデル / 旅行計画・画像生成プロバイダを再設定",
       "/elsewhere-status",
       "/elsewhere-stop",
     ],
@@ -139,7 +139,7 @@ export const jaJP: SystemLocaleCatalog = {
       ].join("\n"),
     tripStartProviderBlocked: [
       "今回の旅行計画は失敗しました。",
-      "Gemini 側の provider 制限で失敗しており、行き先の入力ミスではありません。",
+      "今回失敗したのは選択中のプロバイダ側の制限であり、行き先の入力ミスではありません。",
       "今は行き先を送り直さなくて大丈夫です。少し待ってから試してください。",
     ].join("\n"),
     tripStartFailed: (message) =>
@@ -166,7 +166,7 @@ export const jaJP: SystemLocaleCatalog = {
     ].join("\n"),
     setupContinueModel: [
       "相棒のプロフィールは作成できました。",
-      "次に、旅行計画と自撮り生成のために Gemini API key を設定する必要があります。",
+      "次に、旅行計画と画像生成で使うプロバイダを設定する必要があります。",
     ].join("\n"),
     personaCreated: (name) => `${name} を作成しました。`,
     personaUpdated: (name) => `${name} のプロフィールを更新しました。`,
@@ -285,10 +285,17 @@ export const jaJP: SystemLocaleCatalog = {
       [`使いたいモデル名を返信してください。`, `現在: ${current}`].join("\n"),
     geminiProviderChoice: (current) =>
       [
-        "最後に、旅行計画と画像生成で使う Gemini チャンネルを選んでください。",
+        "最後に、旅行計画と画像生成で使うモデル系統を選んでください。",
         `現在: ${current}`,
-        "1. google-direct（Gemini API key / AI Studio）",
-        "2. openrouter（OpenRouter key で Gemini を使う）",
+        "1. gemini",
+        "2. openai",
+      ].join("\n"),
+    planImageChannelChoice: (current, family) =>
+      [
+        `選択中の系統: ${family}`,
+        `現在の通路: ${current}`,
+        "1. native（公式 API）",
+        "2. openrouter",
       ].join("\n"),
     askGeminiApiKey: [
       "Gemini API key がまだ必要です。",
@@ -296,12 +303,19 @@ export const jaJP: SystemLocaleCatalog = {
       "取得先: https://aistudio.google.com/app/apikey",
       "そのまま key を送ってください。",
     ].join("\n"),
-    askOpenRouterApiKey: [
-      "OpenRouter API key がまだ必要です。",
-      "旅行計画と画像生成でこの OpenRouter key を共用し、OpenRouter 経由で Gemini を使います。",
-      "取得先: https://openrouter.ai/settings/keys",
+    askPlanImageOpenAiApiKey: [
+      "OpenAI API key がまだ必要です。",
+      "旅行計画と画像生成でこの OpenAI key を共用します。",
+      "取得先: https://platform.openai.com/api-keys",
       "そのまま key を送ってください。",
     ].join("\n"),
+    askOpenRouterApiKey: (family) =>
+      [
+        "OpenRouter API key がまだ必要です。",
+        `旅行計画と画像生成でこの OpenRouter key を共用し、OpenRouter 経由で ${family} 系モデルを使います。`,
+        "取得先: https://openrouter.ai/settings/keys",
+        "そのまま key を送ってください。",
+      ].join("\n"),
     localeSelectionPersisted: (localeLabel) =>
       `${localeLabel} に切り替えました。`,
     errorReplyOne: "準備できたら 1 で返信してください。",

@@ -729,7 +729,11 @@ async function handleSetupSessionInbound(
         details: { kind: configPatch.textProvider.kind },
       });
     }
-    if (configPatch?.geminiApiKey || configPatch?.geminiProvider?.apiKey) {
+    if (
+      configPatch?.geminiApiKey ||
+      configPatch?.geminiProvider?.apiKey ||
+      configPatch?.planningImageProvider?.apiKey
+    ) {
       await logCommandBridgeEvent(deps.logger, {
         binding: input.binding,
         runId,
@@ -740,7 +744,10 @@ async function handleSetupSessionInbound(
         status: "success",
         details: {
           hasGeminiKey: true,
-          providerKind: configPatch.geminiProvider?.kind ?? "google-direct",
+          providerKind:
+            configPatch.planningImageProvider?.kind ??
+            configPatch.geminiProvider?.kind ??
+            "gemini-direct",
         },
       });
     }
@@ -825,6 +832,7 @@ async function handleSetupSessionInbound(
       locale,
       globalConfig,
       fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+      fallbackOpenAiApiKey: deps.pluginConfig.openaiApiKey,
       fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
     });
   } catch (error) {
@@ -1102,6 +1110,7 @@ async function finalizeSetupSession(input: {
       binding: inbound.binding,
       config: globalConfig,
       fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+      fallbackOpenAiApiKey: deps.pluginConfig.openaiApiKey,
       fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
     });
     if (readiness.isComplete && !inbound.binding.lastTripId && !nextState.awaitingDestination) {
@@ -1149,6 +1158,7 @@ async function finalizeSetupSession(input: {
       binding: updatedBinding,
       config: globalConfig,
       fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+      fallbackOpenAiApiKey: deps.pluginConfig.openaiApiKey,
       fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
     });
     const shouldSendImmediateIdleGuide =
@@ -1260,6 +1270,7 @@ async function finalizeSetupSession(input: {
     binding: inbound.binding,
     config: globalConfig,
     fallbackGeminiApiKey: deps.pluginConfig.geminiApiKey,
+    fallbackOpenAiApiKey: deps.pluginConfig.openaiApiKey,
     fallbackOpenRouterApiKey: deps.pluginConfig.openrouterApiKey,
   });
   const shouldSendImmediateIdleGuide =

@@ -36,7 +36,7 @@ export const zhCN: SystemLocaleCatalog = {
       "/elsewhere-activate",
       "/elsewhere-deactivate",
       "/elsewhere-setup                      # 修改当前旅伴",
-      "/elsewhere-model                      # 重新配置文本模型 / Gemini key",
+      "/elsewhere-model                      # 重新配置文本模型 / 旅行规划与生图提供方",
       "/elsewhere-status",
       "/elsewhere-stop",
     ],
@@ -141,7 +141,7 @@ export const zhCN: SystemLocaleCatalog = {
     },
     tripStartProviderBlocked: [
       "这次行程生成失败了。",
-      "Gemini 当前拒绝了这次请求，像是 provider 侧限制，不是你目的地填错了。",
+      "当前选择的规划提供方拒绝了这次请求，更像是 provider 侧限制，不是你目的地填错了。",
       "先不用重复发送目的地，稍后再试就行。",
     ].join("\n"),
     tripStartFailed(message?: string): string {
@@ -168,7 +168,7 @@ export const zhCN: SystemLocaleCatalog = {
     ].join("\n"),
     setupContinueModel: [
       "好的，旅伴资料已经创建好了。",
-      "接下来您还需要配置Gemini API Key来获取旅行规划和自拍生成能力",
+      "接下来您还需要配置旅行规划与生图提供方，才能继续使用这些能力。",
     ].join("\n"),
     personaCreated(name: string): string {
       return `${name} 创建完成。`;
@@ -293,10 +293,18 @@ export const zhCN: SystemLocaleCatalog = {
     },
     geminiProviderChoice(current: string): string {
       return [
-        "最后一步，给 旅行规划 和 生图 选一个 Gemini 通道：",
+        "最后一步，先选 旅行规划 和 生图 要用哪一系模型：",
         `当前：${current}`,
-        "1. google-direct（Gemini API key / AI Studio）",
-        "2. openrouter（用 OpenRouter key 调 Gemini）",
+        "1. gemini",
+        "2. openai",
+      ].join("\n");
+    },
+    planImageChannelChoice(current: string, family: string): string {
+      return [
+        `已选模型系：${family}`,
+        `当前通道：${current}`,
+        "1. native（原生官方 API）",
+        "2. openrouter",
       ].join("\n");
     },
     askGeminiApiKey: [
@@ -305,12 +313,19 @@ export const zhCN: SystemLocaleCatalog = {
       "Gemini key 获取链接：https://aistudio.google.com/app/apikey",
       "直接把 key 发我就行。",
     ].join("\n"),
-    askOpenRouterApiKey: [
-      "还需要一个 OpenRouter API key。",
-      "旅行规划 和生图都会共用这一个 OpenRouter key，并通过 OpenRouter 调 Gemini。",
-      "OpenRouter key 获取链接：https://openrouter.ai/settings/keys",
+    askPlanImageOpenAiApiKey: [
+      "还需要一个 OpenAI API key。",
+      "旅行规划 和生图都会共用这一个 OpenAI key。",
+      "OpenAI key 获取链接：https://platform.openai.com/api-keys",
       "直接把 key 发我就行。",
     ].join("\n"),
+    askOpenRouterApiKey: (family: string) =>
+      [
+        "还需要一个 OpenRouter API key。",
+        `旅行规划 和生图都会共用这一个 OpenRouter key，并通过 OpenRouter 调 ${family} 系模型。`,
+        "OpenRouter key 获取链接：https://openrouter.ai/settings/keys",
+        "直接把 key 发我就行。",
+      ].join("\n"),
     localeSelectionPersisted(localeLabel: string): string {
       return `已切换为：${localeLabel}`;
     },

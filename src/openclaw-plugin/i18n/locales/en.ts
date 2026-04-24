@@ -36,7 +36,7 @@ export const en: SystemLocaleCatalog = {
       "/elsewhere-activate",
       "/elsewhere-deactivate",
       "/elsewhere-setup                      # edit the current companion",
-      "/elsewhere-model                      # reconfigure the text model / Gemini key",
+      "/elsewhere-model                      # reconfigure the text model / planning-image provider",
       "/elsewhere-status",
       "/elsewhere-stop",
     ],
@@ -148,7 +148,7 @@ export const en: SystemLocaleCatalog = {
     },
     tripStartProviderBlocked: [
       "Trip planning failed this time.",
-      "Gemini rejected this request because of a provider-side restriction, not because your destination was wrong.",
+      "The selected planning provider rejected this request because of a provider-side restriction, not because your destination was wrong.",
       "You do not need to resend the destination right now. Please try again later.",
     ].join("\n"),
     tripStartFailed(message?: string): string {
@@ -176,7 +176,7 @@ export const en: SystemLocaleCatalog = {
     ].join("\n"),
     setupContinueModel: [
       "Great, your companion profile has been created.",
-      "Next, you still need to connect a Gemini API key for trip planning and selfie generation.",
+      "Next, you still need to configure the provider for trip planning and image generation.",
     ].join("\n"),
     personaCreated: (name) => `${name} has been created.`,
     personaUpdated: (name) => `${name}'s profile has been updated.`,
@@ -299,10 +299,17 @@ export const en: SystemLocaleCatalog = {
       ),
     geminiProviderChoice: (current) =>
       [
-        "Last step: choose a Gemini channel for trip planning and image generation:",
+        "Last step: choose the model family for trip planning and image generation:",
         `Current: ${current}`,
-        "1. google-direct (Gemini API key / AI Studio)",
-        "2. openrouter (use an OpenRouter key to call Gemini)",
+        "1. gemini",
+        "2. openai",
+      ].join("\n"),
+    planImageChannelChoice: (current, family) =>
+      [
+        `Selected family: ${family}`,
+        `Current channel: ${current}`,
+        "1. native (official API)",
+        "2. openrouter",
       ].join("\n"),
     askGeminiApiKey: [
       "A Gemini API key is still needed.",
@@ -310,12 +317,19 @@ export const en: SystemLocaleCatalog = {
       "Get a Gemini key here: https://aistudio.google.com/app/apikey",
       "Just send me the key directly.",
     ].join("\n"),
-    askOpenRouterApiKey: [
-      "An OpenRouter API key is still needed.",
-      "Trip planning and image generation will share this OpenRouter key and call Gemini through OpenRouter.",
-      "Get an OpenRouter key here: https://openrouter.ai/settings/keys",
+    askPlanImageOpenAiApiKey: [
+      "An OpenAI API key is still needed.",
+      "Trip planning and image generation will share this OpenAI key.",
+      "Get an OpenAI key here: https://platform.openai.com/api-keys",
       "Just send me the key directly.",
     ].join("\n"),
+    askOpenRouterApiKey: (family) =>
+      [
+        "An OpenRouter API key is still needed.",
+        `Trip planning and image generation will share this OpenRouter key and call ${family} models through OpenRouter.`,
+        "Get an OpenRouter key here: https://openrouter.ai/settings/keys",
+        "Just send me the key directly.",
+      ].join("\n"),
     localeSelectionPersisted: (localeLabel) =>
       `Switched to: ${localeLabel}`,
     errorReplyOne: "Reply with 1 when you're ready.",
