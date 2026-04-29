@@ -839,6 +839,7 @@ export interface RuntimeHooks {
   afterMessageSent?(
     record: TripRecord,
     receipt: SendReceipt,
+    pending: PendingDispatch,
   ): Promise<void> | void;
   afterTripCompleted?(record: TripRecord): Promise<void> | void;
 }

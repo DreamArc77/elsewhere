@@ -128,6 +128,38 @@ describe("service scheduling and crash recovery", () => {
     expect(updatedTrip?.state.currentPhase).toBe("planning");
   });
 
+  it("passes the sent pending postcard into afterMessageSent hooks", async () => {
+    let sentPhase: string | undefined;
+    let recordPendingWasCleared = false;
+    const runtime = await createTestRuntime({
+      hooks: {
+        afterMessageSent(record, _receipt, pending) {
+          sentPhase = pending.phase;
+          recordPendingWasCleared = record.pendingDispatch === null;
+        },
+      },
+    });
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      homeCity: "Hong Kong",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+
+    await runtime.service.runTrip(trip.tripId);
+
+    expect(sentPhase).toBe("planning");
+    expect(recordPendingWasCleared).toBe(true);
+  });
+
   it("can force the next step immediately for manual testing", async () => {
     const runtime = await createTestRuntime();
     const persona = await runtime.service.createPersona({

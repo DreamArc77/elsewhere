@@ -730,7 +730,11 @@ export class ElsewhereService {
       };
 
       await this.dependencies.tripRepository.save(nextRecord);
-      await this.dependencies.hooks?.afterMessageSent?.(nextRecord, receipt);
+      await this.dependencies.hooks?.afterMessageSent?.(
+        nextRecord,
+        receipt,
+        pending,
+      );
       await this.log({
         tripId: record.tripId,
         runId,

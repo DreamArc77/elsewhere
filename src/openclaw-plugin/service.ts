@@ -193,9 +193,8 @@ export async function createRuntimeBundle(input: {
     clock: new SystemClockPort(),
     logger,
     hooks: {
-      afterMessageSent: async (record) => {
-        const pending = record.pendingDispatch;
-        if (!pending?.postcard) {
+      afterMessageSent: async (record, _receipt, pending) => {
+        if (!pending.postcard) {
           return;
         }
 
