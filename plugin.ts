@@ -3,7 +3,6 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { handleTravelCompanionCommand } from "./src/openclaw-plugin/command.js";
 import { BindingRegistryStore } from "./src/openclaw-plugin/binding-state.js";
 import {
-  DIRECT_SUBCOMMAND_ALIASES,
   LEGACY_COMMAND_NAME,
   PRIMARY_COMMAND_NAME,
 } from "./src/openclaw-plugin/command-alias.js";
@@ -196,17 +195,5 @@ export default definePluginEntry({
       "Legacy alias for elsewhere.",
       "elsewhere is getting ready...",
     );
-    for (const subcommand of DIRECT_SUBCOMMAND_ALIASES) {
-      registerCompanionCommand(
-        `${PRIMARY_COMMAND_NAME}-${subcommand}`,
-        `Shortcut alias for /${PRIMARY_COMMAND_NAME} ${subcommand}.`,
-        "elsewhere is getting ready...",
-      );
-      registerCompanionCommand(
-        `${LEGACY_COMMAND_NAME}-${subcommand}`,
-        `Legacy shortcut alias for /${PRIMARY_COMMAND_NAME} ${subcommand}.`,
-        "elsewhere is getting ready...",
-      );
-    }
   },
 });

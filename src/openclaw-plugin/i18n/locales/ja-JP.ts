@@ -33,12 +33,12 @@ export const jaJP: SystemLocaleCatalog = {
   },
   help: {
     lines: [
-      "/elsewhere-activate",
-      "/elsewhere-deactivate",
-      "/elsewhere-setup                      # 今の相棒を編集",
-      "/elsewhere-model                      # テキストモデル / 旅行計画・画像生成プロバイダを再設定",
-      "/elsewhere-status",
-      "/elsewhere-stop",
+      "/elsewhere activate",
+      "/elsewhere deactivate",
+      "/elsewhere setup                      # 今の相棒を編集",
+      "/elsewhere model                      # テキストモデル / 旅行計画・画像生成プロバイダを再設定",
+      "/elsewhere status",
+      "/elsewhere stop",
     ],
   },
   command: {

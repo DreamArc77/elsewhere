@@ -33,12 +33,12 @@ export const zhCN: SystemLocaleCatalog = {
   },
   help: {
     lines: [
-      "/elsewhere-activate",
-      "/elsewhere-deactivate",
-      "/elsewhere-setup                      # 修改当前旅伴",
-      "/elsewhere-model                      # 重新配置文本模型 / 旅行规划与生图提供方",
-      "/elsewhere-status",
-      "/elsewhere-stop",
+      "/elsewhere activate",
+      "/elsewhere deactivate",
+      "/elsewhere setup                      # 修改当前旅伴",
+      "/elsewhere model                      # 重新配置文本模型 / 旅行规划与生图提供方",
+      "/elsewhere status",
+      "/elsewhere stop",
     ],
   },
   command: {

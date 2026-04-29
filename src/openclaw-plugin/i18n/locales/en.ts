@@ -33,12 +33,12 @@ export const en: SystemLocaleCatalog = {
   },
   help: {
     lines: [
-      "/elsewhere-activate",
-      "/elsewhere-deactivate",
-      "/elsewhere-setup                      # edit the current companion",
-      "/elsewhere-model                      # reconfigure the text model / planning-image provider",
-      "/elsewhere-status",
-      "/elsewhere-stop",
+      "/elsewhere activate",
+      "/elsewhere deactivate",
+      "/elsewhere setup                      # edit the current companion",
+      "/elsewhere model                      # reconfigure the text model / planning-image provider",
+      "/elsewhere status",
+      "/elsewhere stop",
     ],
   },
   command: {

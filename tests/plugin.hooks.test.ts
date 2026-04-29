@@ -313,7 +313,7 @@ describe("travel companion inbound takeover hook", () => {
     expect(payload).toContain('"event":"command.bridge.replied"');
   });
 
-  it("bridges direct /elsewhere-status aliases inside companion-exclusive conversations", async () => {
+  it("bridges /elsewhere status inside companion-exclusive conversations", async () => {
     const runtime = await createTestRuntime();
     const key = bindingKey({
       channel: "telegram",
@@ -345,8 +345,8 @@ describe("travel companion inbound takeover hook", () => {
 
     const result = await handleTravelCompanionInboundClaim(
       {
-        content: "/elsewhere-status",
-        body: "/elsewhere-status",
+        content: "/elsewhere status",
+        body: "/elsewhere status",
         channel: "telegram",
         accountId: "default",
         conversationId: "1459473177",
