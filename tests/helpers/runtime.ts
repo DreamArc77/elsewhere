@@ -85,6 +85,24 @@ export async function createTestRuntime(options?: {
         }
       },
     },
+    resolveCaptionContext: async (record, step) => {
+      const allBindings = await bindings.list();
+      const targetBinding = allBindings.find(
+        (binding) => binding.lastTripId === record.tripId,
+      );
+      if (!targetBinding) {
+        return null;
+      }
+
+      const state = await conversationStateRepository.getByKey(targetBinding.key);
+      return {
+        planningSilentUserMessages:
+          step.phase === "planning"
+            ? state?.planningSilentUserMessages ?? []
+            : [],
+        locale: state?.systemLocale ?? "zh-CN",
+      };
+    },
   });
   conversationService = new CompanionConversationService({
     bindings,

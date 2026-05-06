@@ -261,10 +261,6 @@ export async function createRuntimeBundle(input: {
       },
     },
     resolveCaptionContext: async (record, step) => {
-      if (step.phase !== "planning") {
-        return null;
-      }
-
       const allBindings = await bindings.list();
       const targetBinding = allBindings.find(
         (binding) => binding.lastTripId === record.tripId,
@@ -275,7 +271,10 @@ export async function createRuntimeBundle(input: {
 
       const state = await conversationStateRepository.getByKey(targetBinding.key);
       return {
-        planningSilentUserMessages: state?.planningSilentUserMessages ?? [],
+        planningSilentUserMessages:
+          step.phase === "planning"
+            ? state?.planningSilentUserMessages ?? []
+            : [],
         locale: state?.systemLocale ?? "zh-CN",
       };
     },

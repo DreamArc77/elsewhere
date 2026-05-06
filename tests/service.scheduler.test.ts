@@ -6,6 +6,7 @@ import { JsonArtifactStore, JsonPersonaRepository, JsonTripRepository } from "..
 import { JsonlFileLogger } from "../src/infrastructure/jsonl-file-logger.js";
 import { createTestRuntime } from "./helpers/runtime.js";
 import { buildFixtureTripPlan } from "../src/testing/fakes.js";
+import { bindingKey } from "../src/openclaw-plugin/binding-state.js";
 
 describe("service scheduling and crash recovery", () => {
   it("does not send duplicate postcards when the same trip is ticked concurrently", async () => {
@@ -185,6 +186,74 @@ describe("service scheduling and crash recovery", () => {
 
     const updatedTrip = await runtime.tripRepository.getById(trip.tripId);
     expect(updatedTrip?.state.currentPhase).toBe("departing");
+  });
+
+  it("uses the conversation locale for non-planning postcard captions", async () => {
+    const runtime = await createTestRuntime();
+    const persona = await runtime.service.createPersona({
+      name: "Mori",
+      homeCity: "Hong Kong",
+      traits: ["gentle", "curious"],
+      relationship: "travel soulmate",
+      toneStyle: "warm",
+      referenceImageAsset: runtime.referenceImagePath,
+    });
+    const trip = await runtime.service.startTrip({
+      personaId: persona.personaId,
+      originCity: "Hong Kong",
+      destinationCity: "Tokyo",
+    });
+    const key = bindingKey({
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+    });
+    await runtime.bindings.upsert({
+      key,
+      channel: "telegram",
+      accountId: "default",
+      target: "1459473177",
+      boundAt: Date.now(),
+      mode: "companion-exclusive",
+      defaultPersonaId: persona.personaId,
+      lastTripId: trip.tripId,
+    });
+    await runtime.conversationStateRepository.save({
+      conversationKey: key,
+      mode: "companion-exclusive",
+      systemLocale: "en",
+      pendingUserMessages: [],
+      pendingReplyDispatch: null,
+      instantReplyWindow: null,
+      recentHandledCommandMessageIds: [],
+      recentTurns: [],
+      lastUserMessageAt: null,
+      lastCompanionReplyAt: null,
+      updatedAt: runtime.clock.now().toISOString(),
+    });
+
+    const captionInputs: Array<{ phase: string; locale: string | undefined }> = [];
+    const originalComposeCaption =
+      runtime.grounding.composeCaption.bind(runtime.grounding);
+    runtime.grounding.composeCaption = async (input) => {
+      captionInputs.push({ phase: input.phase, locale: input.locale });
+      return await originalComposeCaption(input);
+    };
+
+    await runtime.service.runTrip(trip.tripId);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (captionInputs.some((input) => input.phase !== "planning")) {
+        break;
+      }
+      await runtime.service.runTrip(trip.tripId, { ignoreSchedule: true });
+    }
+
+    expect(captionInputs[0]).toMatchObject({ phase: "planning", locale: "en" });
+    const nonPlanningCaption = captionInputs.find(
+      (input) => input.phase !== "planning",
+    );
+    expect(nonPlanningCaption).toBeTruthy();
+    expect(nonPlanningCaption?.locale).toBe("en");
   });
 
   it("can stop an old trip so it no longer schedules messages", async () => {
