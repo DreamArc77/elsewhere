@@ -713,6 +713,116 @@ function resolveTransportWindow(input: {
   return { beforeStart, departStart, departAt, arriveAt, arriveEnd };
 }
 
+type TransportWindow = ReturnType<typeof resolveTransportWindow>;
+
+function shiftIsoDate(date: string, dayOffset: number): string {
+  const base = parseDateParts(date);
+  const shifted = addDaysToDateParts({ ...base, dayOffset });
+  return `${shifted.year}-${String(shifted.month).padStart(2, "0")}-${String(
+    shifted.day,
+  ).padStart(2, "0")}`;
+}
+
+function resolveDepartureWindow(input: {
+  date: string;
+  departureTime: string;
+  arrivalTime: string;
+  departureTimeZone: string;
+  arrivalTimeZone: string;
+  firstActivityStartsAt: Date;
+}): TransportWindow {
+  const candidates = [-3, -2, -1, 0, 1].map((dayOffset) =>
+    resolveTransportWindow({
+      date: shiftIsoDate(input.date, dayOffset),
+      departureTime: input.departureTime,
+      arrivalTime: input.arrivalTime,
+      departureTimeZone: input.departureTimeZone,
+      arrivalTimeZone: input.arrivalTimeZone,
+      referenceDirection: "departure",
+    }),
+  );
+  const arrivalsBeforeFirstActivity = candidates.filter(
+    (candidate) =>
+      candidate.arriveAt.getTime() <= input.firstActivityStartsAt.getTime(),
+  );
+  return (
+    arrivalsBeforeFirstActivity.sort(
+      (left, right) => right.arriveAt.getTime() - left.arriveAt.getTime(),
+    )[0] ??
+    candidates.sort(
+      (left, right) =>
+        Math.abs(left.arriveAt.getTime() - input.firstActivityStartsAt.getTime()) -
+        Math.abs(right.arriveAt.getTime() - input.firstActivityStartsAt.getTime()),
+    )[0]!
+  );
+}
+
+function isReturnStagingActivity(
+  plan: TripPlan,
+  activity: ItineraryActivity,
+): boolean {
+  if (activity.type !== "transport" && activity.type !== "accommodation") {
+    return false;
+  }
+
+  const station = plan.transportation.return.departure.station.trim().toLowerCase();
+  const haystack = [
+    activity.location,
+    activity.address,
+    activity.description,
+    activity.route?.from_location,
+    activity.route?.to_location,
+    activity.arrival_context.from_location,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    (station.length > 0 && haystack.includes(station)) ||
+    looksLikeTerminalContext(activity)
+  );
+}
+
+function resolveReturnWindow(input: {
+  date: string;
+  departureTime: string;
+  arrivalTime: string;
+  departureTimeZone: string;
+  arrivalTimeZone: string;
+  afterActivityEndsAt?: Date;
+}): TransportWindow {
+  const candidates = [-1, 0, 1, 2, 3].map((dayOffset) =>
+    resolveTransportWindow({
+      date: shiftIsoDate(input.date, dayOffset),
+      departureTime: input.departureTime,
+      arrivalTime: input.arrivalTime,
+      departureTimeZone: input.departureTimeZone,
+      arrivalTimeZone: input.arrivalTimeZone,
+      departureLeadHours: 0.25,
+      referenceDirection: "return",
+    }),
+  );
+
+  if (!input.afterActivityEndsAt) {
+    return candidates[1]!;
+  }
+
+  const departuresAfterStaging = candidates.filter(
+    (candidate) =>
+      candidate.departAt.getTime() >= input.afterActivityEndsAt!.getTime(),
+  );
+  return (
+    departuresAfterStaging.sort(
+      (left, right) => left.departAt.getTime() - right.departAt.getTime(),
+    )[0] ??
+    candidates.sort(
+      (left, right) =>
+        Math.abs(left.departAt.getTime() - input.afterActivityEndsAt!.getTime()) -
+        Math.abs(right.departAt.getTime() - input.afterActivityEndsAt!.getTime()),
+    )[0]!
+  );
+}
+
 export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
   const timeZone = inferDestinationTimeZone(plan);
   const itinerary = [...plan.daily_itinerary].sort((a, b) => a.day - b.day);
@@ -796,22 +906,29 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
 
   const firstDay = getDayItinerary(plan, firstActivityStep.day)!;
   const lastDay = itinerary[itinerary.length - 1]!;
-  const departureWindow = resolveTransportWindow({
+  const departureWindow = resolveDepartureWindow({
     date: firstDay.date,
     departureTime: plan.transportation.departure.departure.time,
     arrivalTime: plan.transportation.departure.arrival.time,
     departureTimeZone: inferTimeZoneFromText(plan.metadata.origin),
     arrivalTimeZone: inferTimeZoneFromText(plan.metadata.destination),
-    referenceDirection: "departure",
+    firstActivityStartsAt: new Date(firstActivityStep.scheduledAt),
   });
-  const returnWindow = resolveTransportWindow({
+  const lastReturnStagingStep = [...activitySteps].reverse().find(
+    (step) =>
+      step.day === lastDay.day &&
+      step.context?.kind === "activity" &&
+      isReturnStagingActivity(plan, step.context.activity),
+  );
+  const returnWindow = resolveReturnWindow({
     date: lastDay.date,
     departureTime: plan.transportation.return.departure.time,
     arrivalTime: plan.transportation.return.arrival.time,
     departureTimeZone: inferTimeZoneFromText(plan.metadata.destination),
     arrivalTimeZone: inferTimeZoneFromText(plan.metadata.origin),
-    departureLeadHours: 0.25,
-    referenceDirection: "return",
+    afterActivityEndsAt: lastReturnStagingStep?.context
+      ? new Date(lastReturnStagingStep.context.timing.endUtc)
+      : undefined,
   });
   const planningTiming = buildSyntheticTiming(now, inferTimeZoneFromText(plan.metadata.origin));
   const planningActivity = buildPlanningActivity(plan);

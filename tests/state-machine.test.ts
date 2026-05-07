@@ -81,6 +81,53 @@ describe("state machine", () => {
     expect(timeline.find((step) => step.phase === "returning")).toBeTruthy();
   });
 
+  it("keeps overnight outbound and early-morning return legs outside destination activities", () => {
+    const plan = buildFixtureTripPlan({
+      tripId: "trip-istanbul-overnight",
+      originCity: "大阪",
+      destinationCity: "伊斯坦布尔",
+      days: 3,
+    });
+    plan.transportation.departure.departure.station = "关西国际机场";
+    plan.transportation.departure.departure.time = "22:30";
+    plan.transportation.departure.arrival.station = "伊斯坦布尔机场";
+    plan.transportation.departure.arrival.time = "05:35 (+1)";
+    plan.transportation.return.departure.station = "伊斯坦布尔机场";
+    plan.transportation.return.departure.time = "02:00";
+    plan.transportation.return.arrival.station = "关西国际机场";
+    plan.transportation.return.arrival.time = "19:00";
+
+    const timeline = buildTimeline(
+      plan,
+      new Date("2026-04-10T00:00:00.000Z"),
+    );
+    const mainDeparture = timeline.find(
+      (step) => step.stepId === "departing:1:main_departing",
+    )!;
+    const firstDestinationActivity = timeline.find(
+      (step) =>
+        step.context?.kind === "activity" &&
+        step.context.activityIndex === 0 &&
+        step.day === 1,
+    )!;
+    const airportTransfer = timeline.find(
+      (step) =>
+        step.context?.kind === "activity" &&
+        step.context.activityIndex === 2 &&
+        step.day === 3,
+    )!;
+    const mainReturn = timeline.find(
+      (step) => step.stepId === "returning:3:main_return",
+    )!;
+
+    expect(new Date(mainDeparture.scheduledAt).getTime()).toBeLessThan(
+      new Date(firstDestinationActivity.scheduledAt).getTime(),
+    );
+    expect(new Date(mainReturn.scheduledAt).getTime()).toBeGreaterThan(
+      new Date(airportTransfer.context!.timing.endUtc).getTime(),
+    );
+  });
+
   it("uses the destination local time zone for Chinese mainland destinations", () => {
     const qingdaoPlan = buildFixtureTripPlan({
       tripId: "trip-qingdao",
