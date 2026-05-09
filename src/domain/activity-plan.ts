@@ -823,6 +823,119 @@ function resolveReturnWindow(input: {
   );
 }
 
+function compareRank(left: number[], right: number[]): number {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = (left[index] ?? 0) - (right[index] ?? 0);
+    if (delta !== 0) {
+      return delta;
+    }
+  }
+  return 0;
+}
+
+function sendMomentRank(step: TimelineStep): number {
+  switch (step.context?.sendMoment) {
+    case "start":
+      return 0;
+    case "mid":
+      return 1;
+    case "summary":
+    default:
+      return 2;
+  }
+}
+
+function syntheticDepartureRank(stepId: string): number | null {
+  if (stepId.endsWith(":before_departure")) {
+    return 0;
+  }
+  if (stepId.endsWith(":main_departing")) {
+    return 1;
+  }
+  if (stepId.endsWith(":main_departing_mid")) {
+    return 2;
+  }
+  if (stepId.endsWith(":arrival")) {
+    return 3;
+  }
+  return null;
+}
+
+function syntheticReturnRank(stepId: string): number | null {
+  if (stepId.endsWith(":main_return")) {
+    return 0;
+  }
+  if (stepId.endsWith(":main_return_mid")) {
+    return 1;
+  }
+  if (stepId.endsWith(":return_arrive")) {
+    return 2;
+  }
+  return null;
+}
+
+function timelineNarrativeRank(step: TimelineStep): number[] {
+  if (step.stepId === toId("planning", 0, "planning")) {
+    return [0, 0];
+  }
+  if (step.stepId === toId("planning", 0, "packing")) {
+    return [0, 1];
+  }
+
+  const departureRank = syntheticDepartureRank(step.stepId);
+  if (departureRank !== null && step.context?.activityIndex === -1) {
+    return [1, departureRank];
+  }
+
+  if (step.context?.kind === "activity" && step.context.activityIndex >= 0) {
+    return [
+      2,
+      step.day,
+      step.context.activityIndex,
+      sendMomentRank(step),
+    ];
+  }
+
+  const returnRank = syntheticReturnRank(step.stepId);
+  if (returnRank !== null && step.context?.activityIndex === -1) {
+    return [3, returnRank];
+  }
+
+  return [4, new Date(step.scheduledAt).getTime()];
+}
+
+function compareTimelineNarrative(left: TimelineStep, right: TimelineStep): number {
+  const narrativeDelta = compareRank(
+    timelineNarrativeRank(left),
+    timelineNarrativeRank(right),
+  );
+  if (narrativeDelta !== 0) {
+    return narrativeDelta;
+  }
+
+  const timeDelta =
+    new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime();
+  return timeDelta !== 0 ? timeDelta : left.stepId.localeCompare(right.stepId);
+}
+
+function ensureMonotonicScheduledAt(timeline: TimelineStep[]): TimelineStep[] {
+  let previousMs = Number.NEGATIVE_INFINITY;
+  return timeline.map((step) => {
+    const scheduledMs = new Date(step.scheduledAt).getTime();
+    const nextMs =
+      scheduledMs > previousMs ? scheduledMs : previousMs + 60 * 1000;
+    previousMs = nextMs;
+    if (nextMs === scheduledMs) {
+      return step;
+    }
+    return {
+      ...step,
+      scheduledAt: new Date(nextMs).toISOString(),
+    };
+  });
+}
+
 export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
   const timeZone = inferDestinationTimeZone(plan);
   const itinerary = [...plan.daily_itinerary].sort((a, b) => a.day - b.day);
@@ -1429,16 +1542,14 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
     }),
   );
 
-  const sortedTimeline = [...syntheticSteps, ...activitySteps].sort((left, right) => {
-    const delta =
-      new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime();
-    return delta !== 0 ? delta : left.stepId.localeCompare(right.stepId);
-  });
+  const sortedTimeline = [...syntheticSteps, ...activitySteps].sort(
+    compareTimelineNarrative,
+  );
   const planningStep = syntheticSteps.find(
     (step) => step.stepId === toId("planning", 0, "planning"),
   );
   if (!planningStep) {
-    return sortedTimeline;
+    return ensureMonotonicScheduledAt(sortedTimeline);
   }
 
   const nowMs = now.getTime();
@@ -1447,5 +1558,5 @@ export function buildTimeline(plan: TripPlan, now: Date): TimelineStep[] {
       step.stepId !== planningStep.stepId &&
       new Date(step.scheduledAt).getTime() > nowMs,
   );
-  return [planningStep, ...futureSteps];
+  return ensureMonotonicScheduledAt([planningStep, ...futureSteps]);
 }

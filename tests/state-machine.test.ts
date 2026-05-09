@@ -17,6 +17,10 @@ function buildPlan(days: number) {
   });
 }
 
+function stepIndex(timeline: ReturnType<typeof buildTimeline>, stepId: string): number {
+  return timeline.findIndex((step) => step.stepId === stepId);
+}
+
 describe("state machine", () => {
   it("builds an activity-driven timeline for a 3-day trip", () => {
     const timeline = buildTimeline(
@@ -120,12 +124,44 @@ describe("state machine", () => {
       (step) => step.stepId === "returning:3:main_return",
     )!;
 
+    expect(stepIndex(timeline, "departing:1:before_departure")).toBeLessThan(
+      stepIndex(timeline, "departing:1:0:start"),
+    );
+    expect(stepIndex(timeline, "arrival_checkin:1:arrival")).toBeLessThan(
+      stepIndex(timeline, "departing:1:0:start"),
+    );
+    expect(stepIndex(timeline, "returning:3:main_return")).toBeGreaterThan(
+      stepIndex(timeline, "returning:3:2:start"),
+    );
+    expect(
+      timeline
+        .slice(stepIndex(timeline, "returning:3:main_return") + 1)
+        .every((step) => step.phase === "returning"),
+    ).toBe(true);
     expect(new Date(mainDeparture.scheduledAt).getTime()).toBeLessThan(
       new Date(firstDestinationActivity.scheduledAt).getTime(),
     );
     expect(new Date(mainReturn.scheduledAt).getTime()).toBeGreaterThan(
       new Date(airportTransfer.context!.timing.endUtc).getTime(),
     );
+  });
+
+  it("preserves itinerary activity order when generated time slots conflict", () => {
+    const plan = buildPlan(3);
+    plan.daily_itinerary[0]!.activities[2]!.time_slot = "10:00 - 10:45";
+
+    const timeline = buildTimeline(
+      plan,
+      new Date("2026-04-09T00:00:00.000Z"),
+    );
+    const checkinIndex = stepIndex(timeline, "arrival_checkin:1:1:start");
+    const lunchIndex = stepIndex(timeline, "day_exploration:1:2:start");
+
+    expect(checkinIndex).toBeGreaterThan(-1);
+    expect(lunchIndex).toBeGreaterThan(checkinIndex);
+    expect(
+      new Date(timeline[lunchIndex]!.scheduledAt).getTime(),
+    ).toBeGreaterThan(new Date(timeline[checkinIndex]!.scheduledAt).getTime());
   });
 
   it("uses the destination local time zone for Chinese mainland destinations", () => {
