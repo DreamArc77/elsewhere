@@ -14,5 +14,11 @@
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "plugin.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "apps/**/*.ts",
+    "tests/**/*.ts",
+    "plugin.ts",
+    "vitest.config.ts"
+  ]
 }

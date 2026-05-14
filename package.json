@@ -54,6 +54,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-prompts.mjs",
+    "saas:dev": "node dist/apps/saas/src/index.js",
     "release:check": "node scripts/release-check.mjs",
     "release:publish": "node scripts/release-publish.mjs",
     "release:publish:dry-run": "node scripts/release-publish.mjs --dry-run",
