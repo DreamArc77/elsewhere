@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { parse as parseUrl } from "node:url";
 
@@ -47,6 +46,11 @@ async function route(
 
   if (req.method === "GET" && path === "/healthz") {
     sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/ui-preview") {
+    sendHtml(res, 200, page("Elsewhere UI Preview", renderUiPreviewPage()));
     return;
   }
 
@@ -327,7 +331,7 @@ function renderLoginPage(config: SaasConfig): string {
   return `
     <section class="hero">
       <h1>Elsewhere</h1>
-      <p>Create a private Telegram travel companion that belongs only to you.</p>
+      <p>Create a private Telegram character that belongs only to you.</p>
       <script async src="https://telegram.org/js/telegram-widget.js?22"
         data-telegram-login="${escapeHtml(config.telegramManagerBotUsername)}"
         data-size="large"
@@ -344,18 +348,18 @@ function renderHomePage(input: { user: SaasUser; hasPersona: boolean }): string 
       <form method="post" action="/logout"><button>Log out</button></form>
     </header>
     <main>
-      <h1>Create your companion</h1>
+      <h1>Create your character</h1>
       <form method="post" action="/api/persona" class="form">
         <label>Name <input name="name" required placeholder="Mori"></label>
         <label>Reference photo URL or server path <input name="referenceImageAsset" required placeholder="https://.../mori.jpg"></label>
         <label>Origin city <input name="originCity" required value="Hong Kong"></label>
-        <label>Traits <input name="traits" required placeholder="warm, curious, playful"></label>
-        <label>Tone <input name="toneStyle" required placeholder="gentle and intimate"></label>
-        <label>Relationship <input name="relationship" required placeholder="travel companion"></label>
-        <label>How they address you <input name="userAddressing" required placeholder="baby"></label>
-        <button>Create Telegram companion</button>
+        <label>Traits <input name="traits" required placeholder="warm, curious, observant"></label>
+        <label>Tone <input name="toneStyle" required placeholder="natural, calm, lightly playful"></label>
+        <label>Relationship <input name="relationship" required placeholder="private AI character"></label>
+        <label>How she addresses you <input name="userAddressing" required placeholder="your nickname"></label>
+        <button>Create Telegram character</button>
       </form>
-      ${input.hasPersona ? "<p>You can create a new companion version any time during the MVP.</p>" : ""}
+      ${input.hasPersona ? "<p>You can create a new character version any time during the MVP.</p>" : ""}
     </main>
   `;
 }
@@ -370,7 +374,7 @@ function renderSetupPage(input: {
   const activeUrl = input.finalUrl ?? input.createBotUrl;
   return `
     <main>
-      <h1>${input.finalUrl ? "Your companion is ready" : "Confirm in Telegram"}</h1>
+      <h1>${input.finalUrl ? "Your character is ready" : "Confirm in Telegram"}</h1>
       <p>Status: <strong id="status">${escapeHtml(input.status)}</strong></p>
       ${input.errorMessage ? `<p class="error">${escapeHtml(input.errorMessage)}</p>` : ""}
       <a class="primary" id="open-link" href="${escapeHtml(activeUrl)}">Open Telegram</a>
@@ -394,6 +398,102 @@ function renderSetupPage(input: {
   `;
 }
 
+function renderUiPreviewPage(): string {
+  return `
+    <main class="preview-shell">
+      <nav class="preview-nav">
+        <span class="brand">Elsewhere</span>
+        <span class="preview-pill">Creation Flow Preview</span>
+      </nav>
+
+      <section class="preview-hero">
+        <p class="eyebrow">Telegram SaaS MVP</p>
+        <h1>Create her on the web. Continue in Telegram.</h1>
+        <p class="lead">
+          The user creates a dedicated AI character, confirms Telegram bot creation once, then chats with her directly in Telegram.
+        </p>
+      </section>
+
+      <section class="preview-flow" aria-label="Creation flow">
+        <article class="flow-step active">
+          <div class="step-index">1</div>
+          <h2>Telegram sign-in</h2>
+          <p>Use Telegram identity on the web. No email account is required for the MVP.</p>
+        </article>
+        <article class="flow-step active">
+          <div class="step-index">2</div>
+          <h2>Create character</h2>
+          <p>Set name, photo, personality, tone, relationship, address style, and origin city.</p>
+        </article>
+        <article class="flow-step">
+          <div class="step-index">3</div>
+          <h2>Confirm bot creation</h2>
+          <p>Telegram asks the user to confirm one dedicated managed bot.</p>
+        </article>
+        <article class="flow-step">
+          <div class="step-index">4</div>
+          <h2>Open Telegram</h2>
+          <p>After setup, the page switches to the final bot QR code and direct link.</p>
+        </article>
+      </section>
+
+      <section class="preview-grid">
+        <div class="surface">
+          <div class="surface-header">
+            <span>Create Character</span>
+            <span>Web</span>
+          </div>
+          <form class="form preview-form">
+            <label>Name <input value="Mori" readonly></label>
+            <label>Reference photo <input value="mori-reference.jpg" readonly></label>
+            <label>Origin city <input value="Hong Kong" readonly></label>
+            <label>Traits <input value="curious, warm, observant" readonly></label>
+            <label>Tone <input value="natural, calm, lightly playful" readonly></label>
+            <label>Relationship <input value="private AI character" readonly></label>
+            <label>How she addresses you <input value="your nickname" readonly></label>
+            <button type="button">Create Telegram character</button>
+          </form>
+        </div>
+
+        <div class="surface">
+          <div class="surface-header">
+            <span>Telegram Setup</span>
+            <span>Pending</span>
+          </div>
+          <div class="setup-card">
+            <div class="qr-preview" aria-label="QR placeholder"></div>
+            <h2>Confirm once in Telegram</h2>
+            <p>
+              The user scans or opens the link. After confirmation, Elsewhere automatically sets the bot name, avatar, description, and webhook.
+            </p>
+            <a class="primary" href="#">Open Telegram</a>
+          </div>
+        </div>
+
+        <div class="surface chat-surface">
+          <div class="surface-header">
+            <span>Mori</span>
+            <span>Telegram chat</span>
+          </div>
+          <div class="chat-window">
+            <div class="bubble companion">
+              I am setting off today. I will send you what I see along the way.
+            </div>
+            <div class="bubble user">Where are you going first?</div>
+            <div class="bubble companion">
+              Somewhere coastal first. I want to see the morning light before the streets get busy.
+            </div>
+            <div class="postcard-preview">
+              <div class="photo-block"></div>
+              <p>First photo from the road. I will keep you updated.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  `;
+}
+
 function page(title: string, body: string): string {
   return `<!doctype html>
     <html lang="en">
@@ -413,6 +513,45 @@ function page(title: string, body: string): string {
           button, .primary { display: inline-block; width: fit-content; border: 0; border-radius: 6px; background: #171717; color: white; padding: 12px 16px; font: inherit; text-decoration: none; cursor: pointer; }
           .qr { display: block; margin-top: 20px; width: 220px; height: 220px; border: 1px solid #ddd6ca; }
           .error { color: #9b1c1c; }
+          .preview-shell { max-width: 1180px; }
+          .preview-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 42px; }
+          .brand { font-weight: 760; font-size: 18px; }
+          .preview-pill { border: 1px solid #c9c0b5; border-radius: 999px; padding: 6px 10px; font-size: 13px; color: #514a43; }
+          .preview-hero { max-width: 720px; margin-bottom: 34px; }
+          .eyebrow { margin: 0 0 8px; color: #72685d; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
+          .lead { color: #4f4841; font-size: 18px; margin: 0; }
+          .preview-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 28px 0 28px; }
+          .flow-step { min-height: 128px; border: 1px solid #d8d0c6; border-radius: 8px; padding: 14px; background: #fbf9f5; }
+          .flow-step.active { border-color: #151515; background: #fff; }
+          .step-index { width: 28px; height: 28px; display: grid; place-items: center; background: #151515; color: white; border-radius: 50%; font-size: 14px; margin-bottom: 12px; }
+          .flow-step h2 { font-size: 16px; margin: 0 0 6px; }
+          .flow-step p { margin: 0; color: #5f574f; font-size: 14px; line-height: 1.45; }
+          .preview-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 18px; align-items: start; }
+          .surface { border: 1px solid #d5cdc2; border-radius: 8px; background: #fffdf9; overflow: hidden; }
+          .surface-header { display: flex; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #e3dbd0; color: #514a43; font-size: 14px; }
+          .preview-form { padding: 18px; }
+          .preview-form input { background: #f7f4ef; }
+          .setup-card { padding: 22px; }
+          .setup-card h2 { margin: 18px 0 8px; font-size: 22px; }
+          .setup-card p { color: #5f574f; }
+          .qr-preview { width: 180px; height: 180px; background:
+            linear-gradient(90deg, #151515 10px, transparent 10px) 0 0 / 20px 20px,
+            linear-gradient(#151515 10px, transparent 10px) 0 0 / 20px 20px,
+            #f1ece5; border: 10px solid white; box-shadow: 0 0 0 1px #d8d0c6; }
+          .chat-surface { grid-column: 1 / -1; }
+          .chat-window { padding: 18px; display: grid; gap: 12px; background: #f5efe7; }
+          .bubble { max-width: 68%; padding: 12px 14px; border-radius: 8px; line-height: 1.45; }
+          .bubble.companion { background: #fff; border: 1px solid #e1d8ce; }
+          .bubble.user { justify-self: end; background: #151515; color: white; }
+          .postcard-preview { width: min(360px, 100%); background: #fff; border: 1px solid #e1d8ce; border-radius: 8px; overflow: hidden; }
+          .postcard-preview p { margin: 12px; color: #514a43; }
+          .photo-block { aspect-ratio: 4 / 3; background:
+            linear-gradient(135deg, rgba(20, 20, 20, 0.12), rgba(20, 20, 20, 0)),
+            linear-gradient(150deg, #b9c4bd 0%, #efe1c7 52%, #7f918d 100%); }
+          @media (max-width: 860px) {
+            .preview-flow, .preview-grid { grid-template-columns: 1fr; }
+            .bubble { max-width: 88%; }
+          }
         </style>
       </head>
       <body>${body}</body>
