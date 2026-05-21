@@ -15,6 +15,13 @@ OpenClaw plugin untouched and adds a hosted Web + Telegram runtime under
 6. The child bot `/start` binds the chat and normal text messages enter the
    existing Elsewhere conversation/travel runtime.
 
+## UI Preview
+
+Open `/ui-preview` on the running SaaS server to review the creation flow without
+Telegram Login, BotFather setup, or webhooks. The preview shows the intended Web
+creation form, Telegram confirmation step, final QR/link state, and first chat
+experience.
+
 ## Required Environment
 
 ```bash
@@ -40,4 +47,3 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_MANAGER_BOT_TOKEN/setWebhook
 The MVP uses JSON files under `.saas-data` by default. The store and runtime
 boundaries are isolated so they can be replaced by PostgreSQL and Redis-backed
 implementations without changing Telegram or Web handlers.
-
